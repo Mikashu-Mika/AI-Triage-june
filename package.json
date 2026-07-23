@@ -1,0 +1,23 @@
+{
+  "name": "ai-triage-mcp",
+  "version": "1.0.0",
+  "description": "AI Triage MCP Server & API running local models with Supabase integration",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "test-conn": "node src/testConnection.js",
+    "seed": "node src/seedChats.js",
+    "test-pipeline": "node src/runTest.js",
+    "seed-enterprise": "node src/seedEnterprise.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.1",
+    "@supabase/supabase-js": "^2.43.4",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "tesseract.js": "^7.0.0"
+  }
+}

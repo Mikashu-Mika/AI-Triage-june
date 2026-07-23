@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>API Documentation - AI Customer Intelligence Platform</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-primary: #f8fafc;
+      --bg-secondary: #ffffff;
+      --bg-tertiary: #f1f5f9;
+      --border-color: #e2e8f0;
+      --text-primary: #0f172a;
+      --text-secondary: #64748b;
+      --accent-color: #4f46e5;
+      --accent-hover: #4338ca;
+      --success-color: #059669;
+      --warning-color: #d97706;
+      --danger-color: #dc2626;
+      --code-bg: #0f172a;
+      --sidebar-width: 280px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: var(--bg-primary);
+      color: var(--text-primary);
+      line-height: 1.6;
+      display: flex;
+      min-height: 100vh;
+    }
+
+    /* Sidebar Styles */
+    aside {
+      width: var(--sidebar-width);
+      background-color: var(--bg-secondary);
+      border-right: 1px solid var(--border-color);
+      position: fixed;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .sidebar-header {
+      padding: 24px;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .sidebar-header h1 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 20px;
+      font-weight: 700;
+      background: linear-gradient(135deg, #a5b4fc, var(--accent-color));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .sidebar-header p {
+      font-size: 11px;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      margin-top: 4px;
+    }
+
+    .nav-list {
+      list-style: none;
+      padding: 16px 12px;
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    .nav-item {
+      margin-bottom: 8px;
+    }
+
+    .nav-link {
+      display: flex;
+      align-items: center;
+      padding: 10px 12px;
+      color: var(--text-secondary);
+      text-decoration: none;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 500;
+      transition: all 0.2s ease;
+    }
+
+    .nav-link:hover, .nav-link.active {
+      color: var(--text-primary);
+      background-color: var(--bg-tertiary);
+    }
+
+    .nav-link.active {
+      border-left: 3px solid var(--accent-color);
+      padding-left: 9px;
+    }
+
+    .nav-badge {
+      font-size: 9px;
+      font-weight: 700;
+      padding: 2px 6px;
+      border-radius: 4px;
+      margin-right: 8px;
+      text-transform: uppercase;
+      min-width: 48px;
+      text-align: center;
+    }
+
+    .nav-badge.get { background-color: rgba(16, 185, 129, 0.15); color: var(--success-color); }
+    .nav-badge.post { background-color: rgba(99, 102, 241, 0.15); color: var(--accent-color); }
+
+    /* Main Content area */
+    main {
+      margin-left: var(--sidebar-width);
+      flex: 1;
+      padding: 40px 60px;
+      max-width: 1200px;
+    }
+
+    .header-section {
+      margin-bottom: 40px;
+      border-bottom: 1px solid var(--border-color);
+      padding-bottom: 24px;
+    }
+
+    .header-section h2 {
+      font-family: 'Outfit', sans-serif;
+      font-size: 32px;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+
+    .header-section p {
+      color: var(--text-secondary);
+      font-size: 16px;
+      max-width: 800px;
+    }
+
+    .base-url-card {
+      background-color: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      padding: 16px 20px;
+      margin-bottom: 40px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .base-url-card code {
+      font-family: 'Fira Code', monospace;
+      font-size: 15px;
+      color: var(--accent-color);
+    }
+
+    /* Endpoint details block */
+    .endpoint-card {
+      background-color: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      margin-bottom: 48px;
+      overflow: hidden;
+      scroll-margin-top: 40px;
+    }
+
+    .endpoint-header {
+      padding: 20px 24px;
+      background-color: var(--bg-tertiary);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .method-badge {
+      font-family: 'Outfit', sans-serif;
+      font-weight: 700;
+      padding: 6px 12px;
+      border-radius: 6px;
+      text-transform: uppercase;
+      font-size: 13px;
+    }
+
+    .method-badge.get { background-color: var(--success-color); color: #fff; }
+    .method-badge.post { background-color: var(--accent-color); color: #fff; }
+
+    .endpoint-path {
+      font-family: 'Fira Code', monospace;
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .endpoint-desc {
+      color: var(--text-secondary);
+      font-size: 14px;
+      margin-top: 4px;
+      width: 100%;
+    }
+
+    .endpoint-body {
+      padding: 24px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 24px;
+    }
+
+    @media (max-width: 1024px) {
+      .endpoint-body {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .param-title {
+      font-size: 15px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: var(--text-primary);
+      border-bottom: 1px solid var(--border-color);
+      padding-bottom: 6px;
+    }
+
+    .param-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+      margin-bottom: 24px;
+    }
+
+    .param-table th {
+      text-align: left;
+      color: var(--text-secondary);
+      padding: 8px 12px;
+      border-bottom: 1px solid var(--border-color);
+      font-weight: 500;
+    }
+
+    .param-table td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border-color);
+      vertical-align: top;
+    }
+
+    .param-name {
+      font-family: 'Fira Code', monospace;
+      color: #f43f5e;
+      font-weight: 500;
+    }
+
+    .param-type {
+      color: #38bdf8;
+      font-family: 'Fira Code', monospace;
+    }
+
+    .param-req {
+      color: var(--danger-color);
+      font-weight: 600;
+    }
+    .param-opt {
+      color: var(--text-secondary);
+    }
+
+    /* Code Box Styles */
+    .code-container {
+      background-color: var(--code-bg);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .code-header {
+      background-color: var(--bg-tertiary);
+      padding: 8px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border-color);
+    }
+
+    .code-title {
+      font-size: 11px;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-weight: 600;
+    }
+
+    .copy-btn {
+      background: none;
+      border: none;
+      color: var(--text-secondary);
+      cursor: pointer;
+      font-size: 12px;
+      padding: 4px 8px;
+      border-radius: 4px;
+      transition: all 0.2s;
+    }
+
+    .copy-btn:hover {
+      background-color: var(--bg-secondary);
+      color: var(--text-primary);
+    }
+
+    pre {
+      margin: 0;
+      padding: 16px;
+      overflow-x: auto;
+    }
+
+    code {
+      font-family: 'Fira Code', monospace;
+      font-size: 13px;
+      color: #e5e7eb;
+    }
+
+    /* Styling json keys & strings in demo response */
+    .j-key { color: #f43f5e; }
+    .j-string { color: #10b981; }
+    .j-num { color: #fbbf24; }
+    .j-bool { color: #3b82f6; }
+  </style>
+</head>
+<body>
+
+  <!-- Sidebar -->
+  <aside>
+    <div class="sidebar-header">
+      <h1>AI Triage API</h1>
+      <p>Customer Intelligence Platform</p>
+    </div>
+    <ul class="nav-list">
+      <li class="nav-item">
+        <a href="#overview" class="nav-link active">ภาพรวมระบบ (Overview)</a>
+      </li>
+      <li class="nav-item">
+        <a href="#get-health" class="nav-link">
+          <span class="nav-badge get">GET</span>/health
+        </a>
+      </li>
+      <li class="nav-item">
+        <a href="#get-pending" class="nav-link">
+          <span class="nav-badge get">GET</span>/api/chats/pending
+        </a>
+      </li>
+      <li class="nav-item">
+        <a href="#post-triage-run" class="nav-link">
+          <span class="nav-badge post">POST</span>/api/triage/run
+        </a>
+      </li>
+      <li class="nav-item">
+        <a href="#post-triage-save" class="nav-link">
+          <span class="nav-badge post">POST</span>/api/triage/save
+        </a>
+      </li>
+      <li class="nav-item">
+        <a href="#post-chats-ingest" class="nav-link">
+          <span class="nav-badge post">POST</span>/api/chats/ingest
+        </a>
+      </li>
+      <li class="nav-item">
+        <a href="#post-chats-feedback" class="nav-link">
+          <span class="nav-badge post">POST</span>/api/chats/feedback
+        </a>
+      </li>
+    </ul>
+  </aside>
+
+  <!-- Main Content -->
+  <main>
+    <section id="overview" class="header-section">
+      <h2>API Documentation</h2>
+      <p>เอกสารประกอบการเรียกใช้บริการ (Endpoints) ของระบบวิเคราะห์และสรุปแชตลูกค้าอัตโนมัติ (AI Triage System) สำหรับเชื่อมโยงร่วมกับหน้าจอระบบควบคุมส่วนกลาง (Back Office Dashboard) หรือระบบคิวรีข้อมูลอื่นๆ</p>
+    </section>
+
+    <div class="base-url-card">
+      <div>
+        <div style="font-size: 12px; color: var(--text-secondary); text-transform: uppercase; margin-bottom: 4px;">Base URL</div>
+        <code>https://triage.dev-d.net</code>
+      </div>
+      <div style="font-size: 13px; color: var(--text-secondary);">
+        * หากทำ Cloudflare Tunnel โดเมนจะเปลี่ยนเป็นโดเมนคลาวด์ของคุณมิกะ
+      </div>
+    </div>
+
+    <!-- 1. GET /health -->
+    <div class="endpoint-card" id="get-health">
+      <div class="endpoint-header">
+        <span class="method-badge get">GET</span>
+        <span class="endpoint-path">/health</span>
+        <div class="endpoint-desc">ตรวจสถานะการทำงานหลังบ้าน เช็คว่าเชื่อมต่อ Ollama และตาราง Supabase สมบูรณ์ดีหรือไม่</div>
+      </div>
+      <div class="endpoint-body">
+        <div>
+          <div class="param-title">รายละเอียดข้อมูล</div>
+          <table class="param-table">
+            <thead>
+              <tr>
+                <th>พารามิเตอร์</th>
+                <th>ชนิด</th>
+                <th>ความสำคัญ</th>
+                <th>คำอธิบาย</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td colspan="4" style="text-align: center; color: var(--text-secondary);">ไม่มีพารามิเตอร์ส่งทาง Request</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div style="margin-top: 16px;">
+            <p><strong>ตัวอย่างการเรียกใช้งาน (cURL):</strong></p>
+            <div class="code-container" style="margin-top: 8px;">
+              <div class="code-header">
+                <span class="code-title">cURL</span>
+                <button class="copy-btn" onclick="copyCode(this)">คัดลอก</button>
+              </div>
+              <pre><code>curl -X GET https://triage.dev-d.net/health</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="param-title">รูปแบบการตอบกลับ (Response)</div>
+          <div class="code-container">
+            <div class="code-header">
+              <span class="code-title">HTTP 200 OK</span>
+              <button class="copy-btn" onclick="copyCode(this)">คัดลอก</button>
+            </div>
+            <pre><code>{
+  <span class="j-key">"status"</span>: <span class="j-string">"healthy"</span>,
+  <span class="j-key">"database"</span>: <span class="j-string">"connected"</span>,
+  <span class="j-key">"ollama"</span>: <span class="j-string">"connected"</span>,
+  <span class="j-key">"timestamp"</span>: <span class="j-string">"2026-07-10T10:15:30.123Z"</span>
+}</code></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. GET /api/chats/pending -->
+    <div class="endpoint-card" id="get-pending">
+      <div class="endpoint-header">
+        <span class="method-badge get">GET</span>
+        <span class="endpoint-path">/api/chats/pending</span>
+        <div class="endpoint-desc">ดึงรายการแชตของลูกค้าใน Supabase ทั้งหมดที่ค้างอยู่ (มีสถานะเป็น 'pending') รอวิเคราะห์ข้อมูลเชิงลึกด้วย AI</div>
+      </div>
+      <div class="endpoint-body">
+        <div>
+          <div class="param-title">รายละเอียดข้อมูล</div>
+          <table class="param-table">
+            <thead>
+              <tr>
+                <th>พารามิเตอร์</th>
+                <th>ชนิด</th>
+                <th>ความสำคัญ</th>
+                <th>คำอธิบาย</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td colspan="4" style="text-align: center; color: var(--text-secondary);">ไม่มีพารามิเตอร์ส่งทาง Request</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div style="margin-top: 16px;">
+            <p><strong>ตัวอย่างการเรียกใช้งาน (Javascript):</strong></p>
+            <div class="code-container" style="margin-top: 8px;">
+              <div class="code-header">
+                <span class="code-title">Fetch API</span>
+                <button class="copy-btn" onclick="copyCode(this)">คัดลอก</button>
+              </div>
+              <pre><code>fetch('https://triage.dev-d.net/api/chats/pending')
+  .then(res => res.json())
+  .then(data => console.log(data));</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="param-title">รูปแบบการตอบกลับ (Response)</div>
+          <div class="code-container">
+            <div class="code-header">
+              <span class="code-title">HTTP 200 OK</span>
+              <button class="copy-btn" onclick="copyCode(this)">คัดลอก</button>
+            </div>
+            <pre><code>[
+  {
+    <span class="j-key">"id"</span>: <span class="j-string">"chat-001"</span>,
+    <span class="j-key">"customer_id"</span>: <span class="j-string">"cust-001"</span>,
+    <span class="j-key">"conversation"</span>: <span class="j-string">"ลูกค้า: ยอดเงินไม่เข้าระบบ..."</span>,
+    <span class="j-key">"status"</span>: <span class="j-string">"pending"</span>,
+    <span class="j-key">"created_at"</span>: <span class="j-string">"2026-07-10T02:00:00Z"</span>,
+    <span class="j-key">"customers"</span>: {
+      <span class="j-key">"name"</span>: <span class="j-string">"Somchai (สมชาย)"</span>,
+      <span class="j-key">"phone"</span>: <span class="j-string">"0812345678"</span>
+    }
+  }
+]</code></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. POST /api/triage/run -->
+    <div class="endpoint-card" id="post-triage-run">
+      <div class="endpoint-header">
+        <span class="method-badge post">POST</span>
+        <span class="endpoint-path">/api/triage/run</span>
+        <div class="endpoint-desc">สั่งการให้ระบบเริ่มรันคัดกรองวิเคราะห์แชตลูกค้าที่ค้างอยู่ในฐานข้อมูลทั้งหมด (ดึงแชต pending ส่งให้ Qwen 2.5 + คำนวณเวกเตอร์ BGE-M3 + หาประวัติคดีที่เหมือนกัน และอัปเดตกลับลง Supabase)</div>
+      </div>
+      <div class="endpoint-body">
+        <div>
+          <div class="param-title">รายละเอียดข้อมูล</div>
+          <table class="param-table">
+            <thead>
+              <tr>
+                <th>พารามิเตอร์</th>
+                <th>ชนิด</th>
+                <th>ความสำคัญ</th>
+                <th>คำอธิบาย</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td colspan="4" style="text-align: center; color: var(--text-secondary);">ไม่ต้องส่ง Body ส่งเฉพาะ Request เปล่า</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div style="margin-top: 16px;">
+            <p><strong>ตัวอย่างการเรียกใช้งาน (cURL):</strong></p>
+            <div class="code-container" style="margin-top: 8px;">
+              <div class="code-header">
+                <span class="code-title">cURL</span>
+                <button class="copy-btn" onclick="copyCode(this)">คัดลอก</button>
+              </div>
+              <pre><code>curl -X POST https://triage.dev-d.net/api/triage/run</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="param-title">รูปแบบการตอบกลับ (Response)</div>
+          <div class="code-container">
+            <div class="code-header">
+              <span class="code-title">HTTP 200 OK</span>
+              <button class="copy-btn" onclick="copyCode(this)">คัดลอก</button>
+            </div>
+            <pre><code>{
+  <span class="j-key">"processedCount"</span>: <span class="j-num">1</span>,
+  <span class="j-key">"successCount"</span>: <span class="j-num">1</span>,
+  <span class="j-key">"failures"</span>: []
+}</code></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 4. POST /api/triage/save -->
+    <div class="endpoint-card" id="post-triage-save">
+      <div class="endpoint-header">
+        <span class="method-badge post">POST</span>
+        <span class="endpoint-path">/api/triage/save</span>
+        <div class="endpoint-desc">เขียนผลลัพธ์ข้อมูลคัดแยก AI บันทึกลงตารางแชตโดยตรงแบบ Manual (ใช้สำหรับทดสอบข้อมูลเข้าของตัวแปลรายคอลัมน์โดยตรง)</div>
+      </div>
+      <div class="endpoint-body">
+        <div>
+          <div class="param-title">Request Body Parameters</div>
+          <table class="param-table">
+            <thead>
+              <tr>
+                <th>พารามิเตอร์</th>
+                <th>ชนิด</th>
+                <th>ความสำคัญ</th>
+                <th>คำอธิบาย</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="param-name">id</td>
+                <td class="param-type">string</td>
+                <td class="param-req">Required</td>
+                <td>ID ของแชตลูกค้าที่ต้องการบันทึก (เช่น "chat-001")</td>
+              </tr>
+              <tr>
+                <td class="param-name">category_id</td>
+                <td class="param-type">string</td>
+                <td class="param-req">Required</td>
+                <td>ID หมวดหมู่หลักในฐานข้อมูล (เช่น "deposit_withdrawal")</td>
+              </tr>
+              <tr>
+                <td class="param-name">priority</td>
+                <td class="param-type">string</td>
+                <td class="param-req">Required</td>
+                <td>ลำดับความสำคัญ: "low", "medium", "high", "urgent"</td>
+              </tr>
+              <tr>
+                <td class="param-name">summary</td>
+                <td class="param-type">string</td>
+                <td class="param-req">Required</td>
+                <td>สรุปเนื้อหาปัญหาของแชตใน 1 ประโยคภาษาไทย</td>
+              </tr>
+              <tr>
+                <td class="param-name">department</td>
+                <td class="param-type">string</td>
+                <td class="param-opt">Optional</td>
+                <td>แผนกแนะนำ: "Finance", "Support", "Developer", "Marketing", "Admin", "VIP"</td>
+              </tr>
+              <tr>
+                <td class="param-name">sentiment</td>
+                <td class="param-type">string</td>
+                <td class="param-opt">Optional</td>
+                <td>อารมณ์: "โกรธ", "ไม่พอใจ", "สับสน", "สงสัย", "ปกติ"</td>
+              </tr>
+              <tr>
+                <td class="param-name">business_impact</td>
+                <td class="param-type">string</td>
+                <td class="param-opt">Optional</td>
+                <td>ความเสี่ยงธุรกิจ: "Revenue Risk", "Customer Risk", "None"</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div>
+          <div class="param-title">ตัวอย่าง Request JSON Body</div>
+          <div class="code-container" style="margin-bottom: 24px;">
+            <div class="code-header">
+              <span class="code-title">JSON Body</span>
+              <button class="copy-btn" onclick="copyCode(this)">คัดลอก</button>
+            </div>
+            <pre><code>{
+  <span class="j-key">"id"</span>: <span class="j-string">"chat-001"</span>,
+  <span class="j-key">"category_id"</span>: <span class="j-string">"deposit_withdrawal"</span>,
+  <span class="j-key">"priority"</span>: <span class="j-string">"high"</span>,
+  <span class="j-key">"summary"</span>: <span class="j-string">"ลูกค้าสอบถามเรื่องเงินที่ฝากเข้ายังไม่ได้รับปรับเครดิต"</span>,
+  <span class="j-key">"sub_category"</span>: <span class="j-string">"ฝากเงินไม่เข้า"</span>,
+  <span class="j-key">"intent"</span>: <span class="j-string">"deposit"</span>,
+  <span class="j-key">"root_cause"</span>: <span class="j-string">"ธนาคารขัดข้องชั่วคราว"</span>,
+  <span class="j-key">"sentiment"</span>: <span class="j-string">"สับสน"</span>,
+  <span class="j-key">"urgency"</span>: <span class="j-string">"medium"</span>,
+  <span class="j-key">"department"</span>: <span class="j-string">"Finance"</span>,
+  <span class="j-key">"keywords"</span>: [<span class="j-string">"ฝากเงิน"</span>, <span class="j-string">"ไม่เข้า"</span>],
+  <span class="j-key">"confidence"</span>: <span class="j-num">95.0</span>,
+  <span class="j-key">"recommended_reply"</span>: <span class="j-string">"สวัสดีค่ะ ทีมงานกำลังประสานงานตรวจสอบยอดโอนให้นะคะ"</span>,
+  <span class="j-key">"resolution"</span>: <span class="j-string">"Pending"</span>,
+  <span class="j-key">"business_impact"</span>: <span class="j-string">"Revenue Risk"</span>,
+  <span class="j-key">"business_impact_score"</span>: <span class="j-num">65.0</span>
+}</code></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 5. POST /api/chats/ingest -->
+    <div class="endpoint-card" id="post-chats-ingest">
+      <div class="endpoint-header">
+        <span class="method-badge post">POST</span>
+        <span class="endpoint-path">/api/chats/ingest</span>
+        <div class="endpoint-desc">นำเข้าบทสนทนาแชตใหม่ล่าสุดของลูกค้าเข้าระบบ (เช่น เมื่อลูกค้าพึ่งทักแชตสดเข้ามา) โดย AI จะประเมินและคัดกรองในแบบเรียลไทม์ทันที</div>
+      </div>
+      <div class="endpoint-body">
+        <div>
+          <div class="param-title">Request Body Parameters</div>
+          <table class="param-table">
+            <thead>
+              <tr>
+                <th>พารามิเตอร์</th>
+                <th>ชนิด</th>
+                <th>ความสำคัญ</th>
+                <th>คำอธิบาย</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="param-name">id</td>
+                <td class="param-type">string</td>
+                <td class="param-req">Required</td>
+                <td>ID ของห้องแชตลูกค้า (เช่น "chat-004")</td>
+              </tr>
+              <tr>
+                <td class="param-name">customer_id</td>
+                <td class="param-type">string</td>
+                <td class="param-req">Required</td>
+                <td>ID ของประวัติลูกค้า (เช่น "cust-001")</td>
+              </tr>
+              <tr>
+                <td class="param-name">conversation</td>
+                <td class="param-type">string</td>
+                <td class="param-req">Required</td>
+                <td>ข้อความบทสนทนาทั้งหมดที่เกิดในห้องแชตขณะนั้น</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div style="margin-top: 16px;">
+            <p><strong>ตัวอย่างการเรียกใช้งาน (Javascript):</strong></p>
+            <div class="code-container" style="margin-top: 8px;">
+              <div class="code-header">
+                <span class="code-title">Fetch API</span>
+                <button class="copy-btn" onclick="copyCode(this)">คัดลอก</button>
+              </div>
+              <pre><code>fetch('https://triage.dev-d.net/api/chats/ingest', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    id: "chat-004",
+    customer_id: "cust-001",
+    conversation: "ลูกค้า: แอดมินคะ โอนเงินไปแล้วเครดิตไม่ขึ้นค่ะ"
+  })
+}).then(res => res.json()).then(console.log);</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="param-title">รูปแบบการตอบกลับ (Response)</div>
+          <div class="code-container">
+            <div class="code-header">
+              <span class="code-title">HTTP 200 OK</span>
+              <button class="copy-btn" onclick="copyCode(this)">คัดลอก</button>
+            </div>
+            <pre><code>{
+  <span class="j-key">"message"</span>: <span class="j-string">"Chat ingested successfully and queued for real-time AI Triage"</span>,
+  <span class="j-key">"data"</span>: {
+    <span class="j-key">"id"</span>: <span class="j-string">"chat-004"</span>,
+    <span class="j-key">"customer_id"</span>: <span class="j-string">"cust-001"</span>,
+    <span class="j-key">"conversation"</span>: <span class="j-string">"ลูกค้า: แอดมินคะ โอนเงินไปแล้วเครดิตไม่ขึ้นค่ะ"</span>,
+    <span class="j-key">"status"</span>: <span class="j-string">"pending"</span>
+  }
+}</code></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 6. POST /api/chats/feedback -->
+    <div class="endpoint-card" id="post-chats-feedback">
+      <div class="endpoint-header">
+        <span class="method-badge post">POST</span>
+        <span class="endpoint-path">/api/chats/feedback</span>
+        <div class="endpoint-desc">ช่องทางส่งผลการประเมินและการแก้ไขของแอดมินกลับมาให้ AI เรียนรู้ (Human-in-the-Loop) พร้อมเก็บข้อมูลประวัติการตรวจทานและคะแนนไลก์ลงฐานข้อมูล</div>
+      </div>
+      <div class="endpoint-body">
+        <div>
+          <div class="param-title">Request Body Parameters</div>
+          <table class="param-table">
+            <thead>
+              <tr>
+                <th>พารามิเตอร์</th>
+                <th>ชนิด</th>
+                <th>ความสำคัญ</th>
+                <th>คำอธิบาย</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="param-name">chat_id</td>
+                <td class="param-type">string</td>
+                <td class="param-req">Required</td>
+                <td>ID ของแชตลูกค้าที่ทำการตรวจทาน</td>
+              </tr>
+              <tr>
+                <td class="param-name">is_correct</td>
+                <td class="param-type">boolean</td>
+                <td class="param-req">Required</td>
+                <td>ผลการตรวจทาน: `true` (AI จัดกลุ่มถูก), `false` (จัดกลุ่มผิดและแก้ไข)</td>
+              </tr>
+              <tr>
+                <td class="param-name">corrected_category_id</td>
+                <td class="param-type">string</td>
+                <td class="param-opt">Optional</td>
+                <td>ID หมวดหมู่ใหม่ที่ถูกต้อง (ส่งเมื่อ `is_correct` เป็น `false`)</td>
+              </tr>
+              <tr>
+                <td class="param-name">liked_by</td>
+                <td class="param-type">string (uuid)</td>
+                <td class="param-opt">Optional</td>
+                <td>ID ของผู้ใช้หลังบ้านที่กดตรวจทาน (อ้างอิง `users.id`)</td>
+              </tr>
+              <tr>
+                <td class="param-name">is_like</td>
+                <td class="param-type">boolean</td>
+                <td class="param-opt">Optional</td>
+                <td>ความพึงพอใจการทำงานของ AI: `true` (ถูกใจ), `false` (ไม่ถูกใจ)</td>
+              </tr>
+              <tr>
+                <td class="param-name">comment</td>
+                <td class="param-type">string</td>
+                <td class="param-opt">Optional</td>
+                <td>คำติชมผลงานของ AI เพิ่มเติมโดยเจ้าหน้าที่</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div>
+          <div class="param-title">ตัวอย่าง Request JSON Body</div>
+          <div class="code-container" style="margin-bottom: 24px;">
+            <div class="code-header">
+              <span class="code-title">JSON Body</span>
+              <button class="copy-btn" onclick="copyCode(this)">คัดลอก</button>
+            </div>
+            <pre><code>{
+  <span class="j-key">"chat_id"</span>: <span class="j-string">"chat-004"</span>,
+  <span class="j-key">"is_correct"</span>: <span class="j-bool">false</span>,
+  <span class="j-key">"corrected_category_id"</span>: <span class="j-string">"promo_bonus"</span>,
+  <span class="j-key">"liked_by"</span>: <span class="j-string">"ea764a96-2153-46b2-9359-96792894165a"</span>,
+  <span class="j-key">"is_like"</span>: <span class="j-bool">false</span>,
+  <span class="j-key">"comment"</span>: <span class="j-string">"จริงๆ แล้วลูกค้าถามเรื่องโปรโมชั่นสะสมเทิร์นโอเวอร์ ไม่ใช่ปัญหาเรื่องโอนเงิน"</span>
+}</code></pre>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // Copy to clipboard helper
+    function copyCode(button) {
+      const codeElement = button.closest('.code-container').querySelector('code');
+      const textToCopy = codeElement.textContent;
+      
+      navigator.clipboard.writeText(textToCopy).then(() => {
+        const originalText = button.textContent;
+        button.textContent = 'คัดลอกแล้ว!';
+        button.style.color = '#10b981';
+        setTimeout(() => {
+          button.textContent = originalText;
+          button.style.color = '';
+        }, 2000);
+      });
+    }
+
+    // Scroll active nav link update helper
+    const sections = document.querySelectorAll('.endpoint-card, .header-section');
+    const navLinks = document.querySelectorAll('.nav-link');
+
+    window.addEventListener('scroll', () => {
+      let current = '';
+      sections.forEach(section => {
+        const sectionTop = section.offsetTop;
+        const sectionHeight = section.clientHeight;
+        if (pageYOffset >= (sectionTop - 120)) {
+          current = section.getAttribute('id');
+        }
+      });
+
+      navLinks.forEach(link => {
+        link.classList.remove('active');
+        if (link.getAttribute('href').slice(1) === current) {
+          link.classList.add('active');
+        }
+      });
+    });
+  </script>
+</body>
+</html>

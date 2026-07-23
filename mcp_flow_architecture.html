@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Triage: MCP System Architecture & Flow</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&family=Sarabun:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Mermaid.js for Diagrams -->
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <script>
+        mermaid.initialize({
+            theme: 'neutral',
+            startOnLoad: true,
+            securityLevel: 'loose',
+            themeVariables: {
+                background: '#f8fafc',
+                primaryColor: '#e0e7ff',
+                primaryTextColor: '#1e1b4b',
+                lineColor: '#6366f1',
+                actorBkg: '#eef2ff',
+                actorBorder: '#818cf8',
+                noteBkg: '#f1f5f9',
+                noteBorder: '#cbd5e1'
+            }
+        });
+    </script>
+
+    <style>
+        :root {
+            --bg-color: #f8fafc;
+            --card-bg: #ffffff;
+            --card-border: rgba(0, 0, 0, 0.06);
+            --accent-primary: #6366f1;
+            --accent-secondary: #3b82f6;
+            --accent-teal: #0d9488;
+            --text-primary: #0f172a;
+            --text-secondary: #475569;
+            --text-muted: #64748b;
+            --font-display: 'Outfit', 'Sarabun', sans-serif;
+            --font-sans: 'Inter', 'Sarabun', sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            scroll-behavior: smooth;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            background-image: 
+                radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.05) 0%, transparent 40%),
+                radial-gradient(circle at 90% 80%, rgba(59, 130, 246, 0.05) 0%, transparent 40%);
+            background-attachment: fixed;
+            color: var(--text-primary);
+            font-family: var(--font-sans);
+            line-height: 1.6;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            display: grid;
+            grid-template-columns: 280px 1fr;
+            gap: 40px;
+        }
+
+        /* Sidebar Navigation */
+        aside {
+            position: sticky;
+            top: 40px;
+            height: calc(100vh - 80px);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .sidebar-card {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 16px;
+            padding: 24px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.02);
+        }
+
+        .sidebar-logo {
+            font-family: var(--font-display);
+            font-size: 1.5rem;
+            font-weight: 800;
+            margin-bottom: 30px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: linear-gradient(135deg, #4f46e5, #3b82f6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .sidebar-logo i {
+            -webkit-text-fill-color: initial;
+            color: #6366f1;
+        }
+
+        .nav-links {
+            list-style: none;
+        }
+
+        .nav-links li {
+            margin-bottom: 12px;
+        }
+
+        .nav-links a {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 0.95rem;
+            font-weight: 500;
+            padding: 10px 14px;
+            border-radius: 10px;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .nav-links a:hover {
+            color: var(--accent-primary);
+            background: rgba(99, 102, 241, 0.05);
+            transform: translateX(5px);
+        }
+
+        .nav-links a.active {
+            color: #ffffff;
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
+        }
+
+        .sidebar-footer {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-top: auto;
+            padding-top: 20px;
+            border-top: 1px solid rgba(0, 0, 0, 0.05);
+        }
+
+        /* Main Content Area */
+        main {
+            display: flex;
+            flex-direction: column;
+            gap: 32px;
+        }
+
+        /* Header Card */
+        header {
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.03) 0%, rgba(59, 130, 246, 0.03) 100%);
+            border: 1px solid var(--card-border);
+            border-radius: 24px;
+            padding: 40px;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.01);
+        }
+
+        header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -20%;
+            width: 300px;
+            height: 300px;
+            background: radial-gradient(circle, rgba(99, 102, 241, 0.08) 0%, transparent 70%);
+            filter: blur(40px);
+            pointer-events: none;
+        }
+
+        .badge {
+            align-self: flex-start;
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+            color: white;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            padding: 6px 12px;
+            border-radius: 20px;
+            letter-spacing: 1px;
+            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2);
+        }
+
+        h1 {
+            font-family: var(--font-display);
+            font-size: 2.5rem;
+            font-weight: 800;
+            color: #0f172a;
+            line-height: 1.2;
+        }
+
+        .header-desc {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            max-width: 800px;
+        }
+
+        .user-intro {
+            background: rgba(13, 148, 136, 0.04);
+            border-left: 4px solid var(--accent-teal);
+            padding: 16px 20px;
+            border-radius: 0 12px 12px 0;
+            font-size: 1rem;
+            color: var(--text-primary);
+        }
+
+        /* Section Card */
+        section {
+            background: var(--card-bg);
+            border: 1px solid var(--card-border);
+            border-radius: 20px;
+            padding: 32px;
+            display: flex;
+            flex-direction: column;
+            gap: 24px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.015);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        section:hover {
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.03);
+        }
+
+        h2 {
+            font-family: var(--font-display);
+            font-size: 1.75rem;
+            font-weight: 700;
+            color: #0f172a;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            position: relative;
+            padding-bottom: 12px;
+        }
+
+        h2::after {
+            content: '';
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 60px;
+            height: 4px;
+            background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary));
+            border-radius: 2px;
+        }
+
+        p {
+            color: var(--text-secondary);
+            font-size: 1.05rem;
+        }
+
+        /* Diagrams */
+        .diagram-container {
+            background: #f8fafc;
+            border: 1px solid rgba(0, 0, 0, 0.06);
+            border-radius: 12px;
+            padding: 24px;
+            overflow-x: auto;
+            display: flex;
+            justify-content: center;
+        }
+
+        .mermaid {
+            width: 100%;
+        }
+
+        /* Grid for Components */
+        .grid-components {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+        }
+
+        .comp-card {
+            background: rgba(99, 102, 241, 0.01);
+            border: 1px solid rgba(0, 0, 0, 0.04);
+            border-radius: 16px;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            transition: all 0.3s ease;
+        }
+
+        .comp-card:hover {
+            background: rgba(99, 102, 241, 0.03);
+            border-color: rgba(99, 102, 241, 0.2);
+            transform: translateY(-5px);
+        }
+
+        .comp-card i {
+            font-size: 1.8rem;
+            color: var(--accent-primary);
+            margin-bottom: 8px;
+        }
+
+        .comp-card h3 {
+            font-family: var(--font-display);
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #0f172a;
+        }
+
+        .comp-card ul {
+            list-style: none;
+            padding-left: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            font-size: 0.95rem;
+            color: var(--text-secondary);
+        }
+
+        .comp-card ul li {
+            position: relative;
+            padding-left: 20px;
+        }
+
+        .comp-card ul li::before {
+            content: '•';
+            color: var(--accent-secondary);
+            font-size: 1.2rem;
+            position: absolute;
+            left: 5px;
+            top: -2px;
+        }
+
+        /* Database Table */
+        .table-responsive {
+            overflow-x: auto;
+            border-radius: 12px;
+            border: 1px solid rgba(0, 0, 0, 0.06);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            text-align: left;
+            font-size: 0.95rem;
+        }
+
+        th {
+            background: rgba(0, 0, 0, 0.02);
+            color: #0f172a;
+            font-family: var(--font-display);
+            font-weight: 600;
+            padding: 16px 20px;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+        }
+
+        td {
+            padding: 16px 20px;
+            border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+            color: var(--text-secondary);
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        tr:hover td {
+            background: rgba(99, 102, 241, 0.01);
+            color: var(--text-primary);
+        }
+
+        code {
+            font-family: 'Courier New', Courier, monospace;
+            background: rgba(99, 102, 241, 0.08);
+            color: #4f46e5;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 0.9rem;
+        }
+
+        /* Alert/Callout Box */
+        .tip-box {
+            background: rgba(13, 148, 136, 0.05);
+            border-left: 4px solid var(--accent-teal);
+            border-radius: 0 16px 16px 0;
+            padding: 20px;
+            display: flex;
+            gap: 16px;
+            align-items: flex-start;
+        }
+
+        .tip-box i {
+            color: var(--accent-teal);
+            font-size: 1.4rem;
+            margin-top: 2px;
+        }
+
+        .tip-content h4 {
+            font-family: var(--font-display);
+            color: #0f172a;
+            font-size: 1.1rem;
+            margin-bottom: 4px;
+        }
+
+        .tip-content p {
+            font-size: 0.95rem;
+            color: var(--text-secondary);
+        }
+
+        /* Timeline for Next Steps */
+        .timeline {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            position: relative;
+            padding-left: 20px;
+        }
+
+        .timeline::before {
+            content: '';
+            position: absolute;
+            top: 10px;
+            left: 5px;
+            width: 2px;
+            height: calc(100% - 20px);
+            background: rgba(0, 0, 0, 0.06);
+        }
+
+        .timeline-item {
+            position: relative;
+            padding-left: 20px;
+        }
+
+        .timeline-marker {
+            position: absolute;
+            top: 6px;
+            left: -20px;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--accent-primary);
+            box-shadow: 0 0 10px rgba(99, 102, 241, 0.3);
+        }
+
+        .timeline-item:nth-child(2) .timeline-marker { background: #818cf8; box-shadow: 0 0 10px rgba(129, 140, 248, 0.3); }
+        .timeline-item:nth-child(3) .timeline-marker { background: #3b82f6; box-shadow: 0 0 10px rgba(59, 130, 246, 0.3); }
+        .timeline-item:nth-child(4) .timeline-marker { background: #60a5fa; box-shadow: 0 0 10px rgba(96, 165, 250, 0.3); }
+        .timeline-item:nth-child(5) .timeline-marker { background: var(--accent-teal); box-shadow: 0 0 10px rgba(13, 148, 136, 0.3); }
+
+        .timeline-content {
+            background: rgba(0, 0, 0, 0.01);
+            border: 1px solid rgba(0, 0, 0, 0.02);
+            border-radius: 12px;
+            padding: 16px 20px;
+            transition: all 0.3s ease;
+        }
+
+        .timeline-content:hover {
+            background: rgba(0, 0, 0, 0.02);
+            transform: translateX(5px);
+        }
+
+        .timeline-content h4 {
+            color: #0f172a;
+            font-size: 1.05rem;
+            margin-bottom: 6px;
+        }
+
+        .timeline-content p {
+            font-size: 0.95rem;
+            color: var(--text-secondary);
+        }
+
+        /* Action Footer */
+        .action-footer {
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.02) 0%, rgba(59, 130, 246, 0.02) 100%);
+            border: 1px dashed rgba(99, 102, 241, 0.2);
+            border-radius: 20px;
+            padding: 30px;
+            text-align: center;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 16px;
+        }
+
+        .action-footer h3 {
+            font-family: var(--font-display);
+            font-size: 1.3rem;
+            color: #0f172a;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 16px;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+            color: #ffffff;
+            border: none;
+            padding: 12px 28px;
+            font-family: var(--font-sans);
+            font-size: 1rem;
+            font-weight: 600;
+            border-radius: 12px;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(99, 102, 241, 0.2);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(99, 102, 241, 0.3);
+            filter: brightness(1.05);
+        }
+
+        /* Mobile Responsive */
+        @media (max-width: 968px) {
+            .container {
+                grid-template-columns: 1fr;
+                padding: 20px;
+            }
+
+            aside {
+                position: relative;
+                top: 0;
+                height: auto;
+            }
+
+            .sidebar-card {
+                padding: 16px;
+            }
+
+            .nav-links {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 10px;
+            }
+
+            .nav-links li {
+                margin-bottom: 0;
+            }
+
+            header {
+                padding: 24px;
+            }
+
+            h1 {
+                font-size: 2rem;
+            }
+
+            section {
+                padding: 24px;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <!-- Sidebar Navigation -->
+        <aside>
+            <div class="sidebar-card">
+                <div class="sidebar-logo">
+                    <i class="fa-solid fa-brain"></i>
+                    <span>AI Triage</span>
+                </div>
+                <ul class="nav-links">
+                    <li><a href="#overview" class="active"><i class="fa-solid fa-house"></i> ภาพรวมระบบ</a></li>
+                    <li><a href="#diagram"><i class="fa-solid fa-network-wired"></i> แผนผังระบบ (Flow)</a></li>
+                    <li><a href="#components"><i class="fa-solid fa-cubes"></i> ส่วนประกอบหลัก</a></li>
+                    <li><a href="#schema"><i class="fa-solid fa-database"></i> โครงสร้างฐานข้อมูล</a></li>
+                    <li><a href="#next-steps"><i class="fa-solid fa-list-check"></i> ขั้นตอนการพัฒนา</a></li>
+                </ul>
+                <div class="sidebar-footer">
+                    <p>Designed for Or (คุณอ้อ)<br>© 2026 AI Triage Project</p>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main>
+            <!-- Header section -->
+            <header id="overview">
+                <div class="badge">Architecture Guide</div>
+                <h1>AI Triage: MCP System Architecture & Flow</h1>
+                <div class="user-intro">
+                    <i class="fa-solid fa-hand-holding-hand" style="color: var(--accent-teal); margin-right: 8px;"></i>
+                    สวัสดีครับคุณอ้อ! โครงการ <strong>AI Triage</strong> นี้เป็นระบบที่จะช่วยนำแชตของลูกค้ามาวิเคราะห์ จัดหมวดหมู่ และบันทึกผลสถิติลงฐานข้อมูลโดยอัตโนมัติ เพื่อนำไปแสดงผลบน Dashboard เชิงลึกครับ
+                </div>
+                <p class="header-desc">
+                    เอกสารฉบับนี้อธิบายโครงสร้าง สถาปัตยกรรม และการไหลของข้อมูล (System Flow) ของระบบเพื่อเป็นไกด์ไลน์เริ่มต้นให้คุณอ้อนำไปศึกษาและทำตามได้ทันที
+                </p>
+            </header>
+
+            <!-- Flow Diagram Section -->
+            <section id="diagram">
+                <h2>1. แผนผังการทำงานของระบบ (System Flow Diagram)</h2>
+                <p>นี่คือโฟลวการทำงานตั้งแต่เริ่มรับข้อความแชตของลูกค้า ไปจนถึงการประมวลผลของ AI และอัปเดตสถิติขึ้นสู่หน้าบ้าน (Dashboard) ผ่านโปรโตคอล MCP:</p>
+                
+                <div class="diagram-container">
+                    <pre class="mermaid">
+                    sequenceDiagram
+                        autonumber
+                        participant DB as Database (JSON / SQLite)
+                        participant MCPServer as MCP Server (Node.js)
+                        participant AIClient as AI Client (Gemini/Claude)
+                        participant Dashboard as Dashboard UI (HTML/CSS/JS)
+
+                        Note over AIClient, MCPServer: 1. ขั้นตอนการวิเคราะห์และคัดแยก (Triage Flow)
+                        AIClient->>MCPServer: ขอข้อมูลแชตที่ยังไม่ได้คัดแยก (Call tool: get_unclassified_chats)
+                        MCPServer->>DB: Query ข้อมูลแชตดิบ (Raw Chats)
+                        DB-->>MCPServer: ส่งข้อมูลแชตกลับมา
+                        MCPServer-->>AIClient: ส่งรายการแชตกลับไปให้ AI
+
+                        Note over AIClient: AI วิเคราะห์ข้อความแชต:<br/>- หมวดหมู่ (เช่น ฝาก-ถอน, เข้าเว็บไม่ได้)<br/>- ความเร่งด่วน (High/Medium/Low)<br/>- บทสรุปสั้นๆ
+
+                        AIClient->>MCPServer: ส่งผลลัพธ์ไปบันทึก (Call tool: save_triage_result)
+                        MCPServer->>DB: บันทึกข้อมูลหมวดหมู่และระดับความสำคัญ
+                        DB-->>MCPServer: ยืนยันการบันทึกสำเร็จ
+                        MCPServer-->>AIClient: ส่งผลลัพธ์ Success
+
+                        Note over Dashboard, DB: 2. ขั้นตอนการแสดงผล (Dashboard Flow)
+                        Dashboard->>MCPServer: ขอข้อมูลสถิติ (REST API หรือ Resource)
+                        MCPServer->>DB: ดึงผลสถิติสรุป (Count by Category, Priority)
+                        DB-->>MCPServer: ส่งผลสถิติกลับมา
+                        MCPServer-->>Dashboard: ส่งข้อมูล JSON ไปแสดงผลบนแผนภูมิ/ตาราง
+                    </pre>
+                </div>
+            </section>
+
+            <!-- Components Section -->
+            <section id="components">
+                <h2>2. ส่วนประกอบหลักของระบบ (Core Components)</h2>
+                <p>ระบบของเราจะแบ่งการเชื่อมต่อการทำงานออกเป็น 3 ส่วนสำคัญหลักๆ:</p>
+                
+                <div class="grid-components">
+                    <!-- Component 1 -->
+                    <div class="comp-card">
+                        <i class="fa-solid fa-server"></i>
+                        <h3>MCP Server</h3>
+                        <ul>
+                            <li>เขียนด้วย Node.js เป็นทางผ่านการคุยของ AI กับฐานข้อมูล</li>
+                            <li>เตรียมเครื่องมือ (Tools) เช่น <code>get_unclassified_chats</code></li>
+                            <li>เตรียมช่องทางส่งบันทึก <code>save_triage_result</code></li>
+                        </ul>
+                    </div>
+                    <!-- Component 2 -->
+                    <div class="comp-card">
+                        <i class="fa-solid fa-database"></i>
+                        <h3>Database (JSON / SQLite)</h3>
+                        <ul>
+                            <li>ใช้เก็บข้อมูลแชตดิบของลูกค้าที่เข้ามา</li>
+                            <li>เก็บผลการวิเคราะห์ของ AI (Category, Priority, Summary)</li>
+                            <li>ช่วงแรกแนะนำให้เก็บในไฟล์ <code>db.json</code> เพื่อการพัฒนาที่ง่ายและไม่มีบั๊กบน Windows</li>
+                        </ul>
+                    </div>
+                    <!-- Component 3 -->
+                    <div class="comp-card">
+                        <i class="fa-solid fa-chart-line"></i>
+                        <h3>Dashboard UI</h3>
+                        <ul>
+                            <li>เว็บอินเทอร์เฟสสวยงาม ดึงข้อมูลสถิติไปจัดทำกราฟ</li>
+                            <li>ช่วยผู้ใช้คัดกรองดูเคสด่วนที่สุด (High Priority) ได้ก่อน</li>
+                            <li>พัฒนาด้วย HTML, Vanilla CSS และ JavaScript รวดเร็วลื่นไหล</li>
+                        </ul>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Database Schema Section -->
+            <section id="schema">
+                <h2>3. โครงสร้างข้อมูลที่ต้องใช้ (Database Schema Example)</h2>
+                <p>ตารางหลักที่เราจะใช้ในการจัดเก็บข้อมูลแชตลูกค้าและประมวลผล (ตาราง <code>chats</code>):</p>
+                
+                <div class="table-responsive">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ชื่อฟิลด์ (Column Name)</th>
+                                <th>ประเภท (Type)</th>
+                                <th>คำอธิบาย (Description)</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><code>id</code></td>
+                                <td>TEXT (PK)</td>
+                                <td>รหัสไอดีของแต่ละแชตเซสชัน (เพื่อใช้อ้างอิง)</td>
+                            </tr>
+                            <tr>
+                                <td><code>customer_name</code></td>
+                                <td>TEXT</td>
+                                <td>ชื่อหรือข้อมูลติดต่อเบื้องต้นของลูกค้า</td>
+                            </tr>
+                            <tr>
+                                <td><code>conversation</code></td>
+                                <td>TEXT</td>
+                                <td>ประโยคพูดคุยทั้งหมดระหว่างลูกค้าและระบบช่วยเหลือ</td>
+                            </tr>
+                            <tr>
+                                <td><code>status</code></td>
+                                <td>TEXT</td>
+                                <td>สถานะคัดกรอง (<code>pending</code> = รอประเมิน, <code>completed</code> = ประเมินแล้ว)</td>
+                            </tr>
+                            <tr>
+                                <td><code>category</code></td>
+                                <td>TEXT</td>
+                                <td>หมวดหมู่ที่วิเคราะห์ได้ (เช่น <code>deposit_withdrawal</code>, <code>login_issue</code>)</td>
+                            </tr>
+                            <tr>
+                                <td><code>priority</code></td>
+                                <td>TEXT</td>
+                                <td>ความเร่งด่วนของเคส (<code>low</code>, <code>medium</code>, <code>high</code>, <code>urgent</code>)</td>
+                            </tr>
+                            <tr>
+                                <td><code>summary</code></td>
+                                <td>TEXT</td>
+                                <td>สรุปเนื้อความของแชตสั้นๆ เพื่อให้เจ้าหน้าที่เปิดอ่านได้ทันที</td>
+                            </tr>
+                            <tr>
+                                <td><code>created_at</code></td>
+                                <td>TIMESTAMP</td>
+                                <td>เวลาที่ลูกค้าสร้างแชตเข้ามา</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- Timeline Section -->
+            <section id="next-steps">
+                <h2>4. แผนการดำเนินการขั้นตอนต่อไป (Next Steps)</h2>
+                <p>เรามาเริ่มดำเนินการทีละขั้นตอนไปด้วยกันได้เลยครับ:</p>
+                
+                <div class="timeline">
+                    <div class="timeline-item">
+                        <div class="timeline-marker"></div>
+                        <div class="timeline-content">
+                            <h4>ขั้นตอนที่ 1: เตรียมสภาพแวดล้อมโปรเจกต์ (Project Setup)</h4>
+                            <p>สร้างโครงสร้างโฟลเดอร์สำหรับเขียนโค้ด ทำการ <code>npm init -y</code> และทำการติดตั้งไลบรารีเบื้องต้นเพื่อเตรียมพร้อมสำหรับ MCP Server</p>
+                        </div>
+                    </div>
+                    <div class="timeline-item">
+                        <div class="timeline-marker"></div>
+                        <div class="timeline-content">
+                            <h4>ขั้นตอนที่ 2: สร้างระบบ Database แบบไฟล์ JSON</h4>
+                            <p>เราจะสร้างไฟล์ <code>db.json</code> พร้อมข้อมูลตัวอย่างของลูกค้า (เช่น ลูกค้าโอนเงินไม่เข้า, เข้าเว็บไม่ได้) เพื่อให้ AI ได้ฝึกคัดแยก</p>
+                        </div>
+                    </div>
+                    <div class="timeline-item">
+                        <div class="timeline-marker"></div>
+                        <div class="timeline-content">
+                            <h4>ขั้นตอนที่ 3: พัฒนา MCP Server และระบบวิเคราะห์ของ AI</h4>
+                            <p>เขียนโค้ดเปิดใช้เครื่องมืออ่านและเขียนฐานข้อมูล และรันสคริปต์ให้ AI อ่านแชตและวิเคราะห์อัปเดตลงไฟล์โดยอัตโนมัติ</p>
+                        </div>
+                    </div>
+                    <div class="timeline-item">
+                        <div class="timeline-marker"></div>
+                        <div class="timeline-content">
+                            <h4>ขั้นตอนที่ 4: ทำหน้าจอ Dashboard สุดพรีเมียม</h4>
+                            <p>สร้างหน้าจอ Dashboard ดึงสถิติกราฟวิเคราะห์และรายการแชตจากฐานข้อมูลให้แสดงผลแบบโต้ตอบได้อย่างสวยงาม</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="tip-box">
+                    <i class="fa-solid fa-lightbulb"></i>
+                    <div class="tip-content">
+                        <h4>คำแนะนำสำคัญสำหรับคุณอ้อ</h4>
+                        <p>คุณอ้อไม่จำเป็นต้องมีพื้นฐานการเขียนโปรแกรมมาก่อนครับ ผมจะคอยเขียนสคริปต์ให้ และแนะนำทีละจุดอย่างใจเย็น สามารถทดลองเปิดไฟล์ HTML หน้านี้กับบราวเซอร์ดูการเปลี่ยนหน้าได้เลยครับ!</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Interactive bottom section -->
+            <div class="action-footer">
+                <h3>คุณอ้อพร้อมที่จะเริ่มขั้นตอนที่ 1 แล้วหรือยังครับ?</h3>
+                <p>เราจะเริ่มเตรียมตัวรันคำสั่งโครงสร้างโปรเจกต์และติดตั้งเครื่องมือให้ทันทีครับ</p>
+                <div class="btn-group">
+                    <button class="btn" onclick="alert('ยินดีด้วยครับ! เดี๋ยวผู้ช่วย AI จะพารันขั้นตอนที่ 1 ทันทีครับ แจ้งกับ AI ในแชตได้เลยครับ')">เริ่มทำโปรเจกต์กันเลย!</button>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Scroll Spy & Active Nav Script -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const sections = document.querySelectorAll('main > *[id]');
+            const navLinks = document.querySelectorAll('.nav-links a');
+
+            window.addEventListener('scroll', () => {
+                let current = '';
+                sections.forEach(section => {
+                    const sectionTop = section.offsetTop;
+                    const sectionHeight = section.clientHeight;
+                    if (pageYOffset >= (sectionTop - 150)) {
+                        current = section.getAttribute('id');
+                    }
+                });
+
+                navLinks.forEach(link => {
+                    link.classList.remove('active');
+                    if (link.getAttribute('href').includes(current)) {
+                        link.classList.add('active');
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>
