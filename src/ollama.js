@@ -80,10 +80,9 @@ function postRequest(urlStr, data, timeoutMs = 900000) {
       headers: {
         'Content-Type': 'application/json',
         'Content-Length': Buffer.byteLength(postData)
-      },
-      timeout: timeoutMs
+      }
     };
-    
+
     const req = http.request(options, (res) => {
       let responseBody = '';
       res.setEncoding('utf8');
@@ -99,13 +98,11 @@ function postRequest(urlStr, data, timeoutMs = 900000) {
       });
     });
     
+    // Disable socket inactivity timeout so LLM generation is never interrupted
+    req.setTimeout(0);
+    
     req.on('error', (err) => {
       reject(err);
-    });
-    
-    req.on('timeout', () => {
-      req.destroy();
-      reject(new Error('Request timed out'));
     });
     
     req.write(postData);
@@ -154,23 +151,37 @@ CRITICAL RULE ON SYSTEM BLOCKERS VS GENERAL TRANSACTIONS (PREVENT KEYWORD HIJACK
 - However, in the "detected_issues" array, you MUST still list the inquiries/requests as separate items under their respective categories (e.g. "other" for general requests/inquiries, "promo_bonus" for claiming promotions, etc.). Do NOT omit them from the "detected_issues" array just because they are not technical blockers.
 - Set resolution to "Pending", and priority to "medium" or "high" because the user is blocked from using the system.
 
-CRITICAL RULE ON MULTIPLE ISSUES IN A SINGLE CHAT (BREAKDOWN ENGINE):
-- Customers often report multiple issues or requests in a single chat.
-- You MUST identify and extract EVERY single distinct problem, error, statement, or request mentioned.
-- IMPORTANT: Treat EACH separate customer message line as a potential separate issue. If there are 5 customer messages, you should produce AT LEAST 5 issues (one per message). Do NOT skip or ignore any customer message.
-- You MUST extract every single problem mentioned by the customer in the conversation, EVEN IF the customer reports later in the chat that the issue is resolved or they managed to proceed (e.g. "ล็อกอินไม่ได้... สุดท้ายเข้าได้ละ" still counts as an active technical report for "ล็อกอินไม่ได้" and "OTP ไม่ส่ง" that needs to be logged).
-- Do NOT combine or group similar issues. For example:
-  - If a user mentions both "เว็บเปิดช้ามาก" (slow) and "จอขาว" (white screen), these are TWO separate issues (Issue 1: เว็บเปิดช้ามาก, Issue 2: จอขาว).
-  - If a user mentions both "ฝากยังไง" (how to deposit) and "ฝากไม่ได้" (deposit failed), these are TWO separate issues (Issue 1: วิธีฝากเงิน, Issue 2: ฝากเงินไม่สำเร็จ).
-- Extract each one as a separate object in the "detected_issues" array (Issue 1, 2, 3, 4...).
-- If a chat contains 10 distinct messages/problems, you MUST output 10 separate issues in the array. Do NOT summarize or condense them.
-- Example: If the customer says 5 lines: "เปลี่ยนนามสกุล", "ใครมาเปลี่ยนรหัสผ่าน", "โบนัสฝากต่อเนื่อง", "สมัครไม่ได้", "เข้าลิงก์ไม่ได้" — you MUST produce 5 separate issues covering account_security, account_security, promo_bonus, registration, and access_blocked respectively.
-- For the primary classification keys (category_id, priority, urgency, department, recommended_reply, summary), choose the highest priority/most critical issue from the "detected_issues" list.
+CRITICAL RULE ON SEMANTIC PROBLEM GROUPING & DISTINCT CATEGORIES (KRU SAM LOGIC):
+- Do NOT classify duplicate sentences of the SAME issue blindly line-by-line (e.g., group "ฝากเงินไปแล้ว", "เงินถูกหักแล้ว", "ยอดเงินยังไม่เข้า", "รายการแจ้งว่าสำเร็จ" into 1 single issue "ฝากเงินแล้วยอดไม่เข้าระบบ" under category_id "deposit_withdrawal").
+- HOWEVER, every DIFFERENT category problem reported in the chat MUST be extracted as its own separate issue object in "detected_issues"! NEVER combine two different categories into a single issue object!
+- For example:
+  - "ฝากเงินแล้วยอดไม่เข้า" -> category_id: "deposit_withdrawal" (Primary Issue)
+  - "กดรีเฟรชแล้วหน้าเว็บค้าง" -> category_id: "page_load_freeze" (Secondary Issue A)
+  - "ระบบขึ้น Service Unavailable" -> category_id: "api_error" (Secondary Issue B)
+- When a chat contains these 3 distinct problems, you MUST output EXACTLY 3 separate issues in "detected_issues" covering "deposit_withdrawal", "page_load_freeze", and "api_error".
+
+CRITICAL RULE ON API ERROR & SERVICE UNAVAILABLE:
+- Any message mentioning "Service Unavailable", "API Error", "Server Error", "Timeout", "Internal Error", "503", "502", "504" MUST be classified under category_id "api_error" (ระบบขัดข้อง/API Error).
+- "Service Unavailable" is ALWAYS an "api_error", NEVER classify it as "other"!
 
 CRITICAL RULE ON ACCOUNT SECURITY & ACCOUNT CHANGES:
 - Any message about changing account details (e.g. "เปลี่ยนรหัสผ่าน", "เปลี่ยนนามสกุล", "เปลี่ยนเบอร์โทร", "เปลี่ยนอีเมล", "ใครมาเปลี่ยนรหัส", "บัญชีถูกแฮก", "ยืนยันตัวตน") MUST be classified as "account_security". These are NOT general inquiries!
 - If the customer reports that someone else changed their password without permission (e.g. "ใครมาเปลี่ยนรหัสผ่าน"), this is a HIGH PRIORITY security incident. Set urgency to "high" and department to "Admin".
 - Account modification requests (name change, password change, phone number change) are real issues that require admin verification, NOT normal inquiries.
+
+CRITICAL RULE ON DISPLAY GLITCHES & BLANK SCREENS:
+- Any message mentioning screen display glitches (e.g. "มืด", "จอมืด", "จอดำ", "หน้าจอมืด", "มืดเหมือนเดิม", "จอขาว", "หน้าจอขาว", "จอเขียว") MUST be classified as "ui_rendering_issue" (การแสดงผลผิดเพี้ยน). Screen display glitches are ALWAYS real technical problems and MUST NEVER be classified as "other"!
+
+CRITICAL RULE ON HTTP ERRORS & ACCESS BLOCKED:
+- Any message mentioning HTTP error codes or page access errors (e.g. "Error 403", "ขึ้น Error 403", "Error 502", "Error 504", "Error 404", "Error 500", "Error 503", "Error", "เข้าเว็บไม่ได้", "หน้าเว็บไม่ขึ้น", "ลิงก์เสีย") MUST be classified as "access_blocked" (เข้าหน้าเว็บไม่ได้/ลิงก์เสีย).
+- HTTP Error messages are ALWAYS real technical problems and MUST NEVER be classified as "other"!
+
+CRITICAL RULE ON NOTIFICATION ISSUES VS LOGIN ISSUES:
+- Any issue mentioning not receiving SMS, not receiving OTP, OTP not sending, not receiving email ("ไม่ได้รับ OTP", "OTP ไม่ส่ง", "ไม่ได้รับ SMS", "ไม่ได้รับอีเมล", "OTP ไม่เข้า", "แจ้งเตือนล่าช้า") MUST be categorized as "notification_issue" (ปัญหาการแจ้งเตือน). Do NOT classify OTP/SMS delivery failures as "login_issue".
+- Even if the customer was attempting to reset password or log in when the OTP failed, the specific problem of OTP/SMS/email non-delivery MUST be assigned category_id "notification_issue" in detected_issues.
+- NEVER combine a login/password reset problem ("ลืมรหัสผ่าน/เข้าไม่ได้") with an OTP/SMS non-delivery problem into a single issue object! You MUST split them into TWO SEPARATE issues in detected_issues:
+  1. Issue A: "ลืมรหัสผ่าน/บัญชีถูกล็อก" -> category_id: "login_issue"
+  2. Issue B: "ไม่ได้รับ OTP ทางอีเมลและ SMS" -> category_id: "notification_issue"
 
 1. Normal Requests & General Inquiries (e.g. asking for bank account "ขอบช", asking to make a normal deposit "ฝากตัง", asking to change bank account details "เปลี่ยนบัญชี"/"ขอเปลี่ยนเลขบัญชี" without errors, asking to help register "สมัครให้หน่อย"/"ขอลิงก์สมัคร" without errors, asking how referral works "แนะนำเพื่อนได้อะไร", asking for promo codes / claiming normal benefits "ขอโบนัสไทม์" without errors):
    - These are NOT problems!
@@ -202,6 +213,13 @@ CRITICAL RULE ON RECOMMENDED REPLIES (OVERRIDING FEW-SHOT EXAMPLES):
   You MUST IGNORE the reply style of the few-shot training examples. Instead, you MUST strictly generate a reply that guides the customer and asks for their transfer slip ("สลิปโอนเงิน") to initiate the verification step, using this exact pattern or very similar:
   "สวัสดีค่ะ รบกวนขอสลิปโอนเงินของคุณลูกค้า เพื่อให้ทางแอดมิน/ทีมงาน ดำเนินการตรวจสอบการทำรายการฝากเงินในระบบ และหากรายการถูกต้อง เจ้าหน้าที่จะเร่งปรับยอดเครดิตให้โดยเร็วที่สุดค่ะ"
 
+CRITICAL RULE ON DEPARTMENT ROUTING:
+- "Head Admin": Use for third-party game provider outages ("ค่ายเกมล่ม", "ค่าย PG ค้าง", "ค่ายเกมปิดปรับปรุง", "เข้าเล่นเกมสล็อต/บาคาร่า/คาสิโนไม่ได้เนื่องจากระบบค่ายเกมขัดข้อง"), severe account takeover security incidents, or urgent administrative escalations.
+- "Developer": Use ONLY for internal website/app bugs, UI display glitches, button click issues, or internal website loading errors ("ปุ่มกดทับซ้อน", "หน้าเว็บค้าง", "ตัวหนังสือเบี้ยว", "โหลดหน้าเว็บไม่ขึ้น"). Do NOT assign third-party game provider outages to Developer!
+- "Finance": Use for deposit/withdrawal delays, transfer slip verification, and monetary balance adjustments.
+- "Support": Use for general customer assistance, password reset guidance, and standard inquiries.
+- "Marketing": Use for promotions, bonuses, referral programs, and marketing campaigns.
+
 The JSON object must have exactly these keys:
 - "category_id": The ID of the matching category. Use one of these exact IDs:
 ${categoriesPromptList || '- "other": หมวดหมู่อื่นๆ'}
@@ -211,7 +229,7 @@ ${categoriesPromptList || '- "other": หมวดหมู่อื่นๆ'}
 - "sentiment": The user's emotional state. Use one of: "โกรธ", "ไม่พอใจ", "สับสน", "สงสัย", "ชมเชย", "ปกติ".
 - "urgency": The urgency level. Use one of: "low", "medium", "high", "urgent".
 - "priority": The priority rating. Use one of: "low", "medium", "high", "urgent".
-- "department": The department that should handle this. Use one of: "Finance", "Support", "Developer", "Marketing", "Admin", "VIP".
+- "department": The department that should handle this. Use one of: "Finance", "Support", "Developer", "Marketing", "Admin", "Head Admin", "VIP".
 - "summary": A brief 1-sentence summary of the customer's problem in Thai language.
 - "keywords": An array of 2-4 important keywords in Thai language.
 - "confidence": A float number between 0.0 and 100.0 representing your confidence.
@@ -225,7 +243,7 @@ ${categoriesPromptList || '- "other": หมวดหมู่อื่นๆ'}
   - "problem_summary": A brief 1-sentence description of this specific problem in Thai.
   - "category_id": The matching category ID for this problem from the available categories list.
   - "urgency": The urgency level for this specific problem (low, medium, high, urgent).
-  - "department": The department for this specific problem (Finance, Support, Developer, Marketing, Admin, VIP).
+  - "department": The department for this specific problem (Finance, Support, Developer, Marketing, Admin, Head Admin, VIP).
   - "recommended_reply": A polite response draft in Thai addressing this specific problem.
 
 Example:
@@ -374,7 +392,7 @@ export async function getEmbedding(text) {
 
     return data.embedding;
   } catch (error) {
-    console.error('Error getting embedding from Ollama:', error);
-    throw error;
+    console.warn('Warning: Embedding generation skipped/failed:', error.message);
+    return null;
   }
 }
