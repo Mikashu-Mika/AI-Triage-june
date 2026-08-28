@@ -5,10 +5,12 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
-import { supabase, getPendingChats, updateTriageResult, updateChatIssues, authenticateCompany, initializeCompanyCategories, getCategories, authenticateUser, getAllUsers, createUser, updateUser, deleteUser, getAllCompanies, ROLE_HIERARCHY } from './supabase.js';
+import { supabase, getPendingChats, updateTriageResult, updateChatIssues, authenticateCompany, initializeCompanyCategories, getCategories, authenticateUser, getAllUsers, createUser, updateUser, deleteUser, getAllCompanies, getAllCustomers, createCustomer, updateCustomer, deleteCustomer, ROLE_HIERARCHY } from './supabase.js';
 import { getEmbedding } from './ollama.js';
 import { runTriagePipeline, processSingleChat } from './triageService.js';
 import { extractTextFromImage } from './ocr.js';
+import { processAgentQuery } from './agentService.js';
+import { handleTelegramMessage, handleTelegramCallbackQuery, startTelegramPolling, initTelegramBot, setTelegramWebhook } from './telegramBot.js';
 
 dotenv.config();
 
@@ -40,16 +42,20 @@ async function processTriageQueue() {
   }
 }
 
-// Auto-enqueue any orphaned pending chats from database on startup
+// Auto-enqueue any orphaned pending chats OR chats missing category_id from database on startup
 (async () => {
   try {
-    const { data: pending } = await supabase.from('chats').select('id').eq('status', 'pending');
-    if (pending && pending.length > 0) {
-      console.log(`[Queue] Found ${pending.length} pending chats in database on startup. Auto-enqueueing...`);
-      pending.forEach(c => enqueueTriage(c.id));
+    const { data: orphaned } = await supabase
+      .from('chats')
+      .select('id')
+      .or('status.eq.pending,category_id.is.null');
+
+    if (orphaned && orphaned.length > 0) {
+      console.log(`[Queue] Found ${orphaned.length} orphaned/un-triaged chats in database on startup. Auto-enqueueing...`);
+      orphaned.forEach(c => enqueueTriage(c.id));
     }
   } catch (err) {
-    console.error('Failed to auto-enqueue pending chats on startup:', err.message);
+    console.error('Failed to auto-enqueue un-triaged chats on startup:', err.message);
   }
 })();
 
@@ -226,6 +232,33 @@ app.get('/health', async (req, res) => {
   res.json(status);
 });
 
+// REST API: AI Interactive Agent Chat (Process Thai questions/commands)
+app.post('/api/agent/chat', async (req, res) => {
+  const { query, company_id } = req.body;
+  if (!query) {
+    return res.status(400).json({ error: 'Missing parameter: query is required.' });
+  }
+  try {
+    const response = await processAgentQuery(query, company_id);
+    res.json(response);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// REST API: Telegram Bot Webhook Endpoint
+app.post('/api/telegram/webhook', async (req, res) => {
+  try {
+    const update = req.body;
+    if (update && update.message) {
+      handleTelegramMessage(update.message).catch(err => console.error('Telegram Webhook error:', err));
+    }
+    res.status(200).send('OK');
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
 // REST API: Get pending chats for authenticated company
 app.get('/api/chats/pending', authCompany, async (req, res) => {
   try {
@@ -274,10 +307,23 @@ app.post('/api/chats/ingest', authCompany, async (req, res) => {
       finalConversation = conversation.join('\n');
     }
 
-    // 1. Insert chat session as pending, referencing the authenticated company
+    // 0. Ensure customer_id exists in 'customers' table to prevent foreign key constraint error!
+    if (customer_id) {
+      const { data: custCheck } = await supabase.from('customers').select('id').eq('id', customer_id).single();
+      if (!custCheck) {
+        await supabase.from('customers').insert({
+          id: customer_id,
+          name: `Guest Customer (${customer_id})`,
+          phone: null,
+          email: null
+        });
+      }
+    }
+
+    // 1. Upsert chat session as pending, referencing the authenticated company
     const { data, error } = await supabase
       .from('chats')
-      .insert({ 
+      .upsert({ 
         id, 
         customer_id, 
         conversation: finalConversation, 
@@ -838,6 +884,86 @@ app.get('/api/companies', authUser, requireRole('system_admin'), async (req, res
   }
 });
 
+// ==========================================
+// CUSTOMER MANAGEMENT REST API ENDPOINTS
+// ==========================================
+
+// GET /api/customers - List all customer members
+app.get('/api/customers', async (req, res) => {
+  try {
+    const companyId = req.query.company_id || undefined;
+    const customers = await getAllCustomers(companyId);
+    res.json(customers);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/customers - Create a new customer member (for Postman testing & UI)
+app.post('/api/customers', async (req, res) => {
+  try {
+    const { id, name, email, phone, company_id } = req.body;
+    if (!name) {
+      return res.status(400).json({ error: 'กรุณาระบุชื่อลูกค้า (name)' });
+    }
+
+    const newCustomer = await createCustomer({
+      id,
+      name,
+      email,
+      phone,
+      company_id
+    });
+
+    res.status(201).json({
+      message: 'เพิ่มสมาชิกลูกค้าใหม่สำเร็จ (Customer created successfully)',
+      customer: newCustomer
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// PUT /api/customers/:id - Update an existing customer
+app.put('/api/customers/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updated = await updateCustomer(id, req.body);
+    res.json({ message: 'อัปเดตข้อมูลลูกค้าสำเร็จ', customer: updated });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// DELETE /api/customers/:id - Delete a customer
+app.delete('/api/customers/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const deleted = await deleteCustomer(id);
+    res.json({ message: 'ลบข้อมูลลูกค้าสำเร็จ', customer: deleted });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// POST /api/telegram/webhook - Telegram Webhook Receiver Endpoint
+app.post('/api/telegram/webhook', (req, res) => {
+  res.status(200).send('OK'); // Acknowledge Telegram Webhook instantly to prevent timeouts
+  const update = req.body;
+  console.log('📥 Telegram Webhook Payload Received:', JSON.stringify(update));
+  if (update) {
+    if (update.message) {
+      handleTelegramMessage(update.message).catch(err => {
+        console.error('Error in Telegram Webhook Handler:', err.message);
+      });
+    } else if (update.callback_query) {
+      handleTelegramCallbackQuery(update.callback_query).catch(err => {
+        console.error('Error in Telegram Callback Query Handler:', err.message);
+      });
+    }
+  }
+});
+
 // Start Express Server
 app.listen(PORT, () => {
   console.log(`==================================================`);
@@ -845,4 +971,5 @@ app.listen(PORT, () => {
   console.log(`  MCP SSE Endpoint: http://localhost:${PORT}/sse`);
   console.log(`  Health Check:     http://localhost:${PORT}/health`);
   console.log(`==================================================`);
+  initTelegramBot();
 });

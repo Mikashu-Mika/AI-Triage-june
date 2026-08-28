@@ -3,14 +3,14 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
-const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
 
-if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-  console.warn('Warning: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY is not defined in environment variables. Database integration will fail until configured.');
+if (!SUPABASE_URL || !SUPABASE_KEY) {
+  console.warn('Warning: SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY / SUPABASE_ANON_KEY is not defined in environment variables. Database integration will fail until configured.');
 }
 
-// Initialize Supabase Client using the Service Role Key
-export const supabase = createClient(SUPABASE_URL || '', SUPABASE_SERVICE_ROLE_KEY || '');
+// Initialize Supabase Client using the Service Role Key or Anon Key
+export const supabase = createClient(SUPABASE_URL || '', SUPABASE_KEY || '');
 
 /**
  * Fetch categories for a specific company or global templates if companyId is not provided.
@@ -21,13 +21,17 @@ export async function getCategories(companyId) {
   let query = supabase.from('categories').select('*');
   if (companyId) {
     query = query.eq('company_id', companyId);
-  } else {
-    query = query.is('company_id', null);
   }
   const { data, error } = await query;
 
   if (error) {
     throw new Error(`Failed to fetch categories: ${error.message}`);
+  }
+
+  // Fallback: If company filtering returned 0 categories, fetch all categories
+  if ((!data || data.length === 0) && companyId) {
+    const { data: allData } = await supabase.from('categories').select('*');
+    return allData || [];
   }
 
   return data || [];
@@ -41,7 +45,7 @@ export async function getCategories(companyId) {
 export async function getPendingChats(companyId) {
   let query = supabase
     .from('chats')
-    .select('*, customers(*) ')
+    .select('id, customer_id, conversation, status, company_id, customers(*)')
     .eq('status', 'pending');
 
   if (companyId) {
@@ -103,14 +107,13 @@ export async function updateTriageResult(id, {
       ai_recommendation,
       status: 'completed'
     })
-    .eq('id', id)
-    .select();
+    .eq('id', id);
 
   if (error) {
     throw new Error(`Failed to update triage result for chat ${id}: ${error.message}`);
   }
 
-  return data;
+  return { id, status: 'completed' };
 }
 
 /**
@@ -333,17 +336,20 @@ export async function initializeCompanyCategories(newCompanyId) {
   }
 
   if (templates && templates.length > 0) {
-    const insertData = templates.map(cat => ({
-      id: `${newCompanyId}:${cat.id}`,
-      name: cat.name,
-      description: cat.description,
-      embedding: cat.embedding,
-      company_id: newCompanyId
-    }));
+    const insertData = templates.map(cat => {
+      const rawCatId = cat.id.includes(':') ? cat.id.split(':').slice(1).join(':') : cat.id;
+      return {
+        id: `${newCompanyId}:${rawCatId}`,
+        name: cat.name,
+        description: cat.description,
+        embedding: cat.embedding,
+        company_id: newCompanyId
+      };
+    });
 
     const { error: insErr } = await supabase
       .from('categories')
-      .insert(insertData);
+      .upsert(insertData);
 
     if (insErr) {
       throw new Error('Failed to clone default categories: ' + insErr.message);
@@ -538,6 +544,93 @@ export async function getAllCompanies() {
 
   if (error) throw new Error('Failed to fetch companies: ' + error.message);
   return data || [];
+}
+
+/**
+ * Get all customers.
+ * @param {string} [companyId]
+ * @returns {Promise<any[]>}
+ */
+export async function getAllCustomers(companyId) {
+  let query = supabase
+    .from('customers')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (companyId) {
+    query = query.eq('company_id', companyId);
+  }
+
+  const { data, error } = await query;
+  if (error) throw new Error('Failed to fetch customers: ' + error.message);
+  return data || [];
+}
+
+/**
+ * Create a new customer.
+ * @param {object} customerData
+ * @returns {Promise<object>}
+ */
+export async function createCustomer(customerData) {
+  let { id, name, email, phone } = customerData;
+  if (!name) throw new Error('กรุณาระบุชื่อลูกค้า (name)');
+
+  if (!id) {
+    const { data: existing } = await supabase.from('customers').select('id');
+    const count = existing ? existing.length + 1 : 1;
+    id = `cust-${String(count).padStart(3, '0')}`;
+  }
+
+  const payload = {
+    id,
+    name,
+    email: email || null,
+    phone: phone || null
+  };
+
+  const { data, error } = await supabase
+    .from('customers')
+    .insert([payload])
+    .select()
+    .single();
+
+  if (error) throw new Error('Failed to create customer: ' + error.message);
+  return data;
+}
+
+/**
+ * Update an existing customer.
+ * @param {string} id
+ * @param {object} updates
+ * @returns {Promise<object>}
+ */
+export async function updateCustomer(id, updates) {
+  const { data, error } = await supabase
+    .from('customers')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) throw new Error('Failed to update customer: ' + error.message);
+  return data;
+}
+
+/**
+ * Delete a customer.
+ * @param {string} id
+ * @returns {Promise<object>}
+ */
+export async function deleteCustomer(id) {
+  const { data, error } = await supabase
+    .from('customers')
+    .delete()
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error) throw new Error('Failed to delete customer: ' + error.message);
+  return data;
 }
 
 export { ROLE_HIERARCHY };
