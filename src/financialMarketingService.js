@@ -1521,6 +1521,82 @@ async function scanKeywordIssues(companyId, keywords = [], periodType = 'today')
 }
 
 /**
+ * Priority Drilldown Analytics Engine (e.g. "ระดับสูง: 13 กรณี มีอะไรบ้าง")
+ * Returns detailed list of chats matching a specific priority level (high, urgent, medium, low).
+ * @param {string} [companyId]
+ * @param {string} [timeframeMode='today']
+ * @param {string} [targetPriority='high']
+ */
+export async function getPriorityDrilldownScan(companyId, timeframeMode = 'today', targetPriority = 'high') {
+  try {
+    const { startCutoff, endCutoff, resolvedLabel } = resolveDynamicTimeframe(timeframeMode);
+
+    let query = supabase
+      .from('chats')
+      .select('id, category_id, priority, created_at, summary, chat_issues(summary, category_id, priority)');
+
+    if (companyId) query = query.eq('company_id', companyId);
+
+    const { data: chats, error } = await query;
+    if (error) throw error;
+
+    const targetP = (targetPriority || 'high').toLowerCase();
+    const matchedPriorityIssues = [];
+
+    (chats || []).forEach(chat => {
+      if (!chat.created_at) return;
+      const cDate = new Date(chat.created_at);
+      if (cDate < startCutoff || cDate >= endCutoff) return;
+
+      const issues = chat.chat_issues && chat.chat_issues.length > 0 ? chat.chat_issues : [
+        { summary: chat.summary || `เคสแชต ${chat.id}`, category_id: chat.category_id, priority: chat.priority }
+      ];
+
+      issues.forEach(iss => {
+        const p = (iss.priority || chat.priority || 'medium').toLowerCase();
+        if (p === targetP || (targetP === 'high' && (p === 'high' || p === 'urgent'))) {
+          matchedPriorityIssues.push({
+            chat_id: chat.id,
+            category_id: iss.category_id || chat.category_id,
+            summary: iss.summary,
+            priority: p,
+            created_at: chat.created_at
+          });
+        }
+      });
+    });
+    const labelText = resolvedLabel || 'วันนี้';
+    const priorityTitle = targetP === 'high' ? 'ระดับสูง (High Priority)' :
+                          targetP === 'urgent' ? 'ด่วนที่สุด (Urgent)' :
+                          targetP === 'medium' ? 'ระดับกลาง (Medium Priority)' : 'ระดับต่ำ (Low Priority)';
+
+    if (matchedPriorityIssues.length === 0) {
+      return {
+        priority_drilldown_summary_thai: `🟢 **รายงานเคสปัญหา${priorityTitle} (${labelText}):**\n\n- ไม่พบรายการเคสปัญหา${priorityTitle}ใน${labelText}ค่ะ (0 กรณี)`
+      };
+    }
+
+    let text = `🔥 **รายชื่อเคสปัญหา${priorityTitle} ${labelText} (รวม ${matchedPriorityIssues.length} กรณี):**\n\n`;
+
+    matchedPriorityIssues.forEach((iss, idx) => {
+      let thTime = '';
+      if (iss.created_at) {
+        try {
+          const d = new Date(iss.created_at);
+          thTime = d.toLocaleTimeString('th-TH', { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit' }) + ' น.';
+        } catch (e) {}
+      }
+      const timeStr = thTime ? ` (เวลา **${thTime}**)` : '';
+      text += `${idx + 1}. แชต \`${iss.chat_id}\`${timeStr} - "${iss.summary}"\n`;
+    });
+
+    return { priority_drilldown_summary_thai: text };
+  } catch (err) {
+    return { priority_drilldown_summary_thai: `- ไม่พบข้อมูลตามเงื่อนไขที่ค้นหาค่ะ` };
+  }
+}
+
+/**
  * Customer Praise & Compliments Analytics Engine
  * Scans chat messages for customer appreciation, praise, compliments, and positive feedback for admin services.
  * @param {string} [companyId]
