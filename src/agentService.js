@@ -16,7 +16,8 @@ import {
   getCustomerSentimentAnalysis,
   getUrgentActionRequiredScan,
   getCustomTopicKeywordScan,
-  getCustomerPraiseAnalytics
+  getCustomerPraiseAnalytics,
+  getPriorityDrilldownScan
 } from './financialMarketingService.js';
 import { auditAnswerRelevancy, calculateConfidenceScore } from './auditLayer.js';
 import { autonomousSqlRecovery } from './sqlRecoveryEngine.js';
@@ -520,7 +521,7 @@ async function processAgentQueryDirect(userQuery, companyId, taskOptions = {}) {
   const mentionsBonus = lower.includes('โปรโมชั่น') || lower.includes('โบนัส') || lower.includes('โปร') || lower.includes('เงื่อนไข') || lower.includes('promobonus') || lower.includes('promo_bonus');
   const mentionsFinance = (lower.includes('ฝาก') || lower.includes('ถอน') || lower.includes('ปรับยอด') || lower.includes('เครดิต')) && !mentionsPageLoad && !mentionsLogin;
   const mentionsComplaint = lower.includes('ร้องเรียน') || lower.includes('แอดมิน') || lower.includes('ร้องเรียนแอดมิน') || lower.includes('feedback_complaint');
-  const mentionsLag = (lower.includes('ตอบช้า') || lower.includes('ตอบช้ามาก') || lower.includes('ช้า') || lower.includes('ไม่ตอบ') || lower.includes('ไม่มีคนตอบ') || lower.includes('รอนาน') || lower.includes('interactionlag') || lower.includes('interaction_lag')) && !mentionsComplaint;
+  const mentionsLag = (lower.includes('ตอบช้า') || lower.includes('กดปุ่มแล้วไม่ตอบสนอง') || lower.includes('กดปุ่ม') || lower.includes('ปุ่มกด') || lower.includes('ไม่ตอบสนอง') || lower.includes('ไม่มีคนตอบ') || lower.includes('interactionlag') || lower.includes('interaction_lag')) && !mentionsComplaint && !mentionsPageLoad;
   const mentionsOverallSummary = lower.includes('ภาพรวม') || lower.includes('สถิติรวม') || lower.includes('สรุปสถิติ');
 
   // Only apply category filter if executive asks for a SPECIFIC area and NOT an overall summary
@@ -715,7 +716,8 @@ async function processAgentQueryDirect(userQuery, companyId, taskOptions = {}) {
   const isNewCustomerRegQuery = (lower.includes('สมัคร') || lower.includes('สมาชิกใหม่') || lower.includes('ลูกค้าใหม่') || lower.includes('ผู้ใช้ใหม่') || lower.includes('ยูสใหม่')) && !lower.includes('ชม');
   const isCustomerPraiseQuery = lower.includes('ชม') || lower.includes('คำชม') || lower.includes('ชื่นชม') || lower.includes('ประทับใจ') || lower.includes('ชมเรา');
 
-  const isUrgentFixQuery = (lower.includes('ต้องรีบแก้ไข') || lower.includes('แก้ไขโดยเร็ว') || lower.includes('แก้ไขให้ไว') || lower.includes('ด่วนที่สุด') || lower.includes('รีบแก้') || lower.includes('เร่งด่วนที่สุด') || lower.includes('ควรแก้ไขให้ไว') || lower.includes('ควรแก้ไข') || lower.includes('ต้องแก้ไข')) && (lower.includes('วันนี้') || lower.includes('เคส') || lower.includes('ปัญหา') || lower.includes('เรื่อง'));
+  const isPriorityDrilldownQuery = (lower.includes('ระดับสูง') || lower.includes('ระดับด่วน') || lower.includes('ระดับกลาง') || lower.includes('ระดับต่ำ') || lower.includes('ฉุกเฉิน')) && (lower.includes('มีอะไรบ้าง') || lower.includes('ขอรายละเอียด') || lower.includes('อะไรบ้าง') || lower.includes('มีแชทไหน') || lower.includes('มีแชตไหน'));
+  const isUrgentFixQuery = lower.includes('เคสด่วน') || lower.includes('เคสเร่งด่วน') || lower.includes('เคสฉุกเฉิน') || lower.includes('มีเคสด่วน') || lower.includes('ต้องรีบแก้ไข') || lower.includes('แก้ไขโดยเร็ว') || lower.includes('แก้ไขให้ไว') || lower.includes('ด่วนที่สุด') || lower.includes('รีบแก้') || lower.includes('เร่งด่วนที่สุด') || lower.includes('ควรแก้ไขให้ไว') || lower.includes('ควรแก้ไข') || lower.includes('ต้องแก้ไข');
   const isCustomTopicQuery = lower.includes('เลขเด็ด') || lower.includes('หวย') || lower.includes('ห้องหวย') || lower.includes('กลุ่ม vip') || lower.includes('สูตร');
 
   // 2. Rule-based & LLM Intent Router (PRIORITIZE SPECIFIC TIME & HOURLY PEAK INTENTS)
@@ -724,6 +726,12 @@ async function processAgentQueryDirect(userQuery, companyId, taskOptions = {}) {
     fetchedData = {
       guardrail_reply: `ℹ️ **คำแนะนำระบบ AI Triage:**\n\nปัจจุบันระบบรองรับการสืบค้นและรายงานสถิติเคสแชต หมวดหมู่ปัญหา ความด่วน และสถิติลูกค้าตามเวลาประเทศไทย แต่ยังไม่ได้เชื่อมต่อระบบอ่านรูปภาพสลิปธนาคารและตัวเลขจำนวนเงินบนสลิปค่ะ`
     };
+  } else if (isPriorityDrilldownQuery) {
+    toolUsed = 'query_priority_drilldown';
+    const targetP = lower.includes('ระดับกลาง') ? 'medium' :
+                    lower.includes('ระดับต่ำ') ? 'low' :
+                    lower.includes('ฉุกเฉิน') ? 'urgent' : 'high';
+    fetchedData = await getPriorityDrilldownScan(companyId, scanPeriodType || 'today', targetP);
   } else if (isCustomerPraiseQuery) {
     toolUsed = 'query_customer_praise';
     fetchedData = await getCustomerPraiseAnalytics(companyId, scanPeriodType || 'this_month');
@@ -899,6 +907,8 @@ Provide a clean, executive, line-by-line bulleted Thai response for the Admin:`;
       replyText = `- ไม่พบข้อมูลตามเงื่อนไขที่ค้นหาค่ะ`;
     } else if (toolUsed === 'unsupported_slip_guardrail' || toolUsed === 'vip_customer_guardrail') {
       replyText = fetchedData.guardrail_reply;
+    } else if (toolUsed === 'query_priority_drilldown') {
+      replyText = fetchedData.priority_drilldown_summary_thai;
     } else if (toolUsed === 'query_customer_praise') {
       replyText = fetchedData.praise_summary_thai;
     } else if (toolUsed === 'query_custom_topic_scan') {
@@ -1140,6 +1150,7 @@ Provide a clean, executive, line-by-line bulleted Thai response for the Admin:`;
       'query_comparison': 'getComparisonPeriodAnalytics()',
       'query_daily_peak': 'getDailyPeakAnalysis()',
       'query_hourly_peak': 'getHourlyPeakAnalysis()',
+      'query_priority_drilldown': 'getPriorityDrilldownScan()',
       'query_customer_praise': 'getCustomerPraiseAnalytics()',
       'query_custom_topic_scan': 'getCustomTopicKeywordScan()',
       'query_urgent_action_required': 'getUrgentActionRequiredScan()',
