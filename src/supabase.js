@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
+import { CATEGORY_BILINGUAL_MAP } from './categoryConstants.js';
 dotenv.config();
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -14,6 +15,10 @@ export const supabase = createClient(SUPABASE_URL || '', SUPABASE_KEY || '');
 
 /**
  * Fetch categories for a specific company or global templates if companyId is not provided.
+ * Enriches each category with clean bilingual properties:
+ * - name: pure Thai
+ * - name_th: pure Thai
+ * - name_en: pure English Title Case
  * @param {string} [companyId] - The ID of the company.
  * @returns {Promise<any[]>}
  */
@@ -29,12 +34,39 @@ export async function getCategories(companyId) {
   }
 
   // Fallback: If company filtering returned 0 categories, fetch all categories
-  if ((!data || data.length === 0) && companyId) {
+  let list = data;
+  if ((!list || list.length === 0) && companyId) {
     const { data: allData } = await supabase.from('categories').select('*');
-    return allData || [];
+    list = allData || [];
   }
+  list = list || [];
 
-  return data || [];
+  return list.map(cat => {
+    const rawKey = cat.id.includes(':') ? cat.id.split(':').slice(1).join(':') : cat.id;
+    const mapping = CATEGORY_BILINGUAL_MAP[rawKey];
+
+    // Pure Thai name (strip out any trailing parenthesis if present)
+    let pureThai = cat.name ? cat.name.replace(/\s*\([^)]*\)\s*$/, '').trim() : '';
+    if (!pureThai && mapping) pureThai = mapping.name_th;
+
+    // English name: use DB cat.name_en if present, else fallback mapping, else parse from parentheses
+    let enName = cat.name_en;
+    if (!enName) {
+      if (mapping) {
+        enName = mapping.name_en;
+      } else {
+        const m = cat.name ? cat.name.match(/\(([^)]+)\)/) : null;
+        enName = m ? m[1].trim() : rawKey;
+      }
+    }
+
+    return {
+      ...cat,
+      name: pureThai,
+      name_th: pureThai,
+      name_en: enName
+    };
+  });
 }
 
 /**
@@ -328,7 +360,7 @@ export async function initializeCompanyCategories(newCompanyId) {
   // 2. Fetch categories from the first company
   const { data: templates, error: catErr } = await supabase
     .from('categories')
-    .select('id, name, description, embedding')
+    .select('*')
     .eq('company_id', firstCompany.id);
 
   if (catErr) {
@@ -338,13 +370,17 @@ export async function initializeCompanyCategories(newCompanyId) {
   if (templates && templates.length > 0) {
     const insertData = templates.map(cat => {
       const rawCatId = cat.id.includes(':') ? cat.id.split(':').slice(1).join(':') : cat.id;
-      return {
+      const row = {
         id: `${newCompanyId}:${rawCatId}`,
         name: cat.name,
         description: cat.description,
         embedding: cat.embedding,
         company_id: newCompanyId
       };
+      if (cat.name_en) {
+        row.name_en = cat.name_en;
+      }
+      return row;
     });
 
     const { error: insErr } = await supabase
@@ -376,10 +412,11 @@ export async function authenticateUser(email, password) {
     .select('id, email, name, role, company_id, is_active, permissions')
     .eq('email', email)
     .eq('password', password)
-    .single();
+    .limit(1);
 
-  if (error || !data) return null;
-  if (!data.is_active) return null;
+  if (error || !data || data.length === 0) return null;
+  const user = data[0];
+  if (!user.is_active) return null;
 
   // Fetch company info if user belongs to one
   let company = null;
