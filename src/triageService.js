@@ -86,7 +86,7 @@ export async function runTriagePipeline(companyId) {
 
       // Step 3d: Update results to Supabase using category_id foreign key
       console.log(`- Saving results to Supabase...`);
-      const normalizedCategory = normalizeCategoryId(triage.category_id, categories);
+      const normalizedCategory = resolvePrimaryCategory(triage.category_id, triage.detected_issues, categories);
       await updateTriageResult(chat.id, {
         category_id: normalizedCategory,
         priority: triage.priority,
@@ -131,96 +131,76 @@ export async function runTriagePipeline(companyId) {
   return results;
 }
 
-function classifySentence(text, mainCategory = 'other', fullConversation = '') {
-  const lower = (text || '').toLowerCase();
-  const fullLower = (fullConversation || '').toLowerCase();
-
-  // 0. Informational Device Statements, Normal Working Statements, Closing Requests & Inquiries -> Category: OTHER
-  if (lower.includes('ต้องทำยังไง') || lower.includes('ช่วยดูให้ที') || lower.includes('ช่วยเช็กให้หน่อย') || lower.includes('ช่วยเช็คให้หน่อย') || lower.includes('ช่วยดูให้หน่อย') || lower.includes('ช่วยที') || lower.includes('ช่วยตรวจสอบให้หน่อย') || lower.includes('ช่วยตรวจสอบให้ด้วย') || lower.includes('ช่วยตรวจสอบบัญชี') || lower.includes('รบกวนช่วยตรวจสอบบัญชี') || lower.includes('ช่วยตรวจสอบให้ทีครับ') || lower.includes('เพราะรอมานานมากแล้ว') || lower.includes('ช่วยตรวจสอบให้ที') || lower.includes('ช่วยเช็คให้ที')) {
-    if (!lower.includes('ไม่ได้') && !lower.includes('ไม่เข้า') && !lower.includes('ผิด') && !lower.includes('ค้าง') && !lower.includes('ช้า') && !lower.includes('หาย') && !lower.includes('ซ้อนกัน')) {
-      return 'other';
-    }
+/**
+ * Calculate Cosine Similarity between two numeric vectors.
+ */
+function cosineSimilarity(vecA, vecB) {
+  if (!vecA || !vecB || vecA.length !== vecB.length) return 0;
+  let dotProduct = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < vecA.length; i++) {
+    dotProduct += vecA[i] * vecB[i];
+    normA += vecA[i] * vecA[i];
+    normB += vecB[i] * vecB[i];
   }
-  if (lower.includes('ผมใช้มือถือเข้าเว็บ') || lower.includes('เปิดจากคอมพิวเตอร์กลับใช้งานได้') || lower.includes('กลับใช้งานได้') || lower.includes('ใช้งานได้ปกติ')) {
-    return 'other';
-  }
-  if (lower.includes('เป็นเพราะมือถือไม่รองรับ') || lower.includes('หรือเว็บมีปัญหาครับ') || lower.includes('แบบนี้เป็นเพราะ')) {
-    return 'other';
-  }
-  if (lower.includes('ปกติ') || lower.includes('เข้ามาปกติ') || lower.includes('ทำงานปกติ')) {
-    if (!lower.includes('ไม่ปกติ') && !lower.includes('ผิดปกติ')) return 'other';
-  }
-  if (lower.includes('รบกวนช่วยตรวจสอบยอดฝาก') || lower.includes('ช่วยตรวจสอบยอดฝาก') || lower.includes('ช่วยตรวจสอบยอด') || lower.includes('รบกวนช่วยตรวจสอบให้')) {
-    return 'other';
-  }
-
-  if (lower.includes('ขอบช') || lower.includes('ขอเลขบัญชี') || lower.includes('ขอโบนัส') || lower.includes('ขอรับโบนัส') || lower.includes('ขอโปรโมชั่น') || lower.includes('ขอลิงก์') || lower.includes('สวัสดี') || lower.includes('ขอบคุณ') || lower.includes('หวัดดี') || lower.includes('ฝากตัง') || lower.includes('สอบถามข้อมูล') || lower.includes('ขอสอบถาม')) {
-    // Only return other if it doesn't mention an actual error/problem!
-    if (!lower.includes('ไม่ได้') && !lower.includes('ไม่เข้า') || lower.includes('ขอบช') || lower.includes('สวัสดี') || lower.includes('ขอบคุณ')) {
-      return 'other';
-    }
-  }
-
-  // 0.1 Compliments, Admin praise, General greetings & Normal Inquiries -> Category: OTHER
-  if (lower.includes('บริการดี') || lower.includes('ตอบสุภาพ') || lower.includes('ดูแลดี') || lower.includes('ชื่นชม') || lower.includes('อธิบายชัดเจน') || lower.includes('อธิบายเข้าใจง่าย') || lower.includes('พูดจาสุภาพ') || lower.includes('ตอบแชตไว') || lower.includes('น่ารักเสมอ') || lower.includes('เจริญรุ่งเรือง') || lower.includes('ออเดอร์ปังๆ')) {
-    return 'other';
-  }
-
-  // 1. Account Security (ความปลอดภัยบัญชี - เปลี่ยนเบอร์โทร/แก้ไขข้อมูลบัญชีไม่ได้)
-  if (lower.includes('เปลี่ยนเบอร์') || lower.includes('เปลี่ยนข้อมูล') || lower.includes('แก้ไขข้อมูล') || lower.includes('ข้อมูลบัญชี') || lower.includes('ความปลอดภัย')) return 'account_security';
-
-  // 1.5 API Error & Service Unavailable
-  if (lower.includes('service unavailable') || lower.includes('api error') || lower.includes('server error') || lower.includes('timeout') || lower.includes('internal error') || lower.includes('503')) return 'api_error';
-
-  // 2. Access Blocked / Domain / Error Codes (Error 403, 502, 504, 404, 500, 503, 401, 400, เข้าหน้าเว็บไม่ได้/ลิงก์เสีย)
-  if (lower.includes('error') || lower.includes('403') || lower.includes('502') || lower.includes('504') || lower.includes('404') || lower.includes('500') || lower.includes('503') || lower.includes('401') || lower.includes('400') || lower.includes('เข้าเว็บไม่ได้') || lower.includes('เข้าหน้าเว็บไม่ได้') || lower.includes('ลิงก์เสีย') || lower.includes('เว็บเข้าไม่ได้') || lower.includes('โดเมน')) return 'access_blocked';
-
-  // 3. Notification / OTP / SMS
-  if (lower.includes('otp') || lower.includes('sms') || lower.includes('แจ้งเตือน') || lower.includes('รหัสยืนยัน') || lower.includes('ไม่มีข้อความ') || lower.includes('ส่งใหม่')) return 'notification_issue';
-
-  // 4. Specific UI Rendering (การแสดงผลผิดเพี้ยน / ปุ่มเลื่อนนอกกรอบ / ตัวหนังสือซ้อนกัน / รูปภาพไม่ขึ้น / จอมืด / จอดำ / จอขาว)
-  if (lower.includes('มืด') || lower.includes('จอมืด') || lower.includes('จอดำ') || lower.includes('หน้าจอมืด') || lower.includes('หน้าจอดำ') || lower.includes('จอขาว') || lower.includes('หน้าจอขาว') || lower.includes('ตัวหนังสือซ้อนกัน') || lower.includes('นอกกรอบ') || lower.includes('ปุ่มเมนูบางปุ่มหายไป') || lower.includes('ปุ่มหาย') || lower.includes('เมนูหาย') || lower.includes('ซ้อนกัน') || lower.includes('รูปโปรโมชั่น') || lower.includes('รูปก็ไม่ขึ้น') || lower.includes('แสดงไม่เต็มจอ') || lower.includes('รูปไม่ขึ้น') || lower.includes('ชิดขอบ') || lower.includes('รูปภาพหน้าเว็บ')) return 'ui_rendering_issue';
-
-  // 5. Page Load / Freeze / Lag (หน้าเว็บค้าง/โหลดช้า)
-  if (lower.includes('กดเข้าเกมแล้วเกมค้าง') || lower.includes('เกมค้าง') || lower.includes('โหลดช้า') || lower.includes('ช้ามาก') || lower.includes('หน้าเว็บช้า') || lower.includes('ค้าง') || lower.includes('หมุน') || lower.includes('โหลดไม่ครบ') || lower.includes('หนืด') || lower.includes('สะดุด') || lower.includes('โหลดไม่ขึ้น') || lower.includes('เด้ง')) return 'page_load_freeze';
-
-  // 5. Account Security & Login (ปัญหาการเข้าสู่ระบบ/บัญชีถูกล็อก/รหัสไม่ถูกต้อง/รีเซ็ตรหัสไม่ได้)
-  if (lower.includes('รหัสไม่ถูกต้อง') || lower.includes('รหัสผ่านไม่ถูกต้อง') || lower.includes('รีเซ็ตรหัส') || lower.includes('รีเซ็ต') || lower.includes('รหัสผิด') || lower.includes('รหัส') || lower.includes('เข้าได้อยู่') || lower.includes('พาสเวิร์ด') || lower.includes('บัญชีถูกล็อก') || lower.includes('ถูกล็อก') || lower.includes('ออกจากระบบ') || lower.includes('สมัคร') || lower.includes('เบอร์โทรนี้ถูกใช้งาน') || lower.includes('ถูกใช้งานแล้ว') || lower.includes('ลืมรหัส') || lower.includes('รหัสผ่าน') || lower.includes('แฮก') || lower.includes('ถูกแฮก') || lower.includes('รหัสผ่านผิด') || lower.includes('อายัด') || lower.includes('เข้าไม่ได้') || lower.includes('เข้าสู่ระบบ') || lower.includes('ล็อกอิน') || lower.includes('ล๊อกอิน') || lower.includes('login') || lower.includes('เข้าบัญชี') || lower.includes('ใช้งานบัญชี') || lower.includes('สมัครสมาชิก') || lower.includes('เด้งกลับ') || lower.includes('เด้งกลับหน้าแรก') || lower.includes('เข้าไม่ได้เลย') || lower.includes('บัญชีมีปัญหา') || lower.includes('เป็นที่เว็บหรือบัญชี')) return 'login_issue';
-
-  // 6. Interaction Lag (ปุ่มกด/เมนูกดแล้วไม่ตอบสนอง/กดยืนยันไม่ได้/แอดมินตอบช้า)
-  if (lower.includes('กดยืนยันไม่ได้') || lower.includes('ยืนยันไม่ได้') || lower.includes('แอดมินตอบช้า') || lower.includes('แอดมินไม่ตอบ') || lower.includes('ไม่มีแอดมินตอบ') || lower.includes('แอดมินหาย') || lower.includes('ไม่ทำงาน') || lower.includes('คลิ๊ก') || lower.includes('คลิก') || lower.includes('กดปุ่ม') || lower.includes('กดสมัครไม่ได้') || lower.includes('กดไม่ได้') || lower.includes('ไม่ตอบสนอง') || lower.includes('รีเฟรช') || lower.includes('ข้อมูลหาย')) return 'interaction_lag';
-
-  // 7. Feedback Complaint (ลูกค้าบ่น/ร้องเรียน แอดมินตอบช้า ส่งข้อความไม่มีคนตอบ รอนาน เสียเวลา)
-  if (lower.includes('ไม่มีใครตอบ') || lower.includes('รอนานมาก') || lower.includes('ส่งข้อความไปหลายครั้ง') || lower.includes('เสียเวลา') || lower.includes('แจ้งกันก่อน') || lower.includes('ร้องเรียน') || lower.includes('แจ้งผลให้ชัดเจน') || lower.includes('ไม่เข้าใจว่าระบบเป็นอะไร')) return 'feedback_complaint';
-
-  // 6. Specific UI Rendering (การแสดงผลผิดเพี้ยน / ปุ่มเมนูหายไป)
-  if (lower.includes('ปุ่มเมนูบางปุ่มหายไป') || lower.includes('ปุ่มหาย') || lower.includes('เมนูหาย') || lower.includes('ซ้อนกัน') || lower.includes('รูปโปรโมชั่น') || lower.includes('รูปก็ไม่ขึ้น') || lower.includes('แสดงไม่เต็มจอ') || lower.includes('รูปไม่ขึ้น') || lower.includes('ชิดขอบ')) return 'ui_rendering_issue';
-
-  // 7. Promo & Bonus (check โบนัส/โปรโมชั่น)
-  if (lower.includes('โปรโมชั่น') || lower.includes('โบนัส') || lower.includes('โปร') || lower.includes('ของขวัญวันเกิด') || lower.includes('สิทธิ์')) return 'promo_bonus';
-
-  // 8. Deposit & Withdrawal
-  if (lower.includes('โอนเงิน') || lower.includes('ฝาก') || lower.includes('ถอน') || lower.includes('ยอดเงิน') || lower.includes('ยอดไม่เข้า') || lower.includes('ยอดยังไม่เข้า') || lower.includes('เงินถูกหัก') || lower.includes('หักเงิน') || lower.includes('เงินไม่เข้า') || lower.includes('ยอดในเว็บ') || lower.includes('รายการถอน') || lower.includes('ถอนเงิน') || lower.includes('เงินยังไม่เข้า')) return 'deposit_withdrawal';
-
-  // 9. Interaction Lag (ปุ่มกด/เมนูกดแล้วไม่ตอบสนอง)
-  if (lower.includes('แอดมินตอบช้า') || lower.includes('แอดมินไม่ตอบ') || lower.includes('ไม่มีแอดมินตอบ') || lower.includes('ไม่ทำงาน') || lower.includes('คลิ๊ก') || lower.includes('คลิก') || lower.includes('กดปุ่ม') || lower.includes('กดสมัครไม่ได้') || lower.includes('กดไม่ได้') || lower.includes('ไม่ตอบสนอง') || lower.includes('รีเฟรช') || lower.includes('ข้อมูลหาย')) return 'interaction_lag';
-
-  // 10. General UI Rendering
-  if (lower.includes('รูป') || lower.includes('ตัวหนังสือ') || lower.includes('กรอบ') || lower.includes('เพี้ยน') || lower.includes('แสดงผล') || lower.includes('ไม่เต็มจอ')) return 'ui_rendering_issue';
-
-  // 11. Device Compatibility
-  if (lower.includes('มือถือ') || lower.includes('อุปกรณ์') || lower.includes('chrome') || lower.includes('safari') || lower.includes('คอมพิวเตอร์') || lower.includes('ไอโฟน') || lower.includes('แอนดรอยด์') || lower.includes('เครื่อง')) return 'device_compatibility';
-
-  // 12. Game Issue
-  if (lower.includes('เข้าเกม') || lower.includes('คาสิโน') || lower.includes('เด้งออก') || lower.includes('เล่นเกม') || lower.includes('สล็อต')) return 'game_issue';
-
-  // 13. Contextual Fallback: Inherit mainCategory of conversation if not other
-  if (mainCategory && mainCategory !== 'other') {
-    return mainCategory;
-  }
-
-  return 'other';
+  if (normA === 0 || normB === 0) return 0;
+  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }
+
+/**
+ * Dynamically classify a sentence using BGE-M3 Vector Semantic Matching against categories in Supabase.
+ * @param {string} text - The sentence/text to classify.
+ * @param {any[]} categories - Available dynamic categories for the company (with embeddings).
+ * @param {string} mainCategory - The main category identified for the conversation.
+ * @returns {Promise<{ category_id: string, similarity: number, source: string }>}
+ */
+export async function classifySentenceSemantic(text, categories = [], mainCategory = 'other') {
+  if (!text || !categories || categories.length === 0) {
+    return { category_id: mainCategory || 'other', similarity: 0, source: 'Fallback' };
+  }
+
+  const cleanText = text.trim();
+  const lower = cleanText.toLowerCase();
+
+  // Basic polite greetings without problem details -> assign to other
+  const isGenericGreeting = /^(สวัสดี(ครับ|ค่ะ)?|ขอบคุณ(ครับ|ค่ะ)?|หวัดดี(ครับ|ค่ะ)?|ขอสอบถามหน่อย(ครับ|ค่ะ)?)$/i.test(lower);
+  if (isGenericGreeting) {
+    const otherCat = categories.find(c => c.id.endsWith(':other') || c.id === 'other');
+    return { category_id: otherCat ? otherCat.id : 'other', similarity: 1.0, source: 'Greeting Filter' };
+  }
+
+  try {
+    // Generate embedding for the sentence using local BGE-M3 model
+    const sentenceVector = await getEmbedding(cleanText);
+    if (!sentenceVector || sentenceVector.length === 0) {
+      return { category_id: mainCategory || 'other', similarity: 0, source: 'Fallback' };
+    }
+
+    // Rank categories dynamically by cosine similarity against categories.embedding in Supabase
+    const scoredCategories = categories
+      .filter(c => c.embedding)
+      .map(c => {
+        const catEmbedding = typeof c.embedding === 'string' ? JSON.parse(c.embedding) : c.embedding;
+        const sim = cosineSimilarity(sentenceVector, catEmbedding);
+        return { category_id: c.id, name: c.name, similarity: sim };
+      })
+      .sort((a, b) => b.similarity - a.similarity);
+
+    if (scoredCategories.length > 0 && scoredCategories[0].similarity >= 0.50) {
+      return {
+        category_id: scoredCategories[0].category_id,
+        similarity: scoredCategories[0].similarity,
+        source: 'Vector Semantic Engine (BGE-M3)'
+      };
+    }
+  } catch (err) {
+    console.warn(`Vector semantic matching error for "${cleanText}":`, err.message);
+  }
+
+  return { category_id: mainCategory || 'other', similarity: 0, source: 'Contextual Fallback' };
+}
+
 
 /**
  * Process a single chat session through the triage pipeline.
@@ -267,7 +247,7 @@ export async function processSingleChat(chatId) {
     finalRecommendation = formatMultiIssuesRecommendation(triage, finalRecommendation);
 
     // 6. Update results in Supabase
-    const normalizedCategory = normalizeCategoryId(triage.category_id, categories);
+    const normalizedCategory = resolvePrimaryCategory(triage.category_id, triage.detected_issues, categories);
     await updateTriageResult(chat.id, {
       category_id: normalizedCategory,
       priority: triage.priority,
@@ -288,51 +268,29 @@ export async function processSingleChat(chatId) {
       ai_recommendation: finalRecommendation
     });
 
-    // 7. Save consolidated multi-issue breakdown to chat_issues table
-    console.log(`- Saving relational multi-issue breakdown to Supabase...`);
+    // 7. Save multi-issue breakdown (Qwen 2.5 14B) to chat_issues table
+    console.log(`- Saving multi-issue breakdown from Qwen 2.5 to Supabase...`);
     
-    const convLines = (chat.conversation || '').split('\n').map(l => l.trim()).filter(l => l.length > 0);
-    const normalizedFinalIssues = [];
-
-    const topicMap = {};
-    convLines.forEach((line) => {
-      const cleanLine = line.replace(/^(ลูกค้า|แอดมิน|user|admin)\s*:\s*/i, '').trim();
-      if (!cleanLine) return;
-
-      const cat = classifySentence(cleanLine, triage.category_id);
-      if (!topicMap[cat]) {
-        topicMap[cat] = [];
-      }
-      topicMap[cat].push(cleanLine);
-    });
-
-    if (Object.keys(topicMap).length === 0) {
-      const mainCat = triage.category_id || 'deposit_withdrawal';
-      topicMap[mainCat] = [triage.summary || chat.conversation.slice(0, 60)];
-    }
-
-    Object.entries(topicMap).forEach(([cat, textList]) => {
-      const matchedLLMIssue = triage.detected_issues?.find(iss => iss.category_id === cat);
-      const matchedSource = matchedLLMIssue ? 'Qwen 2.5 LLM' : 'Keyword Rule Engine';
-      const prio = matchedLLMIssue ? (matchedLLMIssue.urgency || 'medium') : (cat === 'account_security' ? 'urgent' : (cat === 'deposit_withdrawal' || cat === 'game_issue' ? 'high' : 'medium'));
-      const dept = matchedLLMIssue ? (matchedLLMIssue.department || 'Support') : (cat === 'deposit_withdrawal' ? 'Finance' : (cat === 'ui_rendering_issue' || cat === 'device_compatibility' || cat === 'interaction_lag' || cat === 'page_load_freeze' ? 'Developer' : 'Support'));
-      const reply = matchedLLMIssue ? (matchedLLMIssue.recommended_reply || triage.recommended_reply) : triage.recommended_reply;
-
-      let summaryText = textList[0];
-      if (textList.length > 1) {
-        summaryText = textList.slice(0, 3).join(' / ');
-      }
-
-      normalizedFinalIssues.push({
+    let normalizedFinalIssues = [];
+    if (triage.detected_issues && Array.isArray(triage.detected_issues) && triage.detected_issues.length > 0) {
+      normalizedFinalIssues = triage.detected_issues.map(issue => ({
         chat_id: chat.id,
-        category_id: normalizeCategoryId(cat, categories),
-        priority: prio,
-        department: dept,
-        summary: summaryText,
-        recommended_reply: reply,
-        source: matchedSource
-      });
-    });
+        category_id: normalizeCategoryId(issue.category_id, categories),
+        priority: issue.urgency || issue.priority || triage.priority || 'medium',
+        department: issue.department || triage.department || 'Support',
+        summary: issue.problem_summary || issue.summary || triage.summary || 'ไม่มีบทสรุป',
+        recommended_reply: issue.recommended_reply || triage.recommended_reply || ''
+      }));
+    } else {
+      normalizedFinalIssues = [{
+        chat_id: chat.id,
+        category_id: normalizedCategory,
+        priority: triage.priority || 'medium',
+        department: triage.department || 'Support',
+        summary: triage.summary || 'ไม่มีบทสรุป',
+        recommended_reply: triage.recommended_reply || ''
+      }];
+    }
 
     await saveChatIssues(chat.id, normalizedFinalIssues);
 
@@ -393,17 +351,63 @@ function formatMultiIssuesRecommendation(triage, baseRec) {
  * @param {any[]} categories - List of active categories for the company.
  * @returns {string} - The correct resolved category ID.
  */
-function normalizeCategoryId(id, categories) {
+export function normalizeCategoryId(id, categories) {
   if (!id || !categories || categories.length === 0) return null;
   // 1. Direct match
   if (categories.some(c => c.id === id)) return id;
   // 2. Suffix match (e.g. "deposit_withdrawal" matching "company_id:deposit_withdrawal")
-  const suffix = id.split(':').pop();
-  const suffixMatch = categories.find(c => c.id.endsWith(`:${suffix}`) || c.id.endsWith(`:${id}`) || c.id === suffix);
+  const suffix = id.split(':').pop().trim().toLowerCase();
+  const suffixMatch = categories.find(c => {
+    const cClean = (c.id || '').split(':').pop().trim().toLowerCase();
+    return cClean === suffix || c.id.endsWith(`:${suffix}`) || c.id === suffix;
+  });
   if (suffixMatch) return suffixMatch.id;
   // 3. Name match (case-insensitive)
-  const nameMatch = categories.find(c => c.name.toLowerCase() === id.toLowerCase());
+  const nameMatch = categories.find(c => {
+    const cName = (c.name || '').toLowerCase();
+    return cName === id.toLowerCase() || cName.includes(suffix);
+  });
   if (nameMatch) return nameMatch.id;
-  // 4. Default to first category
-  return categories[0].id;
+  // 4. Safe dynamic fallback to company's 'other' category, never arbitrary first category
+  const otherMatch = categories.find(c => {
+    const cClean = (c.id || '').split(':').pop().trim().toLowerCase();
+    return cClean === 'other';
+  });
+  if (otherMatch) return otherMatch.id;
+  return categories[0]?.id || null;
+}
+
+/**
+ * Consistency Rule: Resolve the primary category for the top-level chat record.
+ * Ensures the outer table's category strictly matches the highest priority / primary issue inside detected_issues.
+ * @param {string} triageCategoryId - Category ID suggested by LLM top-level.
+ * @param {any[]} detectedIssues - Array of detected sub-issues.
+ * @param {any[]} categories - Company's categories list.
+ * @returns {string} - Resolved category ID for chats.category_id.
+ */
+export function resolvePrimaryCategory(triageCategoryId, detectedIssues, categories) {
+  if (Array.isArray(detectedIssues) && detectedIssues.length > 0) {
+    const priorityWeight = { urgent: 4, high: 3, medium: 2, low: 1 };
+    
+    // Filter actual problem issues (exclude 'other' if problem issues exist)
+    const problemIssues = detectedIssues.filter(iss => {
+      const clean = (iss.category_id || '').split(':').pop().trim().toLowerCase();
+      return clean !== 'other';
+    });
+
+    if (problemIssues.length > 0) {
+      // Pick the problem issue with the highest urgency/priority
+      const sorted = [...problemIssues].sort((a, b) => {
+        const weightA = priorityWeight[(a.urgency || a.priority || 'medium').toLowerCase()] || 2;
+        const weightB = priorityWeight[(b.urgency || b.priority || 'medium').toLowerCase()] || 2;
+        return weightB - weightA;
+      });
+      return normalizeCategoryId(sorted[0].category_id, categories);
+    }
+
+    // If all issues are 'other' or non-problem inquiries, use the first issue
+    return normalizeCategoryId(detectedIssues[0].category_id, categories);
+  }
+
+  return normalizeCategoryId(triageCategoryId, categories);
 }

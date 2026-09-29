@@ -121,14 +121,18 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
             id: { type: 'string', description: 'รหัส ID ของแชต' },
             category_id: { type: 'string', description: 'รหัสหมวดหมู่แชต (เช่น deposit_withdrawal, login_issue)' },
             priority: { type: 'string', description: 'ระดับความสำคัญ (low, medium, high, urgent)' },
-            summary: { type: 'string', description: 'บทสรุปความต้องการของลูกค้าสั้นๆ เป็นภาษาไทย' }
+            summary: { type: 'string', description: 'บทสรุปความต้องการของลูกค้าสั้นๆ เป็นภาษาไทย' },
+            detected_issues: {
+              type: 'array',
+              description: 'รายการประเด็นปัญหาย่อยที่วิเคราะห์ได้จาก Qwen 2.5 14B'
+            }
           },
           required: ['id', 'category_id', 'priority', 'summary']
         }
       },
       {
         name: 'run_triage_pipeline',
-        description: 'รันกระบวนการคัดแยกแชตค้างประมวลผลทั้งหมดอัตโนมัติ ด้วย qwen2.5:14b และ bge-m3',
+        description: 'รันกระบวนการคัดแยกแชตค้างประมวลผลทั้งหมดอัตโนมัติ ด้วย qwen2.5:14b (วิเคราะห์) และ bge-m3 (embedding)',
         inputSchema: {
           type: 'object',
           properties: {}
@@ -151,7 +155,7 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
     } 
     
     if (name === 'save_triage_result') {
-      const { id, category_id, priority, summary } = args;
+      const { id, category_id, priority, summary, detected_issues } = args;
       const embedding = await getEmbedding(summary);
       const updated = await updateTriageResult(id, {
         category_id,
@@ -159,6 +163,9 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
         summary,
         embedding
       });
+      if (detected_issues && Array.isArray(detected_issues) && detected_issues.length > 0) {
+        await saveChatIssues(id, detected_issues);
+      }
       return {
         content: [{ type: 'text', text: JSON.stringify({ message: 'บันทึกผลสำเร็จ', data: updated }, null, 2) }]
       };
@@ -464,7 +471,7 @@ app.get('/api/categories', authCompany, async (req, res) => {
 
 // POST create a new category (isolated to the company)
 app.post('/api/categories', authCompany, async (req, res) => {
-  const { id, name, description } = req.body;
+  const { id, name, name_en, description } = req.body;
   if (!id || !name || !description) {
     return res.status(400).json({ error: 'Missing parameters: id, name, description' });
   }
@@ -475,15 +482,20 @@ app.post('/api/categories', authCompany, async (req, res) => {
     // Prefix ID with company_id to keep it globally unique
     const uniqueId = `${req.company.id}:${id}`;
 
+    const insertPayload = {
+      id: uniqueId,
+      name,
+      description,
+      embedding,
+      company_id: req.company.id
+    };
+    if (name_en) {
+      insertPayload.name_en = name_en;
+    }
+
     const { data, error } = await supabase
       .from('categories')
-      .insert({
-        id: uniqueId,
-        name,
-        description,
-        embedding,
-        company_id: req.company.id
-      })
+      .insert(insertPayload)
       .select()
       .single();
 
@@ -497,7 +509,7 @@ app.post('/api/categories', authCompany, async (req, res) => {
 // PUT update an existing category
 app.put('/api/categories/:id', authCompany, async (req, res) => {
   const { id } = req.params;
-  const { name, description } = req.body;
+  const { name, name_en, description } = req.body;
   
   if (!name || !description) {
     return res.status(400).json({ error: 'Missing parameters: name, description' });
@@ -524,6 +536,9 @@ app.put('/api/categories/:id', authCompany, async (req, res) => {
 
     // 3. Update the category
     const updateData = { name, description };
+    if (name_en !== undefined) {
+      updateData.name_en = name_en;
+    }
     if (embedding) {
       updateData.embedding = embedding;
     }
@@ -657,6 +672,8 @@ app.get('/api/stats/categories', authCompany, async (req, res) => {
       return {
         id: cat.id,
         name: cat.name,
+        name_th: cat.name_th || cat.name,
+        name_en: cat.name_en,
         count
       };
     });

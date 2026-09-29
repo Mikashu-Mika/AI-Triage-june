@@ -4,11 +4,23 @@ import path from 'path';
 import dotenv from 'dotenv';
 import { processAgentQuery, logAgentActivity } from './agentService.js';
 import { generateExcelReport } from './excelService.js';
+import { 
+  getCachedCategories, 
+  getCategoryDisplayName, 
+  findCategoryKeysByName,
+  findThaiMonthInText, 
+  findAllThaiMonthsInText, 
+  getDynamicMonthMeta, 
+  getDefaultCompanyId, 
+  getPeriodThaiText 
+} from './categoryHelper.js';
 
 dotenv.config();
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
 const TELEGRAM_ALLOWED_CHAT_IDS = (process.env.TELEGRAM_ALLOWED_CHAT_IDS || '').split(',').map(id => id.trim()).filter(Boolean);
+
+export const getDynamicMonthLabels = getDynamicMonthMeta;
 
 /**
  * Send Document (File) to Telegram chat via multipart/form-data POST
@@ -243,6 +255,9 @@ export async function handleTelegramCallbackQuery(callbackQuery) {
 
   console.log(`🔘 Received Telegram Callback Query button click [${data}] from ${senderName} (Chat ID: ${chatId})`);
 
+  const { curMonthName, lastMonthName } = getDynamicMonthLabels();
+  const getPeriodThai = getPeriodThaiText;
+
   // Map button callback_data to Thai natural language query with short byte-compliant callback_data
   let mappedQuery = '';
   let progressMsg = '';
@@ -251,21 +266,11 @@ export async function handleTelegramCallbackQuery(callbackQuery) {
     const parts = data.split(':');
     const catKey = parts[1] || 'feedback_complaint';
     const period = parts[2] || 'today';
-    const periodThai = period === 'yesterday' ? 'ของเมื่อวาน' :
-                       period === 'this_month' ? 'ของเดือนนี้ (สิงหาคม)' :
-                       period === 'last_month' ? 'ของเดือนที่แล้ว (กรกฎาคม)' : 'ของวันนี้';
+    const periodThai = getPeriodThai(period);
     
-    const catTHNameMap = {
-      'feedback_complaint': 'ข้อเสนอแนะและร้องเรียน',
-      'deposit_withdrawal': 'ฝาก-ถอน',
-      'page_load_freeze': 'หน้าเว็บค้าง/โหลดช้า',
-      'login_issue': 'ปัญหาการเข้าสู่ระบบ',
-      'payment_gateway': 'ระบบการชำระเงิน/ธนาคาร',
-      'api_error': 'ข้อผิดพลาดระบบ API',
-      'promo_bonus': 'โปรโมชั่นและโบนัส',
-      'ui_rendering_issue': 'การแสดงผลผิดเพี้ยน'
-    };
-    const catTHName = catTHNameMap[catKey] || catKey;
+    const companyId = process.env.DEFAULT_COMPANY_ID || await getDefaultCompanyId();
+    const categories = await getCachedCategories(companyId);
+    const catTHName = getCategoryDisplayName(catKey, categories);
 
     mappedQuery = `ขอรายละเอียดดูแชตหมวด ${catTHName} ${periodThai}`;
     progressMsg = `⏳ **กำลังสกัดและรวบรวมรายการแชตเรื่อง ${catTHName} ${periodThai} ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🔍✨`;
@@ -273,30 +278,22 @@ export async function handleTelegramCallbackQuery(callbackQuery) {
     const parts = data.split(':');
     const catName = parts[1];
     const period = parts[2] || 'today';
-    const periodThai = period === 'yesterday' ? 'ของเมื่อวาน' :
-                       period === 'this_month' ? 'ของเดือนนี้ (สิงหาคม)' :
-                       period === 'last_month' ? 'ของเดือนที่แล้ว (กรกฎาคม)' : 'ของวันนี้';
+    const periodThai = getPeriodThai(period);
     mappedQuery = `ขอรายละเอียดเรื่อง${catName} ${periodThai}`;
     progressMsg = `⏳ **กำลังสกัดและรวบรวมรายละเอียดแชตเรื่อง${catName} ${periodThai} ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🔍✨`;
   } else if (data.startsWith('cat_1') || data.startsWith('drill_cat_1')) {
     const period = data.includes(':') ? data.split(':')[1] : 'today';
-    const periodThai = period === 'yesterday' ? 'ของเมื่อวาน' :
-                       period === 'this_month' ? 'ของเดือนนี้ (สิงหาคม)' :
-                       period === 'last_month' ? 'ของเดือนที่แล้ว (กรกฎาคม)' : 'ของวันนี้';
+    const periodThai = getPeriodThai(period);
     mappedQuery = `ขอรายละเอียดหมวดที่ 1 ${periodThai}`;
     progressMsg = `⏳ **กำลังสกัดและรวบรวมรายละเอียดแชตหมวดที่ 1 ${periodThai} ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🔍✨`;
   } else if (data.startsWith('cat_2') || data.startsWith('drill_cat_2')) {
     const period = data.includes(':') ? data.split(':')[1] : 'today';
-    const periodThai = period === 'yesterday' ? 'ของเมื่อวาน' :
-                       period === 'this_month' ? 'ของเดือนนี้ (สิงหาคม)' :
-                       period === 'last_month' ? 'ของเดือนที่แล้ว (กรกฎาคม)' : 'ของวันนี้';
+    const periodThai = getPeriodThai(period);
     mappedQuery = `ขอรายละเอียดหมวดที่ 2 ${periodThai}`;
     progressMsg = `⏳ **กำลังสกัดและรวบรวมรายละเอียดแชตหมวดที่ 2 ${periodThai} ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🔍✨`;
   } else if (data.startsWith('drill_hourly')) {
     const period = data.includes(':') ? data.split(':')[1] : 'today';
-    const periodThai = period === 'yesterday' ? 'ของเมื่อวาน' :
-                       period === 'this_month' ? 'ของเดือนนี้' :
-                       period === 'last_month' ? 'ของเดือนที่แล้ว' : 'ของวันนี้';
+    const periodThai = getPeriodThai(period);
     mappedQuery = `ช่วงเวลาหนาแน่น ${periodThai} มีกี่โมง`;
     progressMsg = `⏳ **กำลังวิเคราะห์สถิติช่วงเวลาหนาแน่นของปัญหา ${periodThai} ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ ⏰✨`;
   } else if (data === 'query_today') {
@@ -304,7 +301,7 @@ export async function handleTelegramCallbackQuery(callbackQuery) {
     progressMsg = '⏳ **กำลังรวบรวมและสรุปข้อมูลปัญหาประจำวันนี้ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 📅✨';
   } else if (data === 'query_this_month') {
     mappedQuery = 'สรุปปัญหาในเดือนนี้หน่อย';
-    progressMsg = '⏳ **กำลังรวบรวมและสรุปข้อมูลปัญหาประจำเดือนสิงหาคม ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 📊✨';
+    progressMsg = `⏳ **กำลังรวบรวมและสรุปข้อมูลปัญหาประจำเดือน${curMonthName} ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 📊✨`;
   } else {
     mappedQuery = data;
     progressMsg = '⏳ **กำลังประมวลผลคำสั่งให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🤖✨';
@@ -346,7 +343,7 @@ export async function handleTelegramMessage(message) {
 
   console.log(`📥 Received Telegram Message [${message.chat.type}] from ${senderName} (ID: ${senderId}, Chat ID: ${chatId}): "${text}"`);
 
-  const companyId = process.env.DEFAULT_COMPANY_ID || '2c3f46cc-fae8-4ef8-99e1-874dec8b2af2';
+  const companyId = process.env.DEFAULT_COMPANY_ID || await getDefaultCompanyId();
 
   // Security & VIP Authorization Check (Evaluated Dynamically):
   const allowedIds = (process.env.TELEGRAM_ALLOWED_CHAT_IDS || '').split(',').map(id => id.trim()).filter(Boolean);
@@ -378,6 +375,15 @@ export async function handleTelegramMessage(message) {
   // Send immediate progress acknowledgment if it is a text-typed summary/drilldown query and not coming from callback
   if (!message.skipProgress) {
     const lower = text.toLowerCase();
+    const { curMonthName, lastMonthName } = getDynamicMonthMeta();
+    const matchedMonth = findThaiMonthInText(lower);
+    const mentionedMonths = findAllThaiMonthsInText(lower);
+    const isMonthlyBreakdown = lower.includes('แต่ละเดือน') || 
+                               lower.includes('ทุกเดือน') || 
+                               lower.includes('รายเดือน') || 
+                               lower.includes('แยกตามเดือน') || 
+                               lower.includes('แต่ละ เดือน') || 
+                               mentionedMonths.length > 1;
     let textProgressMsg = '';
 
     const isCustomerQuery = lower.includes('ลูกค้า') || lower.includes('สมัคร') || lower.includes('สมาชิก') || lower.includes('ผู้ใช้') || lower.includes('ยูส') || lower.includes('ใครบ้าง') || lower.includes('มีใคร');
@@ -387,20 +393,24 @@ export async function handleTelegramMessage(message) {
         textProgressMsg = '⏳ **กำลังตรวจสอบประวัติการทักแชตซ้ำเรื่องเดิมของลูกค้าให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🔄✨';
       } else if (lower.includes('ลูกค้าเก่า') && (lower.includes('เปอร์เซ็นต์') || lower.includes('เปอร์เซนต์') || lower.includes('%') || lower.includes('สัดส่วน') || lower.includes('กี่เปอร์'))) {
         textProgressMsg = '⏳ **กำลังวิเคราะห์สัดส่วนเปอร์เซ็นต์แชตจากลูกค้าเก่าให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👥✨';
+      } else if (isMonthlyBreakdown) {
+        textProgressMsg = '⏳ **กำลังสืบค้นและรวบรวมข้อมูลสมาชิกใหม่แยกตามแต่ละเดือนให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 📊✨';
+      } else if (lower.includes('ใครบ้าง') || lower.includes('มีใคร') || lower.includes('รายชื่อ')) {
+        textProgressMsg = '⏳ **กำลังดึงรายชื่อลูกค้าให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨';
+      } else if (lower.includes('เดือนที่แล้ว') || lower.includes('เดือนก่อน')) {
+        textProgressMsg = `⏳ **กำลังสืบค้นและรวบรวมข้อมูลลูกค้าประจำเดือน${lastMonthName} ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨`;
+      } else if (matchedMonth) {
+        textProgressMsg = `⏳ **กำลังสืบค้นและรวบรวมข้อมูลลูกค้าประจำเดือน${matchedMonth.full} ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨`;
+      } else if (lower.includes('เดือนนี้') || lower.includes(curMonthName)) {
+        textProgressMsg = `⏳ **กำลังสืบค้นและรวบรวมข้อมูลลูกค้าประจำเดือน${curMonthName} ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨`;
+      } else if (lower.includes('เมื่อวาน')) {
+        textProgressMsg = '⏳ **กำลังสืบค้นและรวบรวมข้อมูลลูกค้าเมื่อวาน ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨';
+      } else if (lower.includes('วันนี้')) {
+        textProgressMsg = '⏳ **กำลังสืบค้นและรวบรวมข้อมูลลูกค้าประจำวันนี้ ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨';
       } else if (lower.includes('ทั้งหมด') || lower.includes('รวม') || lower.includes('ที่มี')) {
         textProgressMsg = '⏳ **กำลังสืบค้นจำนวนลูกค้าทั้งหมดในระบบให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨';
-      } else if (lower.includes('วันนี้')) {
-        textProgressMsg = '⏳ **กำลังสืบค้นและรวบรวมข้อมูลลูกค้าใหม่ประจำวันนี้ ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨';
-      } else if (lower.includes('เมื่อวาน')) {
-        textProgressMsg = '⏳ **กำลังสืบค้นและรวบรวมข้อมูลลูกค้าใหม่เมื่อวาน ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨';
-      } else if (lower.includes('เดือนที่แล้ว') || lower.includes('กรกฎาคม')) {
-        textProgressMsg = '⏳ **กำลังสืบค้นและรวบรวมข้อมูลลูกค้าใหม่ประจำเดือนที่แล้ว ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨';
-      } else if (lower.includes('เดือน') || lower.includes('ประจำเดือน') || lower.includes('เดือนนี้') || lower.includes('สิงหาคม')) {
-        textProgressMsg = '⏳ **กำลังสืบค้นและรวบรวมข้อมูลลูกค้าใหม่ประจำเดือนนี้ ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨';
-      } else if (lower.includes('ใครบ้าง') || lower.includes('มีใคร') || lower.includes('รายชื่อ')) {
-        textProgressMsg = '⏳ **กำลังดึงรายชื่อลูกค้าใหม่ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨';
       } else {
-        textProgressMsg = '⏳ **กำลังสืบค้นและรวบรวมข้อมูลลูกค้าใหม่ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨';
+        textProgressMsg = '⏳ **กำลังสืบค้นและรวบรวมข้อมูลลูกค้าให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨';
       }
     } else {
       if (lower.includes('หมวดที่ 1') || lower.includes('หมวด 1')) {
@@ -411,8 +421,14 @@ export async function handleTelegramMessage(message) {
         textProgressMsg = '⏳ **กำลังวิเคราะห์สถิติวันที่มีปัญหาพุ่งสูงที่สุดให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 📅✨';
       } else if (lower.includes('ไหม') || lower.includes('หมายถึง') || lower.includes('มีใคร') || lower.includes('มีเคส')) {
         textProgressMsg = '⏳ **กำลังสืบค้นและตรวจสอบรายละเอียดปัญหาให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🔍✨';
-      } else if (lower.includes('เดือน') || lower.includes('ประจำเดือน') || lower.includes('เดือนนี้')) {
-        textProgressMsg = '⏳ **กำลังรวบรวมและสรุปข้อมูลปัญหาประจำเดือนสิงหาคม ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 📊✨';
+      } else if (isMonthlyBreakdown) {
+        textProgressMsg = '⏳ **กำลังรวบรวมและสรุปข้อมูลปัญหาแยกตามแต่ละเดือนให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 📊✨';
+      } else if (lower.includes('เดือนที่แล้ว') || lower.includes('เดือนก่อน')) {
+        textProgressMsg = `⏳ **กำลังรวบรวมและสรุปข้อมูลปัญหาประจำเดือน${lastMonthName} ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 📊✨`;
+      } else if (matchedMonth) {
+        textProgressMsg = `⏳ **กำลังรวบรวมและสรุปข้อมูลปัญหาประจำเดือน${matchedMonth.full} ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 📊✨`;
+      } else if (lower.includes('เดือนนี้') || lower.includes(curMonthName)) {
+        textProgressMsg = `⏳ **กำลังรวบรวมและสรุปข้อมูลปัญหาประจำเดือน${curMonthName} ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 📊✨`;
       } else if (lower.includes('วันนี้') || lower.includes('ประจำวัน')) {
         textProgressMsg = '⏳ **กำลังรวบรวมและสรุปข้อมูลปัญหาประจำวันนี้ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 📅✨';
       } else if (lower.includes('หนาแน่น') || lower.includes('ช่วงเวลา')) {

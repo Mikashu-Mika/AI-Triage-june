@@ -22,6 +22,15 @@ import {
 import { auditAnswerRelevancy, calculateConfidenceScore } from './auditLayer.js';
 import { autonomousSqlRecovery } from './sqlRecoveryEngine.js';
 import { supabase } from './supabase.js';
+import { 
+  getCachedCategories, 
+  getCategoryDisplayName, 
+  findCategoryKeysByName,
+  findThaiMonthInText,
+  findAllThaiMonthsInText,
+  getDynamicMonthMeta,
+  getDefaultCompanyId
+} from './categoryHelper.js';
 import http from 'http';
 import dotenv from 'dotenv';
 dotenv.config();
@@ -81,10 +90,10 @@ function postOllama(path, body) {
       });
     });
 
-    req.setTimeout(20000, () => {
-      console.warn('⚠️ [Ollama HTTP Timeout (20s)]: Aborting request...');
+    req.setTimeout(60000, () => {
+      console.warn('⚠️ [Ollama HTTP Timeout (60s)]: Aborting request...');
       req.destroy();
-      resolve({ error: 'Ollama request timeout (20s)' });
+      resolve({ error: 'Ollama request timeout (60s)' });
     });
     req.on('error', (err) => resolve({ error: err.message }));
     req.write(postData);
@@ -97,9 +106,11 @@ function postOllama(path, body) {
  */
 export async function logAgentActivity({ query, reply, toolUsed, durationMs, senderName, senderId, channel, companyId, chatId, confidence }) {
   try {
+    const resolvedCompanyId = companyId || await getDefaultCompanyId();
+
     // 1. Log to system-wide activity_logs table
     const { error: err1 } = await supabase.from('activity_logs').insert([{
-      company_id: companyId || '2c3f46cc-fae8-4ef8-99e1-874dec8b2af2',
+      company_id: resolvedCompanyId,
       user_name: senderName || 'AI Agent User',
       action_type: 'AI_AGENT_QUERY',
       details: {
@@ -118,7 +129,7 @@ export async function logAgentActivity({ query, reply, toolUsed, durationMs, sen
     // 2. Log to dedicated telegram_chat_logs table for Telegram queries
     if (channel && channel.startsWith('telegram')) {
       const { error: err2 } = await supabase.from('telegram_chat_logs').insert([{
-        company_id: companyId || '2c3f46cc-fae8-4ef8-99e1-874dec8b2af2',
+        company_id: resolvedCompanyId,
         chat_id: chatId || null,
         sender_name: senderName || 'Telegram User',
         sender_id: senderId || null,
@@ -243,17 +254,25 @@ export function extractIntentAndSlots(userQuery = '', activeSession = null) {
   let scanLabel = 'วันนี้';
   let customTimeLabel = 'ในวันนี้';
 
-  const hasExplicitTimeframe = lower.includes('เมื่อวาน') || lower.includes('วันนี้') || lower.includes('เดือน') || lower.includes('สิงหาคม') || lower.includes('กรกฎาคม') || lower.includes('สัปดาห์') || lower.includes('อาทิตย์') || lower.includes('7วัน') || lower.includes('30วัน') || lower.includes('ทั้งหมด') || lower.includes('รวม');
+  const { curMonthName, lastMonthName, thaiMonths } = getDynamicMonthMeta();
+  const matchedExplicitMonth = thaiMonths.find(m => lower.includes(m));
 
-  if (lower.includes('กรกฎาคม') || lower.includes('เดือนที่แล้ว') || lower.includes('เดือนก่อน')) {
+  const hasExplicitTimeframe = lower.includes('เมื่อวาน') || lower.includes('วันนี้') || lower.includes('เดือน') || !!matchedExplicitMonth || lower.includes('สัปดาห์') || lower.includes('อาทิตย์') || lower.includes('7วัน') || lower.includes('30วัน') || lower.includes('ทั้งหมด') || lower.includes('รวม');
+
+  if (lower.includes('เดือนที่แล้ว') || lower.includes('เดือนก่อน') || (lastMonthName && lower.includes(lastMonthName))) {
     scanPeriodType = 'last_month';
-    scanLabel = lower.includes('กรกฎาคม') ? 'เดือนกรกฎาคม' : 'เดือนที่แล้ว (กรกฎาคม)';
-    days = 30;
+    scanLabel = lower.includes(lastMonthName) ? `เดือน${lastMonthName}` : `เดือนที่แล้ว (${lastMonthName})`;
+    days = 'last_month';
     customTimeLabel = scanLabel;
-  } else if (lower.includes('สิงหาคม') || lower.includes('เดือนนี้') || lower.includes('30วัน') || lower.includes('30 วัน') || lower.includes('1 เดือน')) {
+  } else if (lower.includes('เดือนนี้') || (curMonthName && lower.includes(curMonthName)) || lower.includes('30วัน') || lower.includes('30 วัน') || lower.includes('1 เดือน')) {
     scanPeriodType = 'this_month';
-    scanLabel = lower.includes('สิงหาคม') ? 'เดือนสิงหาคม' : 'เดือนนี้';
-    days = 30;
+    scanLabel = lower.includes(curMonthName) ? `เดือน${curMonthName}` : `เดือนนี้ (${curMonthName})`;
+    days = 'this_month';
+    customTimeLabel = scanLabel;
+  } else if (matchedExplicitMonth) {
+    scanPeriodType = matchedExplicitMonth;
+    scanLabel = `เดือน${matchedExplicitMonth}`;
+    days = matchedExplicitMonth;
     customTimeLabel = scanLabel;
   } else if (lower.includes('เมื่อวาน') || lower.includes('เมื่อวานนี้') || cleanLower.includes('เมอวาน')) {
     scanPeriodType = 'yesterday';
@@ -306,43 +325,11 @@ export function extractIntentAndSlots(userQuery = '', activeSession = null) {
     const targetCatName = activeSession.lastGroupedCategories[requestedIndex - 1];
     if (targetCatName) {
       targetCategories.length = 0; // Clear fuzzy keyword matches for specific index drilldown!
-      const catNameToKeyMap = {
-        'ฝาก-ถอน': ['deposit_withdrawal'],
-        'ปัญหาการเข้าสู่ระบบ': ['login_issue'],
-        'เข้าหน้าเว็บไม่ได้/ลิงก์เสีย': ['access_blocked'],
-        'ความปลอดภัยของบัญชี': ['account_security'],
-        'ข้อผิดพลาดระบบ API': ['api_error'],
-        'ปัญหาเบราว์เซอร์/อุปกรณ์': ['device_compatibility'],
-        'ขอเพิ่มฟีเจอร์': ['feature_request'],
-        'ข้อเสนอแนะและร้องเรียน': ['feedback_complaint'],
-        'ปัญหาการเล่นเกม': ['game_issue'],
-        'กดปุ่มแล้วไม่ตอบสนอง': ['interaction_lag'],
-        'ปัญหาการแจ้งเตือน': ['notification_issue'],
-        'หน้าเว็บค้าง/โหลดช้า': ['page_load_freeze'],
-        'ระบบการชำระเงิน/ธนาคาร': ['payment_gateway'],
-        'ประสิทธิภาพระบบช้า': ['performance_issue'],
-        'โปรโมชั่นและโบนัส': ['promo_bonus'],
-        'การสมัครสมาชิก': ['registration'],
-        'การแสดงผลผิดเพี้ยน': ['ui_rendering_issue'],
-        'สิทธิประโยชน์ระดับ VIP (VIP Privileges)': ['vip_privilege'],
-        'ไม่ใช่ปัญหา': ['other']
-      };
-
-      if (catNameToKeyMap[targetCatName]) {
-        targetCategories.push(...catNameToKeyMap[targetCatName]);
+      const matchedKeys = findCategoryKeysByName(targetCatName);
+      if (matchedKeys.length > 0) {
+        targetCategories.push(...matchedKeys);
       } else {
-        if (targetCatName.includes('เข้าสู่ระบบ')) targetCategories.push('login_issue', 'access_blocked');
-        else if (targetCatName.includes('ฝาก-ถอน') || targetCatName.includes('ฝากถอน')) targetCategories.push('deposit_withdrawal');
-        else if (targetCatName.includes('โปรโมชั่น') || targetCatName.includes('โบนัส')) targetCategories.push('promo_bonus');
-        else if (targetCatName.includes('หน้าเว็บ') || targetCatName.includes('ค้าง')) targetCategories.push('page_load_freeze');
-        else if (targetCatName.includes('แสดงผล') || targetCatName.includes('เพี้ยน')) targetCategories.push('ui_rendering_issue');
-        else if (targetCatName.includes('เบราว์เซอร์') || targetCatName.includes('อุปกรณ์')) targetCategories.push('device_compatibility');
-        else if (targetCatName.includes('แจ้งเตือน')) targetCategories.push('notification_issue');
-        else if (targetCatName.includes('ความปลอดภัย')) targetCategories.push('account_security');
-        else if (targetCatName.includes('ตอบสนอง')) targetCategories.push('interaction_lag');
-        else if (targetCatName.includes('ชำระเงิน') || targetCatName.includes('ธนาคาร')) targetCategories.push('payment_gateway');
-        else if (targetCatName.includes('เกม')) targetCategories.push('game_issue');
-        else if (targetCatName.includes('สมัคร')) targetCategories.push('registration');
+        targetCategories.push('other');
       }
     }
   }
@@ -354,7 +341,54 @@ export function extractIntentAndSlots(userQuery = '', activeSession = null) {
   const isDailyPeakQuery = (lower.includes('วันไหน') || lower.includes('วันใด') || lower.includes('วันที่เท่าไหร่')) && (lower.includes('เยอะสุด') || lower.includes('มากที่สุด') || lower.includes('หนักสุด') || lower.includes('สูงสุด') || lower.includes('เยอะที่สุด'));
   const isCustomerQuery = lower.includes('ลูกค้า') || lower.includes('สมาชิก') || lower.includes('ยูส') || lower.includes('คน') || lower.includes('ใครบ้าง') || lower.includes('มีใคร');
   const isHourlyPeakQuery = lower.includes('กี่โมง') || lower.includes('ตอนกี่โมง') || lower.includes('ช่วงเวลาไหน') || lower.includes('เวลาไหน') || lower.includes('เวลาไหนบ้าง') || lower.includes('ช่วงเวลา') || lower.includes('ช่วงไหน') || lower.includes('เวลาใด');
-  const isKnowledgeQuery = lower.includes('วิธี') || lower.includes('ขั้นตอน') || lower.includes('คู่มือ') || lower.includes('ทำอย่างไร') || lower.includes('ทำยังไง') || lower.includes('แก้ไข') || lower.includes('นโยบาย') || lower.includes('เงื่อนไข') || lower.includes('แก้อย่างไร');
+  const isAdvisoryOrTroubleshootingQuery = (
+    lower.includes('ควรแก้') ||
+    lower.includes('แก้ปัญหาแบบไหน') ||
+    lower.includes('แก้แบบไหน') ||
+    lower.includes('แก้ไขแบบไหน') ||
+    lower.includes('แบบไหนดี') ||
+    lower.includes('แก้ยังไง') ||
+    lower.includes('แก้อย่างไร') ||
+    lower.includes('แก้ไขยังไง') ||
+    lower.includes('แก้ไขอย่างไร') ||
+    lower.includes('ต้องแก้ยังไง') ||
+    lower.includes('ต้องแก้อย่างไร') ||
+    lower.includes('ต้องแก้ปัญหา') ||
+    lower.includes('ทำยังไงดี') ||
+    lower.includes('ทำอย่างไรดี') ||
+    lower.includes('ควรทำยังไง') ||
+    lower.includes('ควรทำอย่างไร') ||
+    lower.includes('แนวทางแก้') ||
+    lower.includes('แนวทางแก้ไข') ||
+    lower.includes('แนวทางการแก้ไข') ||
+    lower.includes('วิธีแก้') ||
+    lower.includes('วิธีแก้ไข') ||
+    lower.includes('วิธีการแก้ไข') ||
+    lower.includes('วิธีรับมือ') ||
+    lower.includes('วิธีจัดการ') ||
+    lower.includes('ขั้นตอนการแก้') ||
+    lower.includes('ขั้นตอนแก้ไข') ||
+    lower.includes('คำแนะนำ') ||
+    lower.includes('แนะนำวิธี') ||
+    lower.includes('แนะนำแนวทาง') ||
+    lower.includes('ช่วยแนะนำ') ||
+    lower.includes('ขอคำแนะนำ') ||
+    lower.includes('รับมือยังไง') ||
+    lower.includes('รับมืออย่างไร') ||
+    lower.includes('จัดการยังไง') ||
+    lower.includes('จัดการอย่างไร') ||
+    lower.includes('ป้องกันยังไง') ||
+    lower.includes('ป้องกันอย่างไร') ||
+    lower.includes('มีวิธีแก้') ||
+    lower.includes('มีวิธีแก้ไข') ||
+    lower.includes('sop') ||
+    lower.includes('action plan') ||
+    lower.includes('คู่มือ') ||
+    lower.includes('ขั้นตอน') ||
+    (lower.includes('วิธี') && !lower.includes('กี่'))
+  ) && !lower.includes('กี่เคส') && !lower.includes('กี่ครั้ง') && !lower.includes('กี่คน') && !lower.includes('สถิติรวม') && !lower.includes('สรุปยอด');
+
+  const isKnowledgeQuery = isAdvisoryOrTroubleshootingQuery || lower.includes('วิธี') || lower.includes('ขั้นตอน') || lower.includes('คู่มือ') || lower.includes('ทำอย่างไร') || lower.includes('ทำยังไง') || lower.includes('แก้ไข') || lower.includes('นโยบาย') || lower.includes('เงื่อนไข') || lower.includes('แก้อย่างไร');
   const isSpecificInquiry = (targetCategories.length > 0) && (lower.includes('ไหม') || lower.includes('มีไหม') || lower.includes('มีใคร') || lower.includes('มีเคส') || lower.includes('เกิดปัญหา') || lower.includes('หมายถึง'));
 
   if (isRepeatCustomerIssueQuery) {
@@ -458,8 +492,27 @@ async function processAgentQueryDirect(userQuery, companyId, taskOptions = {}) {
 
   // Session Memory Resolution per Chat ID:
   // Inherit last time period ('today', 'this_month', etc.) and last category list if follow-up query!
+  const { curMonthName, lastMonthName } = getDynamicMonthMeta();
+  const matchedMonthObj = findThaiMonthInText(lower);
+  const matchedMonthInQuery = matchedMonthObj ? matchedMonthObj.full : null;
+  const mentionedMonths = findAllThaiMonthsInText(lower);
+  const isMonthlyBreakdown = lower.includes('แต่ละเดือน') || 
+                             lower.includes('ทุกเดือน') || 
+                             lower.includes('รายเดือน') || 
+                             lower.includes('แยกตามเดือน') || 
+                             lower.includes('แต่ละ เดือน') || 
+                             mentionedMonths.length > 1;
+
   const activeSession = (taskOptions && taskOptions.chatId) ? getUserSession(taskOptions.chatId) : null;
-  const hasExplicitTimeframe = lower.includes('วันนี้') || lower.includes('เมื่อวาน') || lower.includes('สิงหาคม') || lower.includes('เดือนนี้') || lower.includes('กรกฎาคม') || lower.includes('เดือนที่แล้ว') || lower.includes('30 วัน') || lower.includes('7 วัน') || lower.includes('สัปดาห์');
+  const hasExplicitTimeframe = lower.includes('วันนี้') || 
+                               lower.includes('เมื่อวาน') || 
+                               !!matchedMonthInQuery || 
+                               isMonthlyBreakdown || 
+                               lower.includes('เดือนนี้') || 
+                               lower.includes('เดือนที่แล้ว') || 
+                               lower.includes('30 วัน') || 
+                               lower.includes('7 วัน') || 
+                               lower.includes('สัปดาห์');
 
   // 1. Calendar-bound Timeframe & Days Detection Engine
   const cleanLower = lower.replace(/[\u0e48-\u0e4c]/g, '');
@@ -478,15 +531,21 @@ async function processAgentQueryDirect(userQuery, companyId, taskOptions = {}) {
     slotNDaysVal = parseInt(relativeNDaysMatch[1], 10);
   }
 
-  if (slotNDaysVal && slotNDaysVal > 0) {
+  if (isMonthlyBreakdown) {
+    days = 'monthly_breakdown';
+    customTimeLabel = 'แยกตามแต่ละเดือน';
+  } else if (slotNDaysVal && slotNDaysVal > 0) {
     days = slotNDaysVal;
     customTimeLabel = `ย้อนหลัง ${slotNDaysVal} วัน`;
-  } else if (lower.includes('กรกฎาคม') || lower.includes('เดือนที่แล้ว') || lower.includes('เดือนก่อน')) {
+  } else if (lower.includes('เดือนที่แล้ว') || lower.includes('เดือนก่อน') || (lastMonthName && lower.includes(lastMonthName))) {
     days = 'last_month';
-    customTimeLabel = lower.includes('กรกฎาคม') ? 'ประจำเดือนกรกฎาคม' : 'ประจำเดือนที่แล้ว (กรกฎาคม)';
-  } else if (lower.includes('สิงหาคม') || lower.includes('เดือนนี้') || lower.includes('1 เดือน')) {
+    customTimeLabel = lower.includes(lastMonthName) ? `ประจำเดือน${lastMonthName}` : `ประจำเดือนที่แล้ว (${lastMonthName})`;
+  } else if (lower.includes('เดือนนี้') || (curMonthName && lower.includes(curMonthName)) || lower.includes('1 เดือน')) {
     days = 'this_month';
-    customTimeLabel = lower.includes('สิงหาคม') ? 'ประจำเดือนสิงหาคม' : 'ประจำเดือนนี้ (สิงหาคม)';
+    customTimeLabel = lower.includes(curMonthName) ? `ประจำเดือน${curMonthName}` : `ประจำเดือนนี้ (${curMonthName})`;
+  } else if (matchedMonthInQuery) {
+    days = matchedMonthInQuery;
+    customTimeLabel = `ประจำเดือน${matchedMonthInQuery}`;
   } else if (lower.includes('เมื่อวาน') || lower.includes('เมื่อวานนี้') || cleanLower.includes('เมอวาน')) {
     days = 1.5;
     customTimeLabel = 'เมื่อวาน';
@@ -507,8 +566,56 @@ async function processAgentQueryDirect(userQuery, companyId, taskOptions = {}) {
   const timeframe = days === 'this_month' || days === 30 ? '30days' : (days === 1 ? 'today' : '7days');
 
   // Check if explicit data analytics request or RAG Knowledge query
-  const isKnowledgeQuery = (lower.includes('วิธี') || lower.includes('ขั้นตอน') || lower.includes('คู่มือ') || lower.includes('ทำอย่างไร') || lower.includes('ทำยังไง') || lower.includes('แนวทางแก้ไข') || lower.includes('วิธีแก้') || lower.includes('นโยบาย') || lower.includes('เงื่อนไข') || lower.includes('แก้อย่างไร')) && !lower.includes('มีเคส') && !lower.includes('เคส');
-  const isDataQuery = lower.includes('สรุป') || lower.includes('รายงาน') || lower.includes('สถิติ') || lower.includes('กี่') || lower.includes('เท่าไหร่') || lower.includes('ปัญหา') || lower.includes('เคส') || lower.includes('ข้อมูล') || lower.includes('คัดกรอง') || lower.includes('ย้อนหลัง') || lower.includes('วันไหน') || lower.includes('เมื่อไหร่') || lower.includes('รายละเอียด') || lower.includes('เกิดขึ้น') || lower.includes('รายการ') || lower.includes('อะไรบ้าง') || lower.includes('อันไหนบ้าง') || lower.includes('ตัวไหนบ้าง') || lower.includes('ขอรายการ') || lower.includes('ดูให้หน่อย') || lower.includes('เช็คให้หน่อย');
+  const isAdvisoryOrTroubleshootingQuery = (
+    lower.includes('ควรแก้') ||
+    lower.includes('แก้ปัญหาแบบไหน') ||
+    lower.includes('แก้แบบไหน') ||
+    lower.includes('แก้ไขแบบไหน') ||
+    lower.includes('แบบไหนดี') ||
+    lower.includes('แก้ยังไง') ||
+    lower.includes('แก้อย่างไร') ||
+    lower.includes('แก้ไขยังไง') ||
+    lower.includes('แก้ไขอย่างไร') ||
+    lower.includes('ต้องแก้ยังไง') ||
+    lower.includes('ต้องแก้อย่างไร') ||
+    lower.includes('ต้องแก้ปัญหา') ||
+    lower.includes('ทำยังไงดี') ||
+    lower.includes('ทำอย่างไรดี') ||
+    lower.includes('ควรทำยังไง') ||
+    lower.includes('ควรทำอย่างไร') ||
+    lower.includes('แนวทางแก้') ||
+    lower.includes('แนวทางแก้ไข') ||
+    lower.includes('แนวทางการแก้ไข') ||
+    lower.includes('วิธีแก้') ||
+    lower.includes('วิธีแก้ไข') ||
+    lower.includes('วิธีการแก้ไข') ||
+    lower.includes('วิธีรับมือ') ||
+    lower.includes('วิธีจัดการ') ||
+    lower.includes('ขั้นตอนการแก้') ||
+    lower.includes('ขั้นตอนแก้ไข') ||
+    lower.includes('คำแนะนำ') ||
+    lower.includes('แนะนำวิธี') ||
+    lower.includes('แนะนำแนวทาง') ||
+    lower.includes('ช่วยแนะนำ') ||
+    lower.includes('ขอคำแนะนำ') ||
+    lower.includes('รับมือยังไง') ||
+    lower.includes('รับมืออย่างไร') ||
+    lower.includes('จัดการยังไง') ||
+    lower.includes('จัดการอย่างไร') ||
+    lower.includes('ป้องกันยังไง') ||
+    lower.includes('ป้องกันอย่างไร') ||
+    lower.includes('มีวิธีแก้') ||
+    lower.includes('มีวิธีแก้ไข') ||
+    lower.includes('sop') ||
+    lower.includes('action plan') ||
+    lower.includes('คู่มือ') ||
+    lower.includes('ขั้นตอน') ||
+    (lower.includes('วิธี') && !lower.includes('กี่'))
+  ) && !lower.includes('กี่เคส') && !lower.includes('กี่ครั้ง') && !lower.includes('กี่คน') && !lower.includes('สถิติรวม') && !lower.includes('สรุปยอด');
+
+  const isKnowledgeQuery = isAdvisoryOrTroubleshootingQuery || ((lower.includes('วิธี') || lower.includes('ขั้นตอน') || lower.includes('คู่มือ') || lower.includes('ทำอย่างไร') || lower.includes('ทำยังไง') || lower.includes('แนวทางแก้ไข') || lower.includes('วิธีแก้') || lower.includes('นโยบาย') || lower.includes('เงื่อนไข') || lower.includes('แก้อย่างไร')) && !lower.includes('มีเคส') && !lower.includes('กี่เคส'));
+  const hasDomainTopic = lower.includes('แชท') || lower.includes('แชต') || lower.includes('เคส') || lower.includes('ปัญหา') || lower.includes('ลูกค้า') || lower.includes('สมาชิก') || lower.includes('ยูส') || lower.includes('ฝาก') || lower.includes('ถอน') || lower.includes('เงิน') || lower.includes('ระบบ') || lower.includes('เว็บ') || lower.includes('สถิติ') || lower.includes('รายงาน') || lower.includes('สรุป') || lower.includes('ร้องเรียน') || lower.includes('โบนัส') || lower.includes('โปร') || lower.includes('vip') || lower.includes('วีไอพี');
+  const isDataQuery = hasDomainTopic && (lower.includes('สรุป') || lower.includes('รายงาน') || lower.includes('สถิติ') || lower.includes('กี่') || lower.includes('เท่าไหร่') || lower.includes('ปัญหา') || lower.includes('เคส') || lower.includes('ข้อมูล') || lower.includes('คัดกรอง') || lower.includes('ย้อนหลัง') || lower.includes('วันไหน') || lower.includes('เมื่อไหร่') || lower.includes('รายละเอียด') || lower.includes('เกิดขึ้น') || lower.includes('รายการ') || lower.includes('อะไรบ้าง') || lower.includes('อันไหนบ้าง') || lower.includes('ตัวไหนบ้าง') || lower.includes('ขอรายการ') || lower.includes('ดูให้หน่อย') || lower.includes('เช็คให้หน่อย'));
 
   const isChatIssueQuery = lower.includes('ปัญหา') || lower.includes('เคส') || lower.includes('เรื่อง') || lower.includes('รายการ') || lower.includes('อะไรบ้าง');
   // Comprehensive Category Keyword Detector for Executive Queries
@@ -540,44 +647,17 @@ async function processAgentQueryDirect(userQuery, companyId, taskOptions = {}) {
   const indexMatch = lower.match(/(?:หมวดที่|หมวด|ข้อ|รายการที่|รายการ)\s*(\d+)/i) || userQuery.match(/^(\d+)\./);
   let requestedIndex = indexMatch ? parseInt(indexMatch[1], 10) : null;
 
+  const companyCategories = await getCachedCategories(companyId);
+
   if (requestedIndex && activeSession && activeSession.lastGroupedCategories && activeSession.lastGroupedCategories.length >= requestedIndex) {
     const targetCatName = activeSession.lastGroupedCategories[requestedIndex - 1];
     if (targetCatName) {
       targetCategories.length = 0; // Clear fuzzy keyword matches for specific index drilldown!
-      const catNameToKeyMap = {
-        'ฝาก-ถอน': ['deposit_withdrawal'],
-        'ปัญหาการเข้าสู่ระบบ': ['login_issue'],
-        'เข้าหน้าเว็บไม่ได้/ลิงก์เสีย': ['access_blocked'],
-        'ความปลอดภัยของบัญชี': ['account_security'],
-        'ข้อผิดพลาดระบบ API': ['api_error'],
-        'ปัญหาเบราว์เซอร์/อุปกรณ์': ['device_compatibility'],
-        'ขอเพิ่มฟีเจอร์': ['feature_request'],
-        'ข้อเสนอแนะและร้องเรียน': ['feedback_complaint'],
-        'ปัญหาการเล่นเกม': ['game_issue'],
-        'กดปุ่มแล้วไม่ตอบสนอง': ['interaction_lag'],
-        'ปัญหาการแจ้งเตือน': ['notification_issue'],
-        'หน้าเว็บค้าง/โหลดช้า': ['page_load_freeze'],
-        'ระบบการชำระเงิน/ธนาคาร': ['payment_gateway'],
-        'ประสิทธิภาพระบบช้า': ['performance_issue'],
-        'โปรโมชั่นและโบนัส': ['promo_bonus'],
-        'การสมัครสมาชิก': ['registration'],
-        'การแสดงผลผิดเพี้ยน': ['ui_rendering_issue'],
-        'สิทธิประโยชน์ระดับ VIP (VIP Privileges)': ['vip_privilege'],
-        'ไม่ใช่ปัญหา': ['other']
-      };
-
-      if (catNameToKeyMap[targetCatName]) {
-        targetCategories.push(...catNameToKeyMap[targetCatName]);
+      const matchedKeys = findCategoryKeysByName(targetCatName, companyCategories);
+      if (matchedKeys.length > 0) {
+        targetCategories.push(...matchedKeys);
       } else {
-        if (targetCatName.includes('เข้าสู่ระบบ')) targetCategories.push('login_issue');
-        else if (targetCatName.includes('ฝาก-ถอน') || targetCatName.includes('ฝากถอน')) targetCategories.push('deposit_withdrawal');
-        else if (targetCatName.includes('โปรโมชั่น') || targetCatName.includes('โบนัส')) targetCategories.push('promo_bonus');
-        else if (targetCatName.includes('แสดงผล') || targetCatName.includes('เพี้ยน')) targetCategories.push('ui_rendering_issue');
-        else if (targetCatName.includes('หน้าเว็บ') || targetCatName.includes('ค้าง')) targetCategories.push('page_load_freeze');
-        else if (targetCatName.includes('แจ้งเตือน')) targetCategories.push('notification_issue');
-        else if (targetCatName.includes('ความปลอดภัย')) targetCategories.push('account_security');
-        else if (targetCatName.includes('ตอบสนอง')) targetCategories.push('interaction_lag');
-        else if (targetCatName.includes('ชำระเงิน') || targetCatName.includes('ธนาคาร')) targetCategories.push('payment_gateway');
+        targetCategories.push('other');
       }
     }
   }
@@ -625,7 +705,7 @@ async function processAgentQueryDirect(userQuery, companyId, taskOptions = {}) {
   }
 
   if (!isComparisonQuery && !isDailyPeakQuery) {
-    if ((lower.includes('เดือนนี้') || lower.includes('สิงหาคม')) && (lower.includes('เดือนที่แล้ว') || lower.includes('กรกฎาคม') || lower.includes('เดือนก่อน'))) {
+    if ((lower.includes('เดือนนี้') || lower.includes(curMonthName)) && (lower.includes('เดือนที่แล้ว') || lower.includes(lastMonthName) || lower.includes('เดือนก่อน'))) {
       isComparisonQuery = true;
       compType = 'month_over_month';
     } else if ((lower.includes('สัปดาห์นี้') || lower.includes('อาทิตย์นี้')) && (lower.includes('สัปดาห์ที่แล้ว') || lower.includes('อาทิตย์ที่แล้ว') || lower.includes('สัปดาห์ก่อน'))) {
@@ -637,8 +717,8 @@ async function processAgentQueryDirect(userQuery, companyId, taskOptions = {}) {
     }
   }
 
-  // Check for Executive SOP Guidance query ("ต้องแก้ปัญหายังไง" / "แนวทางแก้ไข")
-  const isExecutiveGuidanceQuery = lower.includes('ต้องแก้ปัญหายังไง') || lower.includes('แนวทางแก้ไข') || lower.includes('แก้อย่างไร');
+  // Check for Executive SOP Guidance query ("ต้องแก้ปัญหายังไง" / "แนวทางแก้ไข" / "ควรแก้ปัญหาแบบไหนดี")
+  const isExecutiveGuidanceQuery = isAdvisoryOrTroubleshootingQuery || lower.includes('ต้องแก้ปัญหายังไง') || lower.includes('แนวทางแก้ไข') || lower.includes('แก้อย่างไร');
 
   // Check for Account Security & Freeze Complaint query ("ขู่อายัด" / "อายัด")
   const isFreezeComplaintQuery = lower.includes('อายัด') || lower.includes('ขู่อายัด');
@@ -650,7 +730,14 @@ async function processAgentQueryDirect(userQuery, companyId, taskOptions = {}) {
   let scanLabel = 'วันนี้';
 
   const isRepeatCustomerIssueQuery = lower.includes('ทักซ้ำ') || lower.includes('แจ้งเรื่องเดิม') || lower.includes('ทักเรื่องเดิม') || (lower.includes('เรื่องเดิม') && (lower.includes('ซ้ำ') || lower.includes('อีกไหม')));
-  const hasExplicitTimeWord = lower.includes('เมื่อวาน') || lower.includes('วันนี้') || lower.includes('เดือนนี้') || lower.includes('สิงหาคม') || lower.includes('กรกฎาคม') || lower.includes('เดือนที่แล้ว') || lower.includes('สัปดาห์ที่แล้ว') || lower.includes('สัปดาห์นี้');
+  const hasExplicitTimeWord = lower.includes('เมื่อวาน') || 
+                              lower.includes('วันนี้') || 
+                              lower.includes('เดือนนี้') || 
+                              !!matchedMonthInQuery || 
+                              isMonthlyBreakdown || 
+                              lower.includes('เดือนที่แล้ว') || 
+                              lower.includes('สัปดาห์ที่แล้ว') || 
+                              lower.includes('สัปดาห์นี้');
 
   const procNWeeksMatch = lower.match(/(?:ย้อนหลัง|ช่วง|สรุปย้อนหลัง|สถิตีย้อนหลัง)?\s*(\d+)\s*(?:สัปดาห์|อาทิตย์)/i);
   const procNDaysMatch = lower.match(/(?:ย้อนหลัง|ช่วง|สรุปย้อนหลัง|สถิตีย้อนหลัง)?\s*(\d+)\s*วัน/i) || lower.match(/ย้อนหลัง\s*(\d+)/i);
@@ -662,19 +749,27 @@ async function processAgentQueryDirect(userQuery, companyId, taskOptions = {}) {
     procNDaysVal = parseInt(procNDaysMatch[1], 10);
   }
 
-  if (procNDaysVal && procNDaysVal > 0) {
+  if (isMonthlyBreakdown) {
+    scanPeriodType = 'monthly_breakdown';
+    scanLabel = 'แต่ละเดือน';
+    days = 'monthly_breakdown';
+  } else if (procNDaysVal && procNDaysVal > 0) {
     days = procNDaysVal;
     scanPeriodType = procNDaysVal;
     scanLabel = `ย้อนหลัง ${procNDaysVal} วัน`;
     customTimeLabel = `ย้อนหลัง ${procNDaysVal} วัน`;
-  } else if (lower.includes('กรกฎาคม') || lower.includes('เดือนที่แล้ว') || lower.includes('เดือนก่อน')) {
+  } else if (lower.includes('เดือนที่แล้ว') || lower.includes('เดือนก่อน') || (lastMonthName && lower.includes(lastMonthName))) {
     scanPeriodType = 'last_month';
-    scanLabel = lower.includes('กรกฎาคม') ? 'เดือนกรกฎาคม' : 'เดือนที่แล้ว (กรกฎาคม)';
-    days = 30;
-  } else if (lower.includes('สิงหาคม') || lower.includes('เดือนนี้') || lower.includes('30 วัน') || lower.includes('1 เดือน')) {
+    scanLabel = lower.includes(lastMonthName) ? `เดือน${lastMonthName}` : `เดือนที่แล้ว (${lastMonthName})`;
+    days = 'last_month';
+  } else if (lower.includes('เดือนนี้') || (curMonthName && lower.includes(curMonthName)) || lower.includes('30 วัน') || lower.includes('1 เดือน')) {
     scanPeriodType = 'this_month';
-    scanLabel = lower.includes('สิงหาคม') ? 'เดือนสิงหาคม' : 'เดือนนี้';
-    days = 30;
+    scanLabel = lower.includes(curMonthName) ? `เดือน${curMonthName}` : `เดือนนี้ (${curMonthName})`;
+    days = 'this_month';
+  } else if (matchedMonthInQuery) {
+    scanPeriodType = matchedMonthInQuery;
+    scanLabel = `เดือน${matchedMonthInQuery}`;
+    days = matchedMonthInQuery;
   } else if (lower.includes('สัปดาห์ที่แล้ว') || lower.includes('อาทิตย์ที่แล้ว') || lower.includes('สัปดาห์ก่อน')) {
     scanPeriodType = 'last_week';
     scanLabel = 'สัปดาห์ที่แล้ว';
@@ -706,7 +801,10 @@ async function processAgentQueryDirect(userQuery, companyId, taskOptions = {}) {
   }
 
   const isExplicitChatIssueQuery = lower.includes('ปัญหา') || lower.includes('แชท') || lower.includes('แชต') || lower.includes('เคส') || lower.includes('รายงานปัญหา');
-  const isCustomerFollowUp = (!isExplicitChatIssueQuery) && ((activeSession && activeSession.lastToolUsed === 'query_customer_analytics') || lower.includes('ใครบ้าง') || lower.includes('มีใคร') || lower.includes('ขอรายชื่อ'));
+  const isCustomerFollowUp = (!isExplicitChatIssueQuery) && (
+    (activeSession && activeSession.lastToolUsed === 'query_customer_analytics') && 
+    (lower.includes('ใครบ้าง') || lower.includes('มีใคร') || lower.includes('ขอรายชื่อ') || lower.includes('คนไหน') || lower.includes('คนใด') || lower.includes('ขอดูรายชื่อ'))
+  );
 
   // Check for Existing Customer Chat Volume Ratio Query ("แชทลูกค้าเก่ากี่เปอร์เซ็นต์")
   const isExistingCustomerRatioQuery = (lower.includes('ลูกค้าเก่า') || lower.includes('ยูสเก่า') || lower.includes('สมาชิกเก่า')) && (lower.includes('เปอร์เซ็นต์') || lower.includes('เปอร์เซนต์') || lower.includes('%') || lower.includes('สัดส่วน') || lower.includes('กี่เปอร์'));
@@ -715,6 +813,21 @@ async function processAgentQueryDirect(userQuery, companyId, taskOptions = {}) {
   const isCustomerSentimentQuery = lower.includes('ความพึงพอใจ') || lower.includes('อารมณ์') || lower.includes('ความรู้สึก') || lower.includes('พึงพอใจ') || lower.includes('sentiment') || lower.includes('satisfaction');
   const isNewCustomerRegQuery = (lower.includes('สมัคร') || lower.includes('สมาชิกใหม่') || lower.includes('ลูกค้าใหม่') || lower.includes('ผู้ใช้ใหม่') || lower.includes('ยูสใหม่')) && !lower.includes('ชม');
   const isCustomerPraiseQuery = lower.includes('ชม') || lower.includes('คำชม') || lower.includes('ชื่นชม') || lower.includes('ประทับใจ') || lower.includes('ชมเรา');
+
+  const isCustomerAnalyticsQuery = (
+    lower.includes('สมาชิก') || 
+    lower.includes('ลูกค้า') || 
+    lower.includes('ผู้ใช้') || 
+    lower.includes('ยูส')
+  ) && (
+    lower.includes('สมัคร') || 
+    lower.includes('ใหม่') || 
+    lower.includes('กี่คน') || 
+    lower.includes('จำนวน') || 
+    lower.includes('ยอด') || 
+    lower.includes('ทั้งหมด') || 
+    isMonthlyBreakdown
+  ) && !lower.includes('ชม') && !lower.includes('ปัญหา') && !lower.includes('แชท') && !lower.includes('แชต');
 
   const isPriorityDrilldownQuery = (lower.includes('ระดับสูง') || lower.includes('ระดับด่วน') || lower.includes('ระดับกลาง') || lower.includes('ระดับต่ำ') || lower.includes('ฉุกเฉิน')) && (lower.includes('มีอะไรบ้าง') || lower.includes('ขอรายละเอียด') || lower.includes('อะไรบ้าง') || lower.includes('มีแชทไหน') || lower.includes('มีแชตไหน'));
   const isUrgentFixQuery = lower.includes('เคสด่วน') || lower.includes('เคสเร่งด่วน') || lower.includes('เคสฉุกเฉิน') || lower.includes('มีเคสด่วน') || lower.includes('ต้องรีบแก้ไข') || lower.includes('แก้ไขโดยเร็ว') || lower.includes('แก้ไขให้ไว') || lower.includes('ด่วนที่สุด') || lower.includes('รีบแก้') || lower.includes('เร่งด่วนที่สุด') || lower.includes('ควรแก้ไขให้ไว') || lower.includes('ควรแก้ไข') || lower.includes('ต้องแก้ไข');
@@ -773,11 +886,12 @@ async function processAgentQueryDirect(userQuery, companyId, taskOptions = {}) {
     fetchedData = await getBirthdayBonusScan(companyId, scanPeriodType, scanLabel);
   } else if (isExecutiveGuidanceQuery || isKnowledgeQuery) {
     toolUsed = 'query_knowledge_base';
-    fetchedData = await queryKnowledgeBase(userQuery, companyId);
+    fetchedData = await queryKnowledgeBase(userQuery, companyId, targetCategories);
   } else if (isTopProblemCategoryQuery || isExplicitChatIssueQuery || isChatIssueQuery || targetCategories.length > 0) {
     toolUsed = 'query_chat_analytics';
-    fetchedData = await getChatAnalytics(companyId, scanPeriodType || days, targetCategories, scanLabel || customTimeLabel);
-  } else if ((isNewCustomerRegQuery || isCustomerFollowUp) && !isExplicitChatIssueQuery) {
+    const effectiveTimeLabel = (scanPeriodType === 'last_week' || scanPeriodType === 'this_week') ? null : (scanLabel || customTimeLabel);
+    fetchedData = await getChatAnalytics(companyId, scanPeriodType || days, targetCategories, effectiveTimeLabel);
+  } else if ((isNewCustomerRegQuery || isCustomerAnalyticsQuery || isCustomerFollowUp || isMonthlyBreakdown) && !isExplicitChatIssueQuery && !isExistingCustomerRatioQuery && !isVipCustomerQuery && !isRepeatCustomerIssueQuery) {
     toolUsed = 'query_customer_analytics';
     fetchedData = await getCustomerAnalytics(companyId, days, scanPeriodType, userQuery);
   } else if (isChatIssueQuery) {
@@ -793,25 +907,29 @@ async function processAgentQueryDirect(userQuery, companyId, taskOptions = {}) {
     toolUsed = 'query_chat_analytics';
     fetchedData = await getChatAnalytics(companyId, days, targetCategories, customTimeLabel);
   } else {
-    toolUsed = 'unrelated_query';
+    toolUsed = 'general_chat';
     fetchedData = {
-      unrelated_reply: `- ไม่พบข้อมูลตามเงื่อนไขที่ค้นหาค่ะ`
+      is_conversational: true
     };
   }
 
   // 3. Dynamic System Prompt Generation
   let prompt = '';
   if (toolUsed === 'general_chat') {
-    prompt = `You are "Mikashu Bot", an intelligent, witty, polite, and friendly Thai AI assistant.
+    prompt = `You are "Mikashu Bot", an intelligent, witty, polite, and friendly Thai AI assistant for the Backoffice customer support & chat triage analytics platform.
 
 CRITICAL RULES:
-1. MUST respond in 100% NATURAL THAI LANGUAGE ONLY (ภาษาไทยเท่านั้น).
+1. MUST respond in 100% NATURAL, POLITE THAI LANGUAGE ONLY (ภาษาไทยเท่านั้น ลงท้ายด้วย ค่ะ/นะคะ).
 2. ABSOLUTELY NO RUSSIAN, NO CYRILLIC, NO CHINESE CHARACTERS.
-3. Be warm, friendly, polite, helpful, and witty. Respond naturally to general greetings, casual chatter, or questions about your system status!
+3. If the user greets (e.g. "สวัสดี", "หวัดดี"), greet them warmly, introduce yourself as Mikashu Bot, and ask how you can help with system data or chat analysis today.
+4. If the user asks questions unrelated to backoffice customer/chat analytics (e.g. "มีแมวกี่ตัว", "อากาศเป็นยังไง", "กินข้าวหรือยัง", casual jokes):
+   - Politely, wittily, and naturally explain in Thai that you are an AI assistant for customer service & chat analytics, so you do not have data on that topic (e.g. no cats or pets) in the system.
+   - Warmly invite them to ask about customer statistics, chat issue reports, or system summaries instead.
+5. Keep your response concise, polite, natural, and friendly (1-3 sentences).
 
 User Message: "${userQuery}"
 
-Provide a warm, witty, pure Thai response:`;
+Provide a warm, witty, polite pure Thai response:`;
   } else if (toolUsed === 'query_knowledge_base') {
     prompt = `You are "Mikashu Backoffice Knowledge Base Assistant". Answer the Admin's operational SOP question accurately in Thai:
 
@@ -822,6 +940,20 @@ User Question from Admin: "${userQuery}"
 
 Provide a clear, step-by-step bulleted Thai answer:`;
   } else {
+    // Create lean payload for LLM prompt to ensure blazing-fast generation (<3-5s)
+    const leanData = fetchedData ? { ...fetchedData } : {};
+    if (Array.isArray(leanData.new_customers_details) && leanData.new_customers_details.length > 8) {
+      leanData.new_customers_details = leanData.new_customers_details.slice(0, 8);
+      leanData.additional_customers_count = (fetchedData.new_customers_details || []).length - 8;
+    }
+    if (Array.isArray(leanData.chat_details_list) && leanData.chat_details_list.length > 8) {
+      leanData.chat_details_list = leanData.chat_details_list.slice(0, 8);
+      leanData.additional_chats_count = (fetchedData.chat_details_list || []).length - 8;
+    }
+    if (Array.isArray(leanData.all_chats) && leanData.all_chats.length > 8) {
+      leanData.all_chats = leanData.all_chats.slice(0, 8);
+    }
+
     prompt = `You are "Mikashu Backoffice Data Assistant", an executive AI intelligence assistant for System Owners, Admins, and Backoffice Operations.
 
 SYSTEM MISSION & INTENT CLASSIFICATION:
@@ -847,65 +979,59 @@ ${vectorGuidanceText || '(ไม่มีตัวอย่างเวกเต
 User Question from Admin: "${userQuery}"
 
 Retrieved Data JSON from Supabase:
-${JSON.stringify(fetchedData, null, 2)}
+${JSON.stringify(leanData, null, 2)}
 
 Provide a clean, executive, line-by-line bulleted Thai response for the Admin:`;
   }
 
   try {
-    const res = await postOllama('/api/generate', {
-      model: MODEL_LLM,
-      prompt: prompt,
-      stream: false,
-      options: { temperature: 0.2 }
-    });
+    let replyText = '';
+    if (toolUsed === 'query_knowledge_base' && fetchedData && fetchedData.formatted_sop_thai) {
+      replyText = fetchedData.formatted_sop_thai;
+    } else {
+      const res = await postOllama('/api/generate', {
+        model: MODEL_LLM,
+        prompt: prompt,
+        stream: false,
+        options: { temperature: 0.2 }
+      });
 
-    let replyText = res.response ? res.response.trim() : 'ขออภัยค่ะ ระบบไม่สามารถประมวลผลคำตอบได้ในขณะนี้';
+      replyText = res.response ? res.response.trim() : 'ขออภัยค่ะ ระบบไม่สามารถประมวลผลคำตอบได้ในขณะนี้';
 
-    // Post-processing deduplication & character filters
-    const lines = replyText.split('\n');
-    const uniqueLines = [];
-    const seen = new Set();
-    for (const l of lines) {
-      const clean = l.trim();
-      // Filter out technical UTC ISO timestamps and exact duplicate lines
-      if (clean.includes('เวลา UTC:') || clean.includes('2026-08-')) continue;
-      if (clean && seen.has(clean)) continue;
-      if (clean) seen.add(clean);
-      uniqueLines.push(l);
+      // Post-processing deduplication & character filters
+      const lines = replyText.split('\n');
+      const uniqueLines = [];
+      const seen = new Set();
+      for (const l of lines) {
+        const clean = l.trim();
+        // Filter out technical UTC ISO timestamps and exact duplicate lines
+        if (clean.includes('เวลา UTC:') || clean.includes('2026-08-')) continue;
+        if (clean && seen.has(clean)) continue;
+        if (clean) seen.add(clean);
+        uniqueLines.push(l);
+      }
+      replyText = uniqueLines.join('\n');
+
+      // Dynamic text sanitization: strip foreign scripts (CJK, Cyrillic, full-width punctuation) cleanly
+      replyText = replyText
+        .replace(/[\u4e00-\u9fff\u3400-\u4dbf\uf900-\ufaff]/g, '') // Comprehensive CJK Unified Ideographs
+        .replace(/[\u0400-\u04FF]/g, '')                            // Cyrillic (Russian)
+        .replace(/[！，。？：；（）【】《》“”‘’]/g, ' ')               // Full-width foreign punctuation to standard space
+        .replace(/[ \t]{2,}/g, ' ')                                 // Collapse excessive spaces
+        .trim();
     }
-    replyText = uniqueLines.join('\n');
 
-    // Post-processing Russian, Chinese & foreign text filter for 100% Thai guarantee
-    replyText = replyText
-      .replace(/[！，。？]/g, '')
-      .replace(/замерзло/gi, 'ค้าง/โหลดช้า')
-      .replace(/заморожено/gi, 'ค้าง/ช้า')
-      .replace(/заморозка/gi, 'ค้าง')
-      .replace(/зависание/gi, 'ค้าง')
-      .replace(/[\u0400-\u04FF]/g, '') // Strip residual Cyrillic (Russian) characters
-      .replace(/หรือ约占总数的/g, 'หรือคิดเป็น ')
-      .replace(/其次是/g, 'อันดับต่อมาคือ ')
-      .replace(/页面加载冻结问题/g, 'ปัญหาหน้าเว็บค้าง ')
-      .replace(/共/g, 'รวม ')
-      .replace(/例/g, 'รายการ ')
-      .replace(/占总数的/g, 'คิดเป็น ')
-      .replace(/问题มี/g, 'มีปัญหา ')
-      .replace(/促销奖励相关的问题也有/g, 'และโปรโมชั่น ')
-      .replace(/其他类别则只有/g, 'หมวดหมู่อื่นๆ มี ')
-      .replace(/按优先级划分/g, 'จำแนกตามความด่วน ')
-      .replace(/高优先级/g, 'ความด่วนสูง ')
-      .replace(/中优先级/g, 'ความด่วนกลาง ')
-      .replace(/低优先级/g, 'ความด่วนต่ำ ')
-      .replace(/急需处理的问题有/g, 'เคสเร่งด่วนมี ')
-      .replace(/从数据来看/g, 'จากข้อมูลสรุปว่า ')
-      .replace(/关于存款และ取款的操作问题是最常见的/g, 'ปัญหาฝาก-ถอนเป็นปัญหาที่พบมากที่สุด ')
-      .replace(/[\u4e00-\u9fa5]/g, ''); // Strip residual CJK (Chinese) characters
-
-    // Tool-specific Response Formatter Overrides
-    if (toolUsed === 'unrelated_query' || toolUsed === 'general_chat') {
-      replyText = `- ไม่พบข้อมูลตามเงื่อนไขที่ค้นหาค่ะ`;
-    } else if (toolUsed === 'unsupported_slip_guardrail' || toolUsed === 'vip_customer_guardrail') {
+  // Tool-specific Response Formatter Overrides
+  if (toolUsed === 'general_chat') {
+    // Preserve LLM's natural, witty, and polite response for chit-chat / out-of-scope questions!
+    if (!replyText || replyText.includes('ขออภัยค่ะ ระบบไม่สามารถประมวลผล')) {
+      replyText = `สวัสดีค่ะ มิกะเป็น AI ผู้ช่วยวิเคราะห์ข้อมูลแชตและสถิติระบบหลังบ้านค่ะ ในระบบจะเน้นข้อมูลแชต สถิติลูกค้า และรายงานปัญหาของระบบหลังบ้านนะคะ หากต้องการให้มิกะช่วยตรวจสอบเรื่องใด ถามได้เลยค่ะ 😊`;
+    }
+  } else if (toolUsed === 'query_knowledge_base') {
+    if (fetchedData && fetchedData.formatted_sop_thai) {
+      replyText = fetchedData.formatted_sop_thai;
+    }
+  } else if (toolUsed === 'unsupported_slip_guardrail' || toolUsed === 'vip_customer_guardrail') {
       replyText = fetchedData.guardrail_reply;
     } else if (toolUsed === 'query_priority_drilldown') {
       replyText = fetchedData.priority_drilldown_summary_thai;
@@ -949,21 +1075,14 @@ Provide a clean, executive, line-by-line bulleted Thai response for the Admin:`;
 
     if (toolUsed === 'query_chat_analytics') {
       const isSpecificInquiry = targetCategories.length > 0;
+      const categories = await getCachedCategories(companyId);
       
       if (isSpecificInquiry && fetchedData) {
         // Build specific category response
         const catKeys = targetCategories;
         const matchedSpecificList = (fetchedData.matched_issues_list || []).filter(iss => catKeys.some(ck => (iss.category_id || '').includes(ck) || ck.includes(iss.category_id || '')));
         
-        const catNameTH = catKeys.includes('access_blocked') ? 'เข้าหน้าเว็บไม่ได้/ลิงก์เสีย' :
-                          catKeys.includes('login_issue') ? 'ปัญหาการเข้าสู่ระบบ' :
-                          catKeys.includes('deposit_withdrawal') ? 'การฝาก-ถอนเงิน' :
-                          catKeys.includes('page_load_freeze') ? 'หน้าเว็บค้าง/โหลดช้า' :
-                          catKeys.includes('ui_rendering_issue') ? 'การแสดงผลผิดเพี้ยน' :
-                          catKeys.includes('notification_issue') ? 'ปัญหาการแจ้งเตือน' :
-                          catKeys.includes('game_issue') ? 'ปัญหาการเล่นเกม' :
-                          catKeys.includes('feedback_complaint') ? 'ข้อเสนอแนะและร้องเรียน (ร้องเรียนแอดมิน)' :
-                          catKeys.includes('interaction_lag') ? 'กดปุ่มแล้วไม่ตอบสนอง' : 'ปัญหาที่ระบุ';
+        const catNameTH = catKeys.map(ck => getCategoryDisplayName(ck, categories)).join(' / ') || 'ปัญหาที่ระบุ';
 
         const isExplicitChatListRequest = lower.includes('c_k:') || lower.includes('ดูแชตหมวด') || lower.includes('ขอรายการ') || lower.includes('มีแชตไหนบ้าง') || lower.includes('มีแชทไหนบ้าง') || lower.includes('ขอรายละเอียด') || lower.includes('ดูแชต') || lower.includes('ดูแชท') || lower.includes('รายการแชต') || lower.includes('ขอไฟล์') || lower.includes('excel') || isTier3Drilldown || isTier2CategoryList || (requestedIndex !== null);
 
@@ -996,34 +1115,12 @@ Provide a clean, executive, line-by-line bulleted Thai response for the Admin:`;
           (fetchedData.matched_issues_list || []).filter(iss => catKeys.includes(iss.category_id)) :
           (fetchedData.matched_issues_list || []);
 
-        const catTHMap = {
-          'deposit_withdrawal': 'การฝาก-ถอนเงิน',
-          'login_issue': 'ปัญหาการเข้าสู่ระบบ',
-          'access_blocked': 'เข้าหน้าเว็บไม่ได้/ลิงก์เสีย',
-          'account_security': 'ความปลอดภัยของบัญชี',
-          'api_error': 'ข้อผิดพลาดระบบ API',
-          'device_compatibility': 'ปัญหาเบราว์เซอร์/อุปกรณ์',
-          'feature_request': 'ขอเพิ่มฟีเจอร์',
-          'feedback_complaint': 'ข้อเสนอแนะและร้องเรียน',
-          'game_issue': 'ปัญหาการเล่นเกม',
-          'interaction_lag': 'กดปุ่มแล้วไม่ตอบสนอง',
-          'notification_issue': 'ปัญหาการแจ้งเตือน',
-          'page_load_freeze': 'หน้าเว็บค้าง/โหลดช้า',
-          'payment_gateway': 'ระบบการชำระเงิน/ธนาคาร',
-          'performance_issue': 'ประสิทธิภาพระบบช้า',
-          'promo_bonus': 'โปรโมชั่นและโบนัส',
-          'registration': 'การสมัครสมาชิก',
-          'ui_rendering_issue': 'การแสดงผลผิดเพี้ยน',
-          'vip_privilege': 'สิทธิประโยชน์ระดับ VIP',
-          'other': 'เรื่องอื่นๆ'
-        };
-
         const rawCat = catKeys[0] || (filteredList[0] ? filteredList[0].category_id : 'รายละเอียดปัญหา');
-        const mainCatName = catTHMap[rawCat] || rawCat || 'รายละเอียดปัญหา';
+        const mainCatName = getCategoryDisplayName(rawCat, categories) || 'รายละเอียดปัญหา';
 
         const exportItems = filteredList.map(item => ({
           ...item,
-          category_name: catTHMap[item.category_id] || item.category_id || mainCatName
+          category_name: getCategoryDisplayName(item.category_id, categories) || mainCatName
         }));
 
         if (exportItems.length > 20) {
@@ -1040,15 +1137,19 @@ Provide a clean, executive, line-by-line bulleted Thai response for the Admin:`;
         replyText = fetchedData.tier2_category_list;
       } else if (isTopProblemCategoryQuery && fetchedData) {
         const topCatList = fetchedData.sorted_categories_list || [];
-        const topCatName = topCatList[0] ? topCatList[0].name : 'หน้าเว็บค้าง/โหลดช้า';
-        const topCatCount = topCatList[0] ? topCatList[0].count : 16;
-        const topCatPct = topCatList[0] ? topCatList[0].pct : 20;
+        if (topCatList.length === 0 || (fetchedData.matched_issues_count || 0) === 0) {
+          replyText = `🏆 **ปัญหาที่ลูกค้าแจ้งเข้ามามากที่สุด (${scanLabel}):**\n\n🟢 ไม่พบรายงานปัญหาเข้ามาในระบบใน${scanLabel}ค่ะ (0 กรณี)\n\nระบบทำงานได้อย่างราบรื่นตามปกติค่ะ ✨`;
+        } else {
+          const topCatName = topCatList[0] ? topCatList[0].name : 'ประเด็นทั่วไป';
+          const topCatCount = topCatList[0] ? topCatList[0].count : 0;
+          const topCatPct = topCatList[0] ? topCatList[0].pct : 0;
 
-        replyText = `🏆 **ปัญหาที่ลูกค้าแจ้งเข้ามามากที่สุด (${scanLabel}):**\n\n` +
-          `🥇 **อันดับ 1: ${topCatName}** - **${topCatCount} กรณี** (คิดเป็น **${topCatPct}%** ของปัญหาทั้งหมดใน${scanLabel})\n\n` +
-          `📌 **หมวดหมู่ปัญหาที่พบมากที่สุดตามลำดับ:**\n` +
-          `${fetchedData.overall_top_categories_text || ''}\n\n` +
-          `📊 *ข้อมูลจากปัญหาแชตทั้งหมดใน${scanLabel}: ${fetchedData.matched_issues_count || 0} กรณี (${fetchedData.matched_chats_count || 0} แชต)*`;
+          replyText = `🏆 **ปัญหาที่ลูกค้าแจ้งเข้ามามากที่สุด (${scanLabel}):**\n\n` +
+            `🥇 **อันดับ 1: ${topCatName}** - **${topCatCount} กรณี** (คิดเป็น **${topCatPct}%** ของปัญหาทั้งหมดใน${scanLabel})\n\n` +
+            `📌 **หมวดหมู่ปัญหาที่พบมากที่สุดตามลำดับ:**\n` +
+            `${fetchedData.overall_top_categories_text || ''}\n\n` +
+            `📊 *ข้อมูลจากปัญหาแชตทั้งหมดใน${scanLabel}: ${fetchedData.matched_issues_count || 0} กรณี (${fetchedData.matched_chats_count || 0} แชต)*`;
+        }
       } else if (fetchedData && fetchedData.executive_summary_formatted_thai) {
         replyText = fetchedData.executive_summary_formatted_thai;
       }
@@ -1061,31 +1162,16 @@ Provide a clean, executive, line-by-line bulleted Thai response for the Admin:`;
         const currentPeriod = scanPeriodType || (days === 1 ? 'today' : 'this_month');
 
         if (catNames.length > 0) {
-          const catNameToKeyMap = {
-            'ฝาก-ถอน': 'deposit_withdrawal',
-            'ปัญหาการเข้าสู่ระบบ': 'login_issue',
-            'เข้าหน้าเว็บไม่ได้/ลิงก์เสีย': 'access_blocked',
-            'ความปลอดภัยของบัญชี': 'account_security',
-            'ข้อผิดพลาดระบบ API': 'api_error',
-            'ปัญหาเบราว์เซอร์/อุปกรณ์': 'device_compatibility',
-            'ขอเพิ่มฟีเจอร์': 'feature_request',
-            'ข้อเสนอแนะและร้องเรียน': 'feedback_complaint',
-            'ปัญหาการเล่นเกม': 'game_issue',
-            'กดปุ่มแล้วไม่ตอบสนอง': 'interaction_lag',
-            'ปัญหาการแจ้งเตือน': 'notification_issue',
-            'หน้าเว็บค้าง/โหลดช้า': 'page_load_freeze',
-            'ระบบการชำระเงิน/ธนาคาร': 'payment_gateway',
-            'ประสิทธิภาพระบบช้า': 'performance_issue',
-            'โปรโมชั่นและโบนัส': 'promo_bonus',
-            'การสมัครสมาชิก': 'registration',
-            'การแสดงผลผิดเพี้ยน': 'ui_rendering_issue',
-            'สิทธิประโยชน์ระดับ VIP': 'vip_privilege',
-            'สิทธิประโยชน์ระดับ VIP (VIP Privileges)': 'vip_privilege',
-            'ไม่ใช่ปัญหา': 'other'
+          const companyCategories = await getCachedCategories(companyId);
+          const resolveKey = (name, defaultKey) => {
+            if (!name) return defaultKey;
+            const matched = findCategoryKeysByName(name, companyCategories);
+            if (matched && matched.length > 0) return matched[0];
+            return defaultKey;
           };
 
-          const key0 = catNameToKeyMap[catNames[0]] || 'cat_1';
-          const key1 = catNameToKeyMap[catNames[1]] || 'cat_2';
+          const key0 = resolveKey(catNames[0], 'cat_1');
+          const key1 = resolveKey(catNames[1], 'cat_2');
 
           responseButtons = [];
           const btnRow1 = [];
@@ -1096,7 +1182,7 @@ Provide a clean, executive, line-by-line bulleted Thai response for the Admin:`;
           const btnRow2 = [];
           btnRow2.push({ text: `⏰ ดูช่วงเวลาหนาแน่น`, callback_data: `drill_hourly:${currentPeriod}` });
           if (days === 1) {
-            btnRow2.push({ text: `📊 สรุปเดือนสิงหาคม`, callback_data: `query_this_month` });
+            btnRow2.push({ text: `📊 สรุปเดือนนี้ (${curMonthName})`, callback_data: `query_this_month` });
           } else {
             btnRow2.push({ text: `📅 สรุปวันนี้`, callback_data: `query_today` });
           }
@@ -1126,8 +1212,8 @@ Provide a clean, executive, line-by-line bulleted Thai response for the Admin:`;
     let auditResult = auditAnswerRelevancy(userQuery, replyText, toolUsed, fetchedData);
     let confidence = auditResult.confidence;
 
-    // Trigger Autonomous Dynamic SQL Recovery Engine if Confidence < 7 or Relevancy Flagged
-    if (!auditResult.isRelevant || confidence < 7) {
+    // Trigger Autonomous Dynamic SQL Recovery Engine if Confidence < 7 or Relevancy Flagged (for DB queries only)
+    if ((!auditResult.isRelevant || confidence < 7) && toolUsed !== 'query_knowledge_base' && toolUsed !== 'general_chat') {
       console.warn(`⚠️ [Audit Layer Alert] Low confidence (${confidence}/10) or query/response mismatch detected. Activating Autonomous SQL Recovery Engine...`);
       try {
         const recoveryResult = await autonomousSqlRecovery(userQuery, companyId, auditResult);
