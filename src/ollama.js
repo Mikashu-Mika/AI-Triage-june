@@ -150,11 +150,17 @@ CORE PRINCIPLE 1: ATOMIC MULTI-ISSUE EXTRACTION (STRICT CATEGORY SEPARATION)
 - NEVER combine sentences belonging to DIFFERENT categories into the same issue object!
 - Do NOT join sentences across different categories with " / ".
 - Sentences may ONLY be joined with " / " if they describe the exact same symptom and map to the exact same category_id.
-- Example: If a customer reports page loading slow, image missing, button unresponsive, and cart freezing:
+- Example 1 (Performance & UI):
   - "หน้าเว็บโหลดช้า" -> Category matching loading delay (e.g., page_load_freeze) (Issue 1)
   - "รูปสินค้าไม่ขึ้น" -> Category matching graphics/UI (e.g., ui_rendering_issue) (Issue 2)
   - "ปุ่มไม่ตอบสนอง" -> Category matching button/interaction lag (e.g., interaction_lag) (Issue 3)
   - "พอเพิ่มลงตะกร้าหน้าจอก็ค้าง" -> Category matching freeze/hang (e.g., page_load_freeze) (Issue 4)
+
+- Example 2 (Login, Alerts & Account Security Separation):
+  - "ระบบบอกว่า Session หมดอายุ" / "พอล็อกอินใหม่ก็ถูกเด้งออกอีก" / "ลองเปลี่ยนรหัสผ่านแล้วก็ยังเข้าไม่ได้" -> Category matching login failures (e.g., login_issue) (Urgency: high, Dept: Support)
+  - "ก่อนหน้านี้ผมได้รับอีเมลแจ้งว่ามีการเปลี่ยนข้อมูลบัญชี" -> Category matching notifications/alerts (e.g., notification_issue) (Urgency: low/medium, Dept: Support)
+  - "แต่ผมไม่ได้เป็นคนเปลี่ยนครับ" / "ตอนนี้ผมกังวลว่าบัญชีอาจมีปัญหา" -> Category matching account security / unauthorized actions / suspected compromise (e.g., account_security) (Urgency: high/urgent, Dept: Support)
+  - "ผมเข้า Account เพื่อเช็คออเดอร์ครับ" -> Category matching general user actions/inquiry (e.g., other) (Urgency: low, Dept: Support)
   You MUST output SEPARATE issue objects for different categories! NEVER bundle them into a single string under one category!
 
 CORE PRINCIPLE 2: QUESTIONS & INQUIRIES ARE NOT PROBLEMS (คำถาม/ข้อสงสัย ไม่ใช่ปัญหา)
@@ -174,7 +180,17 @@ CORE PRINCIPLE 3: CUSTOMER FEEDBACK & COMPLAINTS vs TECHNICAL BUGS (การบ
   * Classify under "feedback_complaint" (ข้อเสนอแนะและร้องเรียน) or "other", with urgency: "low" or "medium", and department: "Support".
   * NEVER route to "Developer" or classify as "game_issue"!
 
-CORE PRINCIPLE 4: TOP-LEVEL CATEGORY & PRIORITY
+CORE PRINCIPLE 4: ACCOUNT SECURITY & UNAUTHORIZED ACTIONS vs OTHER (ความปลอดภัยบัญชี)
+- When a customer reports that account info was altered without their authorization (e.g. "แต่ผมไม่ได้เป็นคนเปลี่ยนครับ", "ไม่ได้ทำรายการเอง", "ไม่ได้กดเปลี่ยน", "สงสัยว่าโดนแฮก", "กังวลว่าบัญชีอาจมีปัญหา/โดนแฮก", "มีคนอื่นเข้าใช้"):
+  * This is an urgent SECURITY INCIDENT, NOT user context, NOT inquiry, and NEVER "other"!
+  * You MUST classify under "account_security" (ความปลอดภัยของบัญชี), with urgency: "high" (or "urgent"), priority: "high", department: "Support".
+
+CORE PRINCIPLE 5: NOTIFICATIONS & EMAIL ALERTS vs OTHER (การแจ้งเตือนและอีเมล)
+- When a customer mentions notifications, alerts, or emails received unexpectedly (e.g. "ก่อนหน้านี้ผมได้รับอีเมลแจ้งว่ามีการเปลี่ยนข้อมูลบัญชี", "ได้รับ SMS แจ้งเตือน", "มีแจ้งเตือนขึ้นมา") OR missing notifications (e.g. "ไม่ได้รับ OTP", "ไม่ได้รับอีเมล", "OTP ไม่ส่ง"):
+  * You MUST classify under "notification_issue" (ปัญหาการแจ้งเตือน), department: "Support".
+  * NEVER classify notification or email alert statements under "other"!
+
+CORE PRINCIPLE 6: TOP-LEVEL CATEGORY & PRIORITY
 - The top-level "category_id" of the JSON must represent the PRIMARY / HIGHEST SEVERITY system defect that blocks or impacts the user.
 - If the chat contains ONLY inquiries, questions, context, or non-problems, the top-level "category_id" MUST be "other" (or "feedback_complaint" if venting), and priority MUST be "low".
 - Set top-level "priority" and "urgency" matching the highest severity issue found.
@@ -200,7 +216,9 @@ The JSON object must have exactly these keys:
   - "issue_no": Integer (1, 2, ...).
   - "problem_summary": The verbatim sentence from the customer belonging strictly to this single category.
   - "category_id": The exact category ID for this specific issue from the available list:
-    * For user context / actions (e.g. "ผมกำลังเลือกน้ำหอมอยู่ครับ"), greetings, or recovery status ("รีเฟรชแล้วกลับมาใช้งานได้ครับ"), you MUST use category_id "other" (เรื่องอื่นๆ / ไม่ใช่ปัญหา).
+    * For user context / actions (e.g. "ผมกำลังเลือกน้ำหอมอยู่ครับ", "ผมเข้า Account เพื่อเช็คออเดอร์ครับ"), greetings, or recovery status ("รีเฟรชแล้วกลับมาใช้งานได้ครับ"), you MUST use category_id "other" (เรื่องอื่นๆ / ไม่ใช่ปัญหา).
+    * For account security concerns / unauthorized changes ("แต่ผมไม่ได้เป็นคนเปลี่ยนครับ", "ตอนนี้ผมกังวลว่าบัญชีอาจมีปัญหา"), you MUST use category_id "account_security".
+    * For notification / email notices received or missing ("ก่อนหน้านี้ผมได้รับอีเมลแจ้งว่ามีการเปลี่ยนข้อมูลบัญชี"), you MUST use category_id "notification_issue".
     * For defect statements, use the category matching the symptom.
   - "urgency": Urgency for this specific issue ("low", "medium", "high", "urgent"). For "other"/non-problem, use "low".
   - "department": Department for this specific issue ("Support", "Developer", "Finance", etc.). For "other", use "Support".
