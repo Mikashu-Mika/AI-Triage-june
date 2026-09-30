@@ -42,17 +42,30 @@ async function processTriageQueue() {
   }
 }
 
-// Auto-enqueue any orphaned pending chats OR chats missing category_id from database on startup
+// Auto-enqueue any un-triaged or incomplete chats from database on startup
 (async () => {
   try {
     const { data: orphaned } = await supabase
       .from('chats')
       .select('id')
-      .or('status.eq.pending,category_id.is.null');
+      .or('status.eq.pending,category_id.is.null,embedding.is.null');
 
-    if (orphaned && orphaned.length > 0) {
-      console.log(`[Queue] Found ${orphaned.length} orphaned/un-triaged chats in database on startup. Auto-enqueueing...`);
-      orphaned.forEach(c => enqueueTriage(c.id));
+    // Also check recent chats that have 0 issues in chat_issues
+    const { data: allRecent } = await supabase
+      .from('chats')
+      .select('id, chat_issues(id)')
+      .order('created_at', { ascending: false })
+      .limit(100);
+
+    const missingIssues = (allRecent || []).filter(c => !c.chat_issues || c.chat_issues.length === 0);
+    const toEnqueue = new Set([
+      ...(orphaned || []).map(c => c.id),
+      ...missingIssues.map(c => c.id)
+    ]);
+
+    if (toEnqueue.size > 0) {
+      console.log(`[Queue] Found ${toEnqueue.size} un-triaged or incomplete chats in database on startup. Auto-enqueueing...`);
+      toEnqueue.forEach(id => enqueueTriage(id));
     }
   } catch (err) {
     console.error('Failed to auto-enqueue un-triaged chats on startup:', err.message);
@@ -347,6 +360,36 @@ app.post('/api/chats/ingest', authCompany, async (req, res) => {
 
     res.json({ message: 'Chat ingested successfully and queued for real-time AI Triage', data });
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// REST API: Trigger on-demand AI Triage for a single chat (Dynamic Real-time Triage)
+app.post('/api/chats/:id/triage', async (req, res) => {
+  const { id } = req.params;
+  if (!id) {
+    return res.status(400).json({ error: 'Missing parameter: id is required' });
+  }
+  try {
+    console.log(`[API] Triggering on-demand triage for chat: ${id}...`);
+    await processSingleChat(id);
+
+    // Fetch updated chat and relational issues
+    const { data: updatedChat, error: chatErr } = await supabase
+      .from('chats')
+      .select('*, chat_issues(*)')
+      .eq('id', id)
+      .single();
+
+    if (chatErr) throw chatErr;
+
+    res.json({
+      message: `Chat ${id} triaged successfully by AI (Qwen 2.5 + BGE-M3)`,
+      chat: updatedChat,
+      issues: updatedChat.chat_issues || []
+    });
+  } catch (error) {
+    console.error(`[API] On-demand triage failed for ${id}:`, error.message);
     res.status(500).json({ error: error.message });
   }
 });
