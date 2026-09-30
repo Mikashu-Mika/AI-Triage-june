@@ -281,7 +281,7 @@ export async function saveChatIssues(chatId, issues) {
     priority: issue.urgency || issue.priority || 'medium',
     department: issue.department || 'Support',
     summary: issue.problem_summary || issue.summary || 'ไม่มีบทสรุป',
-    recommended_reply: issue.recommended_reply || ''
+    recommended_reply: ''
   }));
 
   const { error: insError } = await supabase
