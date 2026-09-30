@@ -183,15 +183,19 @@ CRITICAL RULE ON NOTIFICATION ISSUES VS LOGIN ISSUES:
   1. Issue A: "ลืมรหัสผ่าน/บัญชีถูกล็อก" -> category_id: "login_issue"
   2. Issue B: "ไม่ได้รับ OTP ทางอีเมลและ SMS" -> category_id: "notification_issue"
 
-1. Normal Requests & General Inquiries (e.g. asking for bank account "ขอบช", asking to make a normal deposit "ฝากตัง", asking to change bank account details "เปลี่ยนบัญชี"/"ขอเปลี่ยนเลขบัญชี" without errors, asking to help register "สมัครให้หน่อย"/"ขอลิงก์สมัคร" without errors, asking how referral works "แนะนำเพื่อนได้อะไร", asking for promo codes / claiming normal benefits "ขอโบนัสไทม์", asking for free credit "เครดิตฟรีมีไหม", "มีโปรอะไรบ้าง", "ขอเครดิตฟรี" without errors):
-   - These are NOT problems!
+1. Normal Requests, Questions & General Inquiries (e.g. asking about transaction duration "ถอนใช้เวลากี่นาที", "ฝากถอนใช้เวลานานไหม", "กี่นาทีเงินเข้า", asking system status "ฝากถอนได้ไหมตอนนี้", "ระบบเปิดอยู่ไหม", "ระบบปิดปรับปรุงไหม", asking for bank account "ขอบช", asking about registration benefits "สมัครใหม่ได้อะไร", asking about turnover conditions "โบนัสทำเทิร์นด้วยหรอ", asking to make a normal deposit "ฝากตัง", asking to change bank account details "เปลี่ยนบัญชี"/"ขอเปลี่ยนเลขบัญชี" without errors, asking to help register "สมัครให้หน่อย"/"ขอลิงก์สมัคร" without errors, asking how referral works "แนะนำเพื่อนได้อะไร", asking for promo codes / claiming normal benefits "ขอโบนัสไทม์", asking for free credit "เครดิตฟรีมีไหม", "มีโปรอะไรบ้าง", "ขอเครดิตฟรี" without errors):
+   - These are QUESTIONS and INQUIRIES, NOT SYSTEM PROBLEMS! (คำถามทั่วไป/ไม่ใช่ปัญหา)
    - You MUST classify these as "other" (หมวดหมู่อื่นๆ / ไม่ใช่ปัญหา). Do NOT classify them under "deposit_withdrawal", "login_issue", "registration", "account_security", or "promo_bonus" because those categories are strictly reserved for actual SYSTEM/FINANCIAL ISSUES, ERRORS, PROCESS FAILURES, OR SECURITY HACKS/THREATS.
-   - For example, "สมัครให้หน่อย" is a request for registration assistance (other), whereas "สมัครสมาชิกไม่ได้" is a registration failure (registration). "เปลี่ยนบัญชี" is a standard request to update bank account info (other), whereas "ใครมาเปลี่ยนรหัสผ่าน" is a security incident (account_security).
+   - Specifically:
+     - "ถอนใช้เวลากี่นาที" / "ฝากถอนได้ไหมตอนนี้" -> "other" (General Inquiry about banking/FAQ), Priority: "low", Urgency: "low", Department: "Support"
+     - "สมัครใหม่ได้อะไร" -> "other" (General Inquiry / Registration FAQ), Priority: "low", Urgency: "low", Department: "Support"
+     - "โบนัสทำเทิร์นด้วยหรอ" -> "other" (General Inquiry about bonus terms), Priority: "low", Urgency: "low", Department: "Support"
+     - "เกมที่แนะนำมาไม่เห็นแตกเลย มีแต่กินเอา" -> This is customer feedback/complaint about game luck (บ่นเรื่องเกม/ไม่แตก), NOT a broken system. Classify as "feedback_complaint" or "game_issue", Priority: "medium" or "low", Department: "Support"
    - Set "resolution" to "Solved" (because it is a standard inquiry that can be replied immediately without technical action).
    - Set "urgency" to "low" and "priority" to "low".
    - Set "business_impact" to "None" and "business_impact_score" to 0.0.
    - Set "department" to "Support".
-   - Set "root_cause" to "None (General Inquiry / Standard Request)".
+   - Set "root_cause" to "None (General Inquiry / FAQ / Standard Question)".
 
 2. Actual System Issues & Failures (e.g. promo errors "แนะนำเพื่อนแล้วไม่ได้รางวัลหรือเครดิตเพิ่มเติม", "ทำไมซื้อของแล้วแต้มสะสมไม่ขึ้น", "ทำไมถึงไม่ได้สิทธิ์แลกสินค้าฟรี", deposit delays "โอนเงินแล้วยอดไม่ขึ้น", withdrawal delays "ถอนเงินช้ามากครึ่งชั่วโมงแล้ว", access errors "เข้าสู่ระบบไม่ได้", "เว็บค้างหน้าดาวน์โหลด"):
    - These are actual issues!
