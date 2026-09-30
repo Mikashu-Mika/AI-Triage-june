@@ -109,10 +109,15 @@ export async function runTriagePipeline(companyId) {
 
       // Step 3e: Save multi-issue breakdown to chat_issues table
       console.log(`- Saving relational multi-issue breakdown to Supabase...`);
-      const normalizedIssues = (triage.detected_issues || []).map(iss => ({
-        ...iss,
-        category_id: normalizeCategoryId(iss.category_id, categories)
+      let normalizedIssues = (triage.detected_issues || []).map(iss => ({
+        chat_id: chat.id,
+        category_id: normalizeCategoryId(iss.category_id, categories),
+        priority: iss.urgency || iss.priority || triage.priority || 'medium',
+        department: iss.department || triage.department || 'Support',
+        summary: iss.problem_summary || iss.summary || triage.summary || 'ไม่มีบทสรุป',
+        recommended_reply: iss.recommended_reply || triage.recommended_reply || ''
       }));
+      normalizedIssues = await ensureCompleteSentenceCoverage(chat.conversation, normalizedIssues, categories, chat.id);
       await saveChatIssues(chat.id, normalizedIssues);
 
       console.log(`Chat ${chat.id} processed successfully!`);
@@ -198,9 +203,66 @@ export async function classifySentenceSemantic(text, categories = [], mainCatego
     console.warn(`Vector semantic matching error for "${cleanText}":`, err.message);
   }
 
-  return { category_id: mainCategory || 'other', similarity: 0, source: 'Contextual Fallback' };
+  // Safe dynamic fallback to company's 'other' category for non-matching or general sentences
+  const otherCat = categories.find(c => c.id.endsWith(':other') || c.id === 'other');
+  return { category_id: otherCat ? otherCat.id : 'other', similarity: 0, source: 'Dynamic Non-Problem Fallback' };
 }
 
+/**
+ * Ensures all individual customer lines from the conversation are represented in chat_issues.
+ * If the LLM omitted non-problem context (e.g. "ผมกำลังเลือกน้ำหอมอยู่ครับ" or "รีเฟรชแล้วกลับมาใช้งานได้ครับ"),
+ * this automatically adds them with category_id 'other' and priority 'low' so the frontend modal
+ * doesn't trigger its fallback and misclassify them as technical defects.
+ */
+export async function ensureCompleteSentenceCoverage(conversation, detectedIssues, categories, chatId) {
+  if (!conversation) return detectedIssues || [];
+
+  // Extract individual customer lines
+  const lines = conversation
+    .split('\n')
+    .map(line => line.replace(/^(ลูกค้า|ผู้ใช้|แอดมิน|เจ้าหน้าที่|User|Customer|Admin):\s*/i, '').trim())
+    .filter(line => line.length > 0);
+
+  const finalIssues = [...(detectedIssues || [])];
+  const otherCatObj = categories.find(c => c.id.endsWith(':other') || c.id === 'other');
+  const otherCatId = otherCatObj ? otherCatObj.id : 'other';
+
+  for (const line of lines) {
+    // Check if this line is already represented in any existing issue summary
+    const isCovered = finalIssues.some(iss => {
+      const s = (iss.summary || '').toLowerCase();
+      const l = line.toLowerCase();
+      return s.includes(l) || l.includes(s);
+    });
+
+    if (!isCovered) {
+      console.log(`- Missing line from LLM detected_issues: "${line}". Adding dynamic coverage...`);
+      // Classify missing line dynamically using vector similarity
+      const semanticMatch = await classifySentenceSemantic(line, categories, otherCatId);
+      const isOther = semanticMatch.category_id === otherCatId || semanticMatch.category_id.endsWith(':other');
+      
+      finalIssues.push({
+        chat_id: chatId,
+        category_id: semanticMatch.category_id || otherCatId,
+        priority: isOther ? 'low' : 'medium',
+        department: isOther ? 'Support' : 'Developer',
+        summary: line,
+        recommended_reply: ''
+      });
+    }
+  }
+
+  // Preserve line order matching the conversation
+  finalIssues.sort((a, b) => {
+    const idxA = lines.findIndex(l => (a.summary || '').includes(l) || l.includes(a.summary || ''));
+    const idxB = lines.findIndex(l => (b.summary || '').includes(l) || l.includes(b.summary || ''));
+    if (idxA === -1) return 1;
+    if (idxB === -1) return -1;
+    return idxA - idxB;
+  });
+
+  return finalIssues;
+}
 
 /**
  * Process a single chat session through the triage pipeline.
@@ -288,10 +350,10 @@ export async function processSingleChat(chatId) {
         priority: triage.priority || 'medium',
         department: triage.department || 'Support',
         summary: triage.summary || 'ไม่มีบทสรุป',
-        recommended_reply: triage.recommended_reply || ''
       }];
     }
 
+    normalizedFinalIssues = await ensureCompleteSentenceCoverage(chat.conversation, normalizedFinalIssues, categories, chat.id);
     await saveChatIssues(chat.id, normalizedFinalIssues);
 
     // Output detailed audit log for full transparency
@@ -335,9 +397,6 @@ function formatMultiIssuesRecommendation(triage, baseRec) {
       breakdown += `- **เรื่องที่ ${issue.issue_no || 1}:** ${issue.problem_summary || ''}\n`;
       breakdown += `  - หมวดหมู่: ${issue.category_id || 'อื่นๆ'}\n`;
       breakdown += `  - แผนก: ${issue.department || 'Support'} (ความเร่งด่วน: ${issue.urgency || 'low'})\n`;
-      if (issue.recommended_reply) {
-        breakdown += `  - แนะนำบทสนทนาตอบลูกค้า: "${issue.recommended_reply}"\n`;
-      }
     });
     recommendation += breakdown;
   }
