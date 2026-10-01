@@ -23,6 +23,8 @@ function enqueueTriage(chatId) {
   if (!triageQueue.includes(chatId)) {
     triageQueue.push(chatId);
   }
+  // Safeguard: Ensure chat is marked 'pending' in database while waiting in queue
+  supabase.from('chats').update({ status: 'pending' }).eq('id', chatId).then();
   processTriageQueue();
 }
 
@@ -65,6 +67,12 @@ async function processTriageQueue() {
 
     if (toEnqueue.size > 0) {
       console.log(`[Queue] Found ${toEnqueue.size} un-triaged or incomplete chats in database on startup. Auto-enqueueing...`);
+      // Safeguard: Ensure un-triaged chats show as 'pending' so admins know they are awaiting AI triage
+      await supabase
+        .from('chats')
+        .update({ status: 'pending' })
+        .in('id', Array.from(toEnqueue));
+
       toEnqueue.forEach(id => enqueueTriage(id));
     }
   } catch (err) {
