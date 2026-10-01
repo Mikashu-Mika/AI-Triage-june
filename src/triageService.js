@@ -175,6 +175,31 @@ export async function classifySentenceSemantic(text, categories = [], mainCatego
     return { category_id: otherCat ? otherCat.id : 'other', similarity: 1.0, source: 'Greeting Filter' };
   }
 
+  // General user actions or shopping context (e.g. "กำลังจะซื้อ...", "กำลังเลือก...", "กำลังดู...") -> assign to other
+  const isShoppingContext = /^(ผม|ดิฉัน|หนู)?\s*(กำลัง|จะ|กำลังจะ|ลอง)\s*(ซื้อ|เลือก|ดู|หา|สั่งซื้อ)/i.test(cleanText);
+  if (isShoppingContext) {
+    const otherCat = categories.find(c => c.id.endsWith(':other') || c.id === 'other');
+    return { category_id: otherCat ? otherCat.id : 'other', similarity: 1.0, source: 'Context Filter' };
+  }
+
+  // Button response lag / multiple clicks (e.g. "พอกดหลายครั้งระบบถึงเลือกให้", "กดหลายทีกว่าจะไป") -> assign to interaction_lag
+  const isButtonLag = /(กดหลายครั้ง|กดซ้ำ|กดแล้วไม่ไป|ปุ่มไม่ตอบสนอง|ระบบถึงเลือกให้|กว่าจะเลือกได้|กว่าจะติด)/i.test(cleanText);
+  if (isButtonLag) {
+    const lagCat = categories.find(c => c.id.endsWith(':interaction_lag') || c.id === 'interaction_lag');
+    if (lagCat) {
+      return { category_id: lagCat.id, similarity: 1.0, source: 'Button Lag Rule' };
+    }
+  }
+
+  // Refresh page / display update (e.g. "ต้องรีเฟรชหน้าถึงจะเห็น...") -> assign to page_load_freeze or ui_rendering_issue
+  const isRefreshIssue = /(รีเฟรช|refresh).*(ถึงจะเห็น|ถึงจะขึ้น|ถึงจะอัปเดต)/i.test(cleanText);
+  if (isRefreshIssue) {
+    const freezeCat = categories.find(c => c.id.endsWith(':page_load_freeze') || c.id === 'page_load_freeze');
+    if (freezeCat) {
+      return { category_id: freezeCat.id, similarity: 1.0, source: 'Refresh Display Rule' };
+    }
+  }
+
   try {
     // Generate embedding for the sentence using local BGE-M3 model
     const sentenceVector = await getEmbedding(cleanText);
@@ -192,7 +217,8 @@ export async function classifySentenceSemantic(text, categories = [], mainCatego
       })
       .sort((a, b) => b.similarity - a.similarity);
 
-    if (scoredCategories.length > 0 && scoredCategories[0].similarity >= 0.50) {
+    // Require high semantic confidence (>= 0.68) to prevent false positives from generic words
+    if (scoredCategories.length > 0 && scoredCategories[0].similarity >= 0.68) {
       return {
         category_id: scoredCategories[0].category_id,
         similarity: scoredCategories[0].similarity,
