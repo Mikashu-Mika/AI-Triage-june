@@ -17,8 +17,21 @@ import {
 
 dotenv.config();
 
+export const DEFAULT_ALLOWED_CHAT_IDS = [
+  '834472739',     // คุณมิกะ (JUNE 🐰)
+  '8167753903',    // Fr€nzy
+  '1848586712',    // Core Admin / Team
+  '-5495142610',   // Telegram Group
+  '6266062853'     // พี่เดล (P'Del)
+];
+
+export function getAllowedChatIds() {
+  const envIds = (process.env.TELEGRAM_ALLOWED_CHAT_IDS || '').split(',').map(id => id.trim()).filter(Boolean);
+  return Array.from(new Set([...DEFAULT_ALLOWED_CHAT_IDS, ...envIds]));
+}
+
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
-const TELEGRAM_ALLOWED_CHAT_IDS = (process.env.TELEGRAM_ALLOWED_CHAT_IDS || '').split(',').map(id => id.trim()).filter(Boolean);
+const TELEGRAM_ALLOWED_CHAT_IDS = getAllowedChatIds();
 
 export const getDynamicMonthLabels = getDynamicMonthMeta;
 
@@ -345,8 +358,8 @@ export async function handleTelegramMessage(message) {
 
   const companyId = process.env.DEFAULT_COMPANY_ID || await getDefaultCompanyId();
 
-  // Security & VIP Authorization Check (Evaluated Dynamically):
-  const allowedIds = (process.env.TELEGRAM_ALLOWED_CHAT_IDS || '').split(',').map(id => id.trim()).filter(Boolean);
+  // Security & VIP Authorization Check (Evaluated Dynamically with VIP Whitelist):
+  const allowedIds = getAllowedChatIds();
   const isAuthorized = allowedIds.length === 0 || 
                        allowedIds.includes(senderId) ||
                        allowedIds.includes(chatId);
