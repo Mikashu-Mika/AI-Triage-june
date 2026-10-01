@@ -175,15 +175,15 @@ export async function classifySentenceSemantic(text, categories = [], mainCatego
     return { category_id: otherCat ? otherCat.id : 'other', similarity: 1.0, source: 'Greeting Filter' };
   }
 
-  // General user actions or shopping context (e.g. "กำลังจะซื้อ...", "กำลังเลือก...", "กำลังดู...") -> assign to other
-  const isShoppingContext = /^(ผม|ดิฉัน|หนู)?\s*(กำลัง|จะ|กำลังจะ|ลอง)\s*(ซื้อ|เลือก|ดู|หา|สั่งซื้อ)/i.test(cleanText);
+  // General user actions or shopping context (e.g. "กำลังจะซื้อ...", "กำลังเลือก...", "กำลังสั่ง...") -> assign to other
+  const isShoppingContext = /^(ผม|ดิฉัน|หนู)?\s*(กำลัง|จะ|กำลังจะ|ลอง)\s*(ซื้อ|เลือก|ดู|หา|สั่งซื้อ|สั่ง)/i.test(cleanText);
   if (isShoppingContext) {
     const otherCat = categories.find(c => c.id.endsWith(':other') || c.id === 'other');
     return { category_id: otherCat ? otherCat.id : 'other', similarity: 1.0, source: 'Context Filter' };
   }
 
-  // Button response lag / multiple clicks (e.g. "พอกดหลายครั้งระบบถึงเลือกให้", "กดหลายทีกว่าจะไป") -> assign to interaction_lag
-  const isButtonLag = /(กดหลายครั้ง|กดซ้ำ|กดแล้วไม่ไป|ปุ่มไม่ตอบสนอง|ระบบถึงเลือกให้|กว่าจะเลือกได้|กว่าจะติด)/i.test(cleanText);
+  // Button response lag / multiple clicks / slow response (e.g. "ตอนเลือกไซซ์ก็กดแล้วตอบสนองช้ามาก", "พอกดหลายครั้งระบบถึงเลือกให้", "กดหลายทีกว่าจะไป") -> assign to interaction_lag
+  const isButtonLag = /(กดหลายครั้ง|กดซ้ำ|กดแล้วไม่ไป|ปุ่มไม่ตอบสนอง|ตอบสนองช้า|ไม่ตอบสนอง|ระบบถึงเลือกให้|กว่าจะเลือกได้|กว่าจะติด|กด.*(ช้า|หน่วง|ไม่ไป|ไม่ติด)|ระบบ.*(ช้า|หน่วง))/i.test(cleanText);
   if (isButtonLag) {
     const lagCat = categories.find(c => c.id.endsWith(':interaction_lag') || c.id === 'interaction_lag');
     if (lagCat) {
@@ -235,6 +235,31 @@ export async function classifySentenceSemantic(text, categories = [], mainCatego
 }
 
 /**
+ * Calculate Bigram Dice Coefficient similarity between two strings.
+ */
+function calculateTextSimilarity(str1, str2) {
+  if (!str1 || !str2) return 0;
+  const s1 = str1.toLowerCase().trim();
+  const s2 = str2.toLowerCase().trim();
+  if (s1 === s2 || s1.includes(s2) || s2.includes(s1)) return 1.0;
+  if (s1.length < 2 || s2.length < 2) return 0;
+  const getBigrams = (str) => {
+    const bigrams = new Set();
+    for (let i = 0; i < str.length - 1; i++) {
+      bigrams.add(str.substring(i, i + 2));
+    }
+    return bigrams;
+  };
+  const b1 = getBigrams(s1);
+  const b2 = getBigrams(s2);
+  let intersection = 0;
+  for (const bg of b1) {
+    if (b2.has(bg)) intersection++;
+  }
+  return (2.0 * intersection) / (b1.size + b2.size);
+}
+
+/**
  * Ensures all individual customer lines from the conversation are represented in chat_issues.
  * If the LLM omitted non-problem context (e.g. "ผมกำลังเลือกน้ำหอมอยู่ครับ" or "รีเฟรชแล้วกลับมาใช้งานได้ครับ"),
  * this automatically adds them with category_id 'other' and priority 'low' so the frontend modal
@@ -254,16 +279,20 @@ export async function ensureCompleteSentenceCoverage(conversation, detectedIssue
   const otherCatId = otherCatObj ? otherCatObj.id : 'other';
 
   for (const line of lines) {
-    // Check if this line is already represented in any existing issue summary
-    const isCovered = finalIssues.some(iss => {
+    // Check if this line is already represented in any existing issue summary (exact or paraphrased)
+    let matchingIssue = finalIssues.find(iss => {
       const s = (iss.summary || '').toLowerCase();
       const l = line.toLowerCase();
-      return s.includes(l) || l.includes(s);
+      if (s.includes(l) || l.includes(s)) return true;
+      return calculateTextSimilarity(l, s) >= 0.65;
     });
 
-    if (!isCovered) {
+    if (matchingIssue) {
+      // Synchronize summary to the customer's verbatim text so UI shows exact original wording
+      matchingIssue.summary = line;
+    } else {
       console.log(`- Missing line from LLM detected_issues: "${line}". Adding dynamic coverage...`);
-      // Classify missing line dynamically using vector similarity
+      // Classify missing line dynamically using vector similarity & rule guards
       const semanticMatch = await classifySentenceSemantic(line, categories, otherCatId);
       const isOther = semanticMatch.category_id === otherCatId || semanticMatch.category_id.endsWith(':other');
       
