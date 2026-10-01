@@ -41,7 +41,7 @@ export const CATEGORY_BILINGUAL_MAP = {
   interaction_lag: {
     name_th: 'ระบบการทำงานล่าช้า',
     name_en: 'System Lag',
-    description: 'การตอบสนองช้า, ปุ่มกดไม่ติด, หน่วง, คลิกไม่ไป'
+    description: 'การตอบสนองช้า, ปุ่มกดไม่ติด, หน่วง, คลิกไม่ไป, กดหลายครั้ง, กดหลายทีกว่าจะไป, พอกดหลายครั้งระบบถึงเลือกให้'
   },
   login_issue: {
     name_th: 'ปัญหาระบบเข้าใช้งาน/ล็อกอิน',

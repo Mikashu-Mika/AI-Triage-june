@@ -150,11 +150,14 @@ CORE PRINCIPLE 1: ATOMIC MULTI-ISSUE EXTRACTION (STRICT CATEGORY SEPARATION)
 - NEVER combine sentences belonging to DIFFERENT categories into the same issue object!
 - Do NOT join sentences across different categories with " / ".
 - Sentences may ONLY be joined with " / " if they describe the exact same symptom and map to the exact same category_id.
-- Example 1 (Performance & UI):
-  - "หน้าเว็บโหลดช้า" -> Category matching loading delay (e.g., page_load_freeze) (Issue 1)
-  - "รูปสินค้าไม่ขึ้น" -> Category matching graphics/UI (e.g., ui_rendering_issue) (Issue 2)
-  - "ปุ่มไม่ตอบสนอง" -> Category matching button/interaction lag (e.g., interaction_lag) (Issue 3)
-  - "พอเพิ่มลงตะกร้าหน้าจอก็ค้าง" -> Category matching freeze/hang (e.g., page_load_freeze) (Issue 4)
+- Example 1 (E-Commerce Web Performance & Button Lag):
+  - "ผมกำลังจะซื้อน้ำหอมครับ" -> Category "other" (Context / general action, urgency: "low", Dept: Support)
+  - "หน้าเว็บเปิดได้แต่โหลดรายละเอียดกลิ่นนานมาก" -> Category "page_load_freeze" (Loading delay, urgency: "medium", Dept: Support)
+  - "รูปสินค้าบางรูปไม่ขึ้นครับ" -> Category "ui_rendering_issue" (Graphics / image rendering issue, urgency: "low", Dept: Support)
+  - "กดเลือกขนาด 50ml แล้วปุ่มไม่ตอบสนอง" -> Category "interaction_lag" (Button response lag, urgency: "medium", Dept: Support)
+  - "พอกดหลายครั้งระบบถึงเลือกให้" -> Category "interaction_lag" (Button response lag / delay, urgency: "medium", Dept: Support)
+  - "ผมเพิ่มลงตะกร้าแล้วจำนวนสินค้าไม่อัปเดตทันที" -> Category "page_load_freeze" (Data update / cart freeze, urgency: "medium", Dept: Support)
+  - "ต้องรีเฟรชหน้าถึงจะเห็นจำนวนที่ถูกต้อง" -> Category "ui_rendering_issue" (Display / UI rendering update, urgency: "low", Dept: Support)
 
 - Example 2 (Login, Alerts & Account Security Separation):
   - "ระบบบอกว่า Session หมดอายุ" / "พอล็อกอินใหม่ก็ถูกเด้งออกอีก" / "ลองเปลี่ยนรหัสผ่านแล้วก็ยังเข้าไม่ได้" -> Category matching login failures (e.g., login_issue) (Urgency: high, Dept: Support)
@@ -216,7 +219,8 @@ The JSON object must have exactly these keys:
   - "issue_no": Integer (1, 2, ...).
   - "problem_summary": The verbatim sentence from the customer belonging strictly to this single category.
   - "category_id": The exact category ID for this specific issue from the available list:
-    * For user context / actions (e.g. "ผมกำลังเลือกน้ำหอมอยู่ครับ", "ผมเข้า Account เพื่อเช็คออเดอร์ครับ"), greetings, or recovery status ("รีเฟรชแล้วกลับมาใช้งานได้ครับ"), you MUST use category_id "other" (เรื่องอื่นๆ / ไม่ใช่ปัญหา).
+    * For user context / actions (e.g. "ผมกำลังเลือกน้ำหอมอยู่ครับ", "ผมกำลังจะซื้อน้ำหอมครับ", "ผมเข้า Account เพื่อเช็คออเดอร์ครับ"), greetings, or recovery status ("รีเฟรชแล้วกลับมาใช้งานได้ครับ"), you MUST use category_id "other" (เรื่องอื่นๆ / ไม่ใช่ปัญหา).
+    * For button clicking / response lag (e.g. "กดเลือกขนาด 50ml แล้วปุ่มไม่ตอบสนอง", "พอกดหลายครั้งระบบถึงเลือกให้", "กดแล้วไม่ไป"), you MUST use category_id "interaction_lag" (ระบบการทำงานล่าช้า). NEVER classify button/clicking statements as "registration"!
     * For account security concerns / unauthorized changes ("แต่ผมไม่ได้เป็นคนเปลี่ยนครับ", "ตอนนี้ผมกังวลว่าบัญชีอาจมีปัญหา"), you MUST use category_id "account_security".
     * For notification / email notices received or missing ("ก่อนหน้านี้ผมได้รับอีเมลแจ้งว่ามีการเปลี่ยนข้อมูลบัญชี"), you MUST use category_id "notification_issue".
     * For defect statements, use the category matching the symptom.
