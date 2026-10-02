@@ -28,36 +28,49 @@ function enqueueTriage(chatId) {
   processTriageQueue();
 }
 
+let currentProcessingChatId = null;
+
 async function processTriageQueue() {
   if (isQueueProcessing || triageQueue.length === 0) return;
   isQueueProcessing = true;
 
   const nextChatId = triageQueue.shift();
+  currentProcessingChatId = nextChatId;
   console.log(`[Queue] Starting background triage for chat ${nextChatId} (Remaining in queue: ${triageQueue.length})`);
   try {
     await processSingleChat(nextChatId);
   } catch (err) {
     console.error(`[Queue] Background triage failed for ${nextChatId}:`, err.message);
   } finally {
+    currentProcessingChatId = null;
     isQueueProcessing = false;
     processTriageQueue();
   }
 }
 
-// Auto-enqueue any un-triaged or incomplete chats from database on startup
-(async () => {
+// Background scanner to auto-enqueue any un-triaged or incomplete chats from database
+let isScanningPending = false;
+async function scanAndEnqueuePendingChats(isStartup = false) {
+  if (isScanningPending) return;
+  isScanningPending = true;
   try {
-    const { data: orphaned } = await supabase
+    const { data: orphaned, error: err1 } = await supabase
       .from('chats')
-      .select('id')
-      .or('status.eq.pending,category_id.is.null,embedding.is.null');
+      .select('id, status, embedding')
+      .or('status.eq.pending,embedding.is.null')
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    if (err1) throw err1;
 
     // Also check recent chats that have 0 issues in chat_issues
-    const { data: allRecent } = await supabase
+    const { data: allRecent, error: err2 } = await supabase
       .from('chats')
       .select('id, chat_issues(id)')
       .order('created_at', { ascending: false })
-      .limit(100);
+      .limit(30);
+
+    if (err2) throw err2;
 
     const missingIssues = (allRecent || []).filter(c => !c.chat_issues || c.chat_issues.length === 0);
     const toEnqueue = new Set([
@@ -65,20 +78,68 @@ async function processTriageQueue() {
       ...missingIssues.map(c => c.id)
     ]);
 
-    if (toEnqueue.size > 0) {
-      console.log(`[Queue] Found ${toEnqueue.size} un-triaged or incomplete chats in database on startup. Auto-enqueueing...`);
-      // Safeguard: Ensure un-triaged chats show as 'pending' so admins know they are awaiting AI triage
-      await supabase
-        .from('chats')
-        .update({ status: 'pending' })
-        .in('id', Array.from(toEnqueue));
+    // Exclude the chat currently being processed and chats already waiting in queue
+    const newItems = Array.from(toEnqueue).filter(id => id !== currentProcessingChatId && !triageQueue.includes(id));
 
-      toEnqueue.forEach(id => enqueueTriage(id));
+    if (newItems.length > 0) {
+      console.log(`[Queue] ${isStartup ? 'Startup scan' : 'Background auto-scanner'} found ${newItems.length} un-triaged chats in database. Auto-enqueueing...`);
+      newItems.forEach(id => enqueueTriage(id));
     }
   } catch (err) {
-    console.error('Failed to auto-enqueue un-triaged chats on startup:', err.message);
+    if (isStartup) {
+      console.error('Failed to auto-enqueue un-triaged chats on startup:', err.message);
+    }
+  } finally {
+    isScanningPending = false;
   }
-})();
+}
+
+// 1. Initial scan on server startup
+scanAndEnqueuePendingChats(true);
+
+// 2. Continuous background polling safeguard (every 10 seconds)
+setInterval(() => {
+  scanAndEnqueuePendingChats(false);
+}, 10000);
+
+// 3. Supabase Realtime event listener for instant 0-second detection
+function initRealtimeListener() {
+  try {
+    supabase
+      .channel('chats-realtime-listener')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'chats' },
+        (payload) => {
+          const newChat = payload.new;
+          if (newChat && newChat.id) {
+            console.log(`⚡ [Realtime] New chat inserted (${newChat.id}). Auto-enqueueing for AI Triage...`);
+            enqueueTriage(newChat.id);
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'chats' },
+        (payload) => {
+          const updated = payload.new;
+          if (updated && updated.id && (updated.status === 'pending' || !updated.embedding)) {
+            if (updated.id !== currentProcessingChatId && !triageQueue.includes(updated.id)) {
+              console.log(`⚡ [Realtime] Chat ${updated.id} status is pending/incomplete. Auto-enqueueing...`);
+              enqueueTriage(updated.id);
+            }
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log(`📡 [Realtime] Supabase chat subscription status: ${status}`);
+      });
+  } catch (err) {
+    console.warn('⚠️ [Realtime] Failed to initialize Supabase realtime listener:', err.message);
+  }
+}
+
+initRealtimeListener();
 
 const app = express();
 app.use(cors());
