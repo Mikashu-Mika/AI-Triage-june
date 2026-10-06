@@ -86,7 +86,18 @@ export async function runTriagePipeline(companyId) {
 
       // Step 3d: Update results to Supabase using category_id foreign key
       console.log(`- Saving results to Supabase...`);
-      const normalizedCategory = resolvePrimaryCategory(triage.category_id, triage.detected_issues, categories);
+      const sanitizedDetectedIssues = (triage.detected_issues || []).map(iss => {
+        const text = iss.problem_summary || iss.summary || '';
+        const validated = sanitizeAndValidateIssueCategory(text, iss.category_id, categories);
+        return {
+          ...iss,
+          category_id: validated.category_id,
+          urgency: validated.isGuarded && validated.priority ? validated.priority : (iss.urgency || iss.priority || 'medium'),
+          department: validated.isGuarded && validated.department ? validated.department : (iss.department || 'Support')
+        };
+      });
+
+      const normalizedCategory = resolvePrimaryCategory(triage.category_id, sanitizedDetectedIssues, categories);
       await updateTriageResult(chat.id, {
         category_id: normalizedCategory,
         priority: triage.priority,
@@ -109,9 +120,9 @@ export async function runTriagePipeline(companyId) {
 
       // Step 3e: Save multi-issue breakdown to chat_issues table
       console.log(`- Saving relational multi-issue breakdown to Supabase...`);
-      let normalizedIssues = (triage.detected_issues || []).map(iss => ({
+      let normalizedIssues = sanitizedDetectedIssues.map(iss => ({
         chat_id: chat.id,
-        category_id: normalizeCategoryId(iss.category_id, categories),
+        category_id: iss.category_id,
         priority: iss.urgency || iss.priority || triage.priority || 'medium',
         department: iss.department || triage.department || 'Support',
         summary: iss.problem_summary || iss.summary || triage.summary || 'ไม่มีบทสรุป',
@@ -154,6 +165,100 @@ function cosineSimilarity(vecA, vecB) {
 }
 
 /**
+ * Deterministic Semantic Guard & Normalizer
+ * Enforces critical business rules and prevents misclassification for known edge cases.
+ * @param {string} text - Sentence or summary text.
+ * @param {string} rawCategoryId - Raw category ID from LLM.
+ * @param {any[]} categories - Available categories for the company.
+ * @returns {{ category_id: string, priority?: string, department?: string, isGuarded: boolean }}
+ */
+export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories = []) {
+  if (!text) {
+    return {
+      category_id: normalizeCategoryId(rawCategoryId, categories),
+      isGuarded: false
+    };
+  }
+
+  const cleanText = text.trim();
+  const lower = cleanText.toLowerCase();
+
+  // Guard 1: OTP / SMS / Notification failure rule
+  // Even if user mentions registration or login context (e.g. "ตอนนี้สมัครได้ไหม ทำไม otp ไม่มา", "otp ไม่ส่ง")
+  const isOtpIssue = /(otp|โอทีพี|sms).*(ไม่มา|ไม่เข้า|ไม่ส่ง|ไม่ได้|ไม่ได้รับ|ช้า)|(ไม่ได้รับ|ไม่ส่ง|ไม่ได้).*(otp|โอทีพี|sms)/i.test(cleanText);
+  if (isOtpIssue) {
+    const notifCat = categories.find(c => c.id.endsWith(':notification_issue') || c.id === 'notification_issue');
+    if (notifCat) {
+      return { category_id: notifCat.id, priority: 'high', department: 'Support', isGuarded: true };
+    }
+  }
+
+  // Guard 2: Account security / change sensitive info (bank account, phone number, password, credentials)
+  // e.g. "เปลี่ยนบัญชีธนาคารให้หน่อย", "ขอเปลี่ยนเลขบัญชี", "เปลี่ยนเบอร์โทรศัพท์", "แก้บัญชีธนาคาร", "ผูกบัญชีใหม่"
+  const isBankOrSecurityChange = /(เปลี่ยน|แก้|ย้าย|อัปเดต|ขอเปลี่ยน|ขอแก้).*(บัญชีธนาคาร|เลขบัญชี|สมุดบัญชี|เบอร์โทร|เบอร์ศัพท์)|(ขอเปลี่ยน|ขอแก้).*(บัญชี|เบอร์)/i.test(cleanText);
+  if (isBankOrSecurityChange) {
+    const secCat = categories.find(c => c.id.endsWith(':account_security') || c.id === 'account_security');
+    if (secCat) {
+      return { category_id: secCat.id, priority: 'high', department: 'Support', isGuarded: true };
+    }
+  }
+
+  // Guard 3: Access blocked / broken links
+  // e.g. "ขอลิงก์หน้าฝากหน่อย ลิงก์เดิมฝากไม่ได้", "ลิงก์เข้าเล่นเป็นอะไร", "เข้าเว็บไม่ได้"
+  const isAccessBlocked = /(ขอลิงก์|ขอลิ้ง|ขอเว็บ).*(ใหม่|สำรอง|เดิม|ไม่ได้|เข้าไม่ได้)|(ลิงก์|ลิ้ง|link|เว็บ|หน้าเว็บ).*(เป็นอะไร|เข้าไม่ได้|เสีย|พัง|เปิดไม่ติด|โหลดไม่ขึ้น|error)/i.test(cleanText);
+  if (isAccessBlocked) {
+    const accessCat = categories.find(c => c.id.endsWith(':access_blocked') || c.id === 'access_blocked');
+    if (accessCat) {
+      return { category_id: accessCat.id, priority: 'medium', department: 'Support', isGuarded: true };
+    }
+  }
+
+  // Guard 4: Button response lag / multiple clicks
+  // e.g. "กดหลายครั้งระบบถึงเลือกให้", "ปุ่มไม่ตอบสนอง", "กดแล้วไม่ไป"
+  const isButtonLag = /(กดหลายครั้ง|กดซ้ำ|กดแล้วไม่ไป|ปุ่มไม่ตอบสนอง|ตอบสนองช้า|ไม่ตอบสนอง|กว่าจะเลือกได้|กว่าจะติด|ระบบถึงเลือกให้)/i.test(cleanText);
+  if (isButtonLag) {
+    const lagCat = categories.find(c => c.id.endsWith(':interaction_lag') || c.id === 'interaction_lag');
+    if (lagCat) {
+      return { category_id: lagCat.id, priority: 'medium', department: 'Support', isGuarded: true };
+    }
+  }
+
+  // Guard 5: Deposit / Withdrawal issue
+  // e.g. "ถอนเมื่อวาน 35,000 ให้หน่อย เงินยังไม่เข้าบัญชี", "ฝากเงินไม่เข้า"
+  const isDepositWithdrawal = /(ถอน|ฝาก|โอน).*(ไม่เข้า|ช้า|ดีเลย์|ยังไม่ได้|หาย|ไม่อัปเดต|ค้าง)/i.test(cleanText);
+  if (isDepositWithdrawal) {
+    const depCat = categories.find(c => c.id.endsWith(':deposit_withdrawal') || c.id === 'deposit_withdrawal');
+    if (depCat) {
+      return { category_id: depCat.id, priority: 'high', department: 'Support', isGuarded: true };
+    }
+  }
+
+  // Guard 6: Refresh page / display update
+  const isRefreshIssue = /(รีเฟรช|refresh).*(ถึงจะเห็น|ถึงจะขึ้น|ถึงจะอัปเดต)/i.test(cleanText);
+  if (isRefreshIssue) {
+    const freezeCat = categories.find(c => c.id.endsWith(':page_load_freeze') || c.id === 'page_load_freeze');
+    if (freezeCat) {
+      return { category_id: freezeCat.id, priority: 'medium', department: 'Support', isGuarded: true };
+    }
+  }
+
+  // Guard 7: General context or inquiries without problems -> other
+  const isGenericGreeting = /^(สวัสดี(ครับ|ค่ะ)?|ขอบคุณ(ครับ|ค่ะ)?|หวัดดี(ครับ|ค่ะ)?|ขอสอบถามหน่อย(ครับ|ค่ะ)?)$/i.test(lower);
+  const isShoppingContext = /^(ผม|ดิฉัน|หนู)?\s*(กำลัง|จะ|กำลังจะ|ลอง)\s*(ซื้อ|เลือก|ดู|หา|สั่งซื้อ|สั่ง)/i.test(cleanText);
+  if (isGenericGreeting || isShoppingContext) {
+    const otherCat = categories.find(c => c.id.endsWith(':other') || c.id === 'other');
+    if (otherCat) {
+      return { category_id: otherCat.id, priority: 'low', department: 'Support', isGuarded: true };
+    }
+  }
+
+  return {
+    category_id: normalizeCategoryId(rawCategoryId, categories),
+    isGuarded: false
+  };
+}
+
+/**
  * Dynamically classify a sentence using BGE-M3 Vector Semantic Matching against categories in Supabase.
  * @param {string} text - The sentence/text to classify.
  * @param {any[]} categories - Available dynamic categories for the company (with embeddings).
@@ -166,38 +271,15 @@ export async function classifySentenceSemantic(text, categories = [], mainCatego
   }
 
   const cleanText = text.trim();
-  const lower = cleanText.toLowerCase();
 
-  // Basic polite greetings without problem details -> assign to other
-  const isGenericGreeting = /^(สวัสดี(ครับ|ค่ะ)?|ขอบคุณ(ครับ|ค่ะ)?|หวัดดี(ครับ|ค่ะ)?|ขอสอบถามหน่อย(ครับ|ค่ะ)?)$/i.test(lower);
-  if (isGenericGreeting) {
-    const otherCat = categories.find(c => c.id.endsWith(':other') || c.id === 'other');
-    return { category_id: otherCat ? otherCat.id : 'other', similarity: 1.0, source: 'Greeting Filter' };
-  }
-
-  // General user actions or shopping context (e.g. "กำลังจะซื้อ...", "กำลังเลือก...", "กำลังสั่ง...") -> assign to other
-  const isShoppingContext = /^(ผม|ดิฉัน|หนู)?\s*(กำลัง|จะ|กำลังจะ|ลอง)\s*(ซื้อ|เลือก|ดู|หา|สั่งซื้อ|สั่ง)/i.test(cleanText);
-  if (isShoppingContext) {
-    const otherCat = categories.find(c => c.id.endsWith(':other') || c.id === 'other');
-    return { category_id: otherCat ? otherCat.id : 'other', similarity: 1.0, source: 'Context Filter' };
-  }
-
-  // Button response lag / multiple clicks / slow response (e.g. "ตอนเลือกไซซ์ก็กดแล้วตอบสนองช้ามาก", "พอกดหลายครั้งระบบถึงเลือกให้", "กดหลายทีกว่าจะไป") -> assign to interaction_lag
-  const isButtonLag = /(กดหลายครั้ง|กดซ้ำ|กดแล้วไม่ไป|ปุ่มไม่ตอบสนอง|ตอบสนองช้า|ไม่ตอบสนอง|ระบบถึงเลือกให้|กว่าจะเลือกได้|กว่าจะติด|กด.*(ช้า|หน่วง|ไม่ไป|ไม่ติด)|ระบบ.*(ช้า|หน่วง))/i.test(cleanText);
-  if (isButtonLag) {
-    const lagCat = categories.find(c => c.id.endsWith(':interaction_lag') || c.id === 'interaction_lag');
-    if (lagCat) {
-      return { category_id: lagCat.id, similarity: 1.0, source: 'Button Lag Rule' };
-    }
-  }
-
-  // Refresh page / display update (e.g. "ต้องรีเฟรชหน้าถึงจะเห็น...") -> assign to page_load_freeze or ui_rendering_issue
-  const isRefreshIssue = /(รีเฟรช|refresh).*(ถึงจะเห็น|ถึงจะขึ้น|ถึงจะอัปเดต)/i.test(cleanText);
-  if (isRefreshIssue) {
-    const freezeCat = categories.find(c => c.id.endsWith(':page_load_freeze') || c.id === 'page_load_freeze');
-    if (freezeCat) {
-      return { category_id: freezeCat.id, similarity: 1.0, source: 'Refresh Display Rule' };
-    }
+  // Deterministic rule check
+  const ruleCheck = sanitizeAndValidateIssueCategory(cleanText, null, categories);
+  if (ruleCheck && ruleCheck.isGuarded) {
+    return {
+      category_id: ruleCheck.category_id,
+      similarity: 1.0,
+      source: 'Deterministic Rule Guard'
+    };
   }
 
   try {
@@ -290,6 +372,13 @@ export async function ensureCompleteSentenceCoverage(conversation, detectedIssue
     if (matchingIssue) {
       // Synchronize summary to the customer's verbatim text so UI shows exact original wording
       matchingIssue.summary = line;
+      // Re-verify category guard on matching issue summary
+      const guarded = sanitizeAndValidateIssueCategory(line, matchingIssue.category_id, categories);
+      if (guarded.isGuarded) {
+        matchingIssue.category_id = guarded.category_id;
+        if (guarded.priority) matchingIssue.priority = guarded.priority;
+        if (guarded.department) matchingIssue.department = guarded.department;
+      }
     } else {
       console.log(`- Missing line from LLM detected_issues: "${line}". Adding dynamic coverage...`);
       // Classify missing line dynamically using vector similarity & rule guards
@@ -364,7 +453,18 @@ export async function processSingleChat(chatId) {
     finalRecommendation = formatMultiIssuesRecommendation(triage, finalRecommendation);
 
     // 6. Update results in Supabase
-    const normalizedCategory = resolvePrimaryCategory(triage.category_id, triage.detected_issues, categories);
+    const sanitizedDetectedIssues = (triage.detected_issues || []).map(iss => {
+      const text = iss.problem_summary || iss.summary || '';
+      const validated = sanitizeAndValidateIssueCategory(text, iss.category_id, categories);
+      return {
+        ...iss,
+        category_id: validated.category_id,
+        urgency: validated.isGuarded && validated.priority ? validated.priority : (iss.urgency || iss.priority || 'medium'),
+        department: validated.isGuarded && validated.department ? validated.department : (iss.department || 'Support')
+      };
+    });
+
+    const normalizedCategory = resolvePrimaryCategory(triage.category_id, sanitizedDetectedIssues, categories);
     await updateTriageResult(chat.id, {
       category_id: normalizedCategory,
       priority: triage.priority,
@@ -389,10 +489,10 @@ export async function processSingleChat(chatId) {
     console.log(`- Saving multi-issue breakdown from Qwen 2.5 to Supabase...`);
     
     let normalizedFinalIssues = [];
-    if (triage.detected_issues && Array.isArray(triage.detected_issues) && triage.detected_issues.length > 0) {
-      normalizedFinalIssues = triage.detected_issues.map(issue => ({
+    if (sanitizedDetectedIssues.length > 0) {
+      normalizedFinalIssues = sanitizedDetectedIssues.map(issue => ({
         chat_id: chat.id,
-        category_id: normalizeCategoryId(issue.category_id, categories),
+        category_id: issue.category_id,
         priority: issue.urgency || issue.priority || triage.priority || 'medium',
         department: issue.department || triage.department || 'Support',
         summary: issue.problem_summary || issue.summary || triage.summary || 'ไม่มีบทสรุป',
