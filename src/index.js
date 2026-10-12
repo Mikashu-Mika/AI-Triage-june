@@ -23,8 +23,6 @@ function enqueueTriage(chatId) {
   if (!triageQueue.includes(chatId)) {
     triageQueue.push(chatId);
   }
-  // Safeguard: Ensure chat is marked 'pending' in database while waiting in queue
-  supabase.from('chats').update({ status: 'pending' }).eq('id', chatId).then();
   processTriageQueue();
 }
 
@@ -56,25 +54,44 @@ async function scanAndEnqueuePendingChats(isStartup = false) {
   try {
     const { data: orphaned, error: err1 } = await supabase
       .from('chats')
-      .select('id, status, embedding')
+      .select('id, status, embedding, summary, category_id')
       .or('status.eq.pending,embedding.is.null')
       .order('created_at', { ascending: false })
       .limit(50);
 
     if (err1) throw err1;
 
-    // Also check recent chats that have 0 issues in chat_issues
+    // Fast-path: If a chat already has summary & category_id, it is already analyzed.
+    // It only needs embedding and status='completed' (fast path: <1s instead of 60s LLM re-triage)
+    const trulyUnprocessed = [];
+    for (const chat of (orphaned || [])) {
+      if (chat.summary && chat.category_id) {
+        if (!chat.embedding) {
+          getEmbedding(chat.summary).then(emb => {
+            supabase.from('chats').update({ status: 'completed', embedding: emb }).eq('id', chat.id).then();
+          }).catch(() => {
+            supabase.from('chats').update({ status: 'completed' }).eq('id', chat.id).then();
+          });
+        } else if (chat.status === 'pending') {
+          supabase.from('chats').update({ status: 'completed' }).eq('id', chat.id).then();
+        }
+      } else {
+        trulyUnprocessed.push(chat.id);
+      }
+    }
+
+    // Also check recent chats that have 0 issues in chat_issues and no summary
     const { data: allRecent, error: err2 } = await supabase
       .from('chats')
-      .select('id, chat_issues(id)')
+      .select('id, summary, chat_issues(id)')
       .order('created_at', { ascending: false })
       .limit(30);
 
     if (err2) throw err2;
 
-    const missingIssues = (allRecent || []).filter(c => !c.chat_issues || c.chat_issues.length === 0);
+    const missingIssues = (allRecent || []).filter(c => (!c.summary || !c.chat_issues || c.chat_issues.length === 0));
     const toEnqueue = new Set([
-      ...(orphaned || []).map(c => c.id),
+      ...trulyUnprocessed,
       ...missingIssues.map(c => c.id)
     ]);
 
