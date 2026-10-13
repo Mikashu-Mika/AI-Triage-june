@@ -54,18 +54,19 @@ async function scanAndEnqueuePendingChats(isStartup = false) {
   try {
     const { data: orphaned, error: err1 } = await supabase
       .from('chats')
-      .select('id, status, embedding, summary, category_id')
+      .select('id, status, embedding, summary, category_id, chat_issues(id, recommended_reply)')
       .or('status.eq.pending,embedding.is.null')
       .order('created_at', { ascending: false })
       .limit(50);
 
     if (err1) throw err1;
 
-    // Fast-path: If a chat already has summary & category_id, it is already analyzed.
-    // It only needs embedding and status='completed' (fast path: <1s instead of 60s LLM re-triage)
+    // Fast-path: If a chat already has summary, category_id, and AI sentence-level chat_issues (empty sub-issue recommended_reply),
+    // it only needs embedding and status='completed' (fast path: <1s instead of 60s LLM re-triage)
     const trulyUnprocessed = [];
     for (const chat of (orphaned || [])) {
-      if (chat.summary && chat.category_id) {
+      const hasValidAiIssues = Array.isArray(chat.chat_issues) && chat.chat_issues.length > 0 && chat.chat_issues.every(i => !i.recommended_reply);
+      if (chat.summary && chat.category_id && hasValidAiIssues) {
         if (!chat.embedding) {
           getEmbedding(chat.summary).then(emb => {
             supabase.from('chats').update({ status: 'completed', embedding: emb }).eq('id', chat.id).then();
@@ -80,16 +81,21 @@ async function scanAndEnqueuePendingChats(isStartup = false) {
       }
     }
 
-    // Also check recent chats that have 0 issues in chat_issues and no summary
+    // Also check recent chats that have 0 issues in chat_issues, no summary, or mock non-empty sub-issue recommended_reply
     const { data: allRecent, error: err2 } = await supabase
       .from('chats')
-      .select('id, summary, chat_issues(id)')
+      .select('id, summary, chat_issues(id, recommended_reply)')
       .order('created_at', { ascending: false })
       .limit(30);
 
     if (err2) throw err2;
 
-    const missingIssues = (allRecent || []).filter(c => (!c.summary || !c.chat_issues || c.chat_issues.length === 0));
+    const missingIssues = (allRecent || []).filter(c => (
+      !c.summary ||
+      !c.chat_issues ||
+      c.chat_issues.length === 0 ||
+      c.chat_issues.some(i => i.recommended_reply && i.recommended_reply !== '')
+    ));
     const toEnqueue = new Set([
       ...trulyUnprocessed,
       ...missingIssues.map(c => c.id)
