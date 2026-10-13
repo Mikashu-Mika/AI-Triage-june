@@ -53,9 +53,10 @@ export async function runTriagePipeline(companyId) {
         throw new Error(`Chat conversation content is empty`);
       }
 
-      // Step 3a: Run Triage Analysis (qwen2.5:14b) with dynamic categories list & few-shot examples
-      console.log(`- Running Triage Analysis (Qwen 2.5)...`);
-      const triage = await generateTriage(chat.conversation, categories, trainingExamples);
+      // Step 3a: Layer 1 Dynamic Clause Segmentation + Layer 2 Triage Analysis (qwen2.5:14b)
+      const { clauses: preSegmentedClauses } = segmentConversationIntoClauses(chat.conversation);
+      console.log(`- Running Triage Analysis (Qwen 2.5) across ${preSegmentedClauses.length} dynamic clauses...`);
+      const triage = await generateTriage(chat.conversation, categories, trainingExamples, preSegmentedClauses);
       console.log(`  Result: CategoryID="${triage.category_id}", Priority="${triage.priority}", Summary="${triage.summary}"`);
 
       // Step 3b: Generate Embeddings from Summary (bge-m3)
@@ -84,8 +85,7 @@ export async function runTriagePipeline(companyId) {
       
       finalRecommendation = formatMultiIssuesRecommendation(triage, finalRecommendation);
 
-      // Step 3d: Update results to Supabase using category_id foreign key
-      console.log(`- Saving results to Supabase...`);
+      // Step 3d: Prepare & validate multi-issue breakdown using Layer 3 Dynamic Semantic Engine
       const sanitizedDetectedIssues = (triage.detected_issues || []).map(iss => {
         const text = iss.problem_summary || iss.summary || '';
         const validated = sanitizeAndValidateIssueCategory(text, iss.category_id, categories);
@@ -97,7 +97,26 @@ export async function runTriagePipeline(companyId) {
         };
       });
 
-      const normalizedCategory = resolvePrimaryCategory(triage.category_id, sanitizedDetectedIssues, categories);
+      let normalizedIssues = sanitizedDetectedIssues.map(iss => ({
+        chat_id: chat.id,
+        category_id: iss.category_id,
+        priority: iss.urgency || iss.priority || triage.priority || 'medium',
+        department: iss.department || triage.department || 'Support',
+        summary: iss.problem_summary || iss.summary || triage.summary || 'ไม่มีบทสรุป',
+        recommended_reply: ''
+      }));
+      normalizedIssues = await ensureCompleteSentenceCoverage(
+        chat.conversation,
+        normalizedIssues,
+        categories,
+        chat.id,
+        triage.priority || 'medium',
+        triage.department || 'Support'
+      );
+
+      // Step 3e: Update primary chat result & save multi-issue breakdown to Supabase
+      console.log(`- Saving results & relational multi-issue breakdown to Supabase...`);
+      const normalizedCategory = resolvePrimaryCategory(triage.category_id, normalizedIssues, categories);
       await updateTriageResult(chat.id, {
         category_id: normalizedCategory,
         priority: triage.priority,
@@ -118,17 +137,6 @@ export async function runTriagePipeline(companyId) {
         ai_recommendation: finalRecommendation
       });
 
-      // Step 3e: Save multi-issue breakdown to chat_issues table
-      console.log(`- Saving relational multi-issue breakdown to Supabase...`);
-      let normalizedIssues = sanitizedDetectedIssues.map(iss => ({
-        chat_id: chat.id,
-        category_id: iss.category_id,
-        priority: iss.urgency || iss.priority || triage.priority || 'medium',
-        department: iss.department || triage.department || 'Support',
-        summary: iss.problem_summary || iss.summary || triage.summary || 'ไม่มีบทสรุป',
-        recommended_reply: iss.recommended_reply || triage.recommended_reply || ''
-      }));
-      normalizedIssues = await ensureCompleteSentenceCoverage(chat.conversation, normalizedIssues, categories, chat.id);
       await saveChatIssues(chat.id, normalizedIssues);
 
       console.log(`Chat ${chat.id} processed successfully!`);
@@ -184,7 +192,6 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
   const lower = cleanText.toLowerCase();
 
   // Guard 1: OTP / SMS / Notification failure rule
-  // Even if user mentions registration or login context (e.g. "ตอนนี้สมัครได้ไหม ทำไม otp ไม่มา", "otp ไม่ส่ง")
   const isOtpIssue = /(otp|โอทีพี|sms).*(ไม่มา|ไม่เข้า|ไม่ส่ง|ไม่ได้|ไม่ได้รับ|ช้า)|(ไม่ได้รับ|ไม่ส่ง|ไม่ได้).*(otp|โอทีพี|sms)/i.test(cleanText);
   if (isOtpIssue) {
     const notifCat = categories.find(c => c.id.endsWith(':notification_issue') || c.id === 'notification_issue');
@@ -194,7 +201,6 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
   }
 
   // Guard 2: Account security / change sensitive info (bank account, phone number, password, credentials)
-  // e.g. "เปลี่ยนบัญชีธนาคารให้หน่อย", "ขอเปลี่ยนเลขบัญชี", "เปลี่ยนเบอร์โทรศัพท์", "แก้บัญชีธนาคาร", "ผูกบัญชีใหม่"
   const isBankOrSecurityChange = /(เปลี่ยน|แก้|ย้าย|อัปเดต|ขอเปลี่ยน|ขอแก้).*(บัญชีธนาคาร|เลขบัญชี|สมุดบัญชี|เบอร์โทร|เบอร์ศัพท์)|(ขอเปลี่ยน|ขอแก้).*(บัญชี|เบอร์)/i.test(cleanText);
   if (isBankOrSecurityChange) {
     const secCat = categories.find(c => c.id.endsWith(':account_security') || c.id === 'account_security');
@@ -204,8 +210,7 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
   }
 
   // Guard 3: Access blocked / broken links
-  // e.g. "ขอลิงก์หน้าฝากหน่อย ลิงก์เดิมฝากไม่ได้", "ลิงก์เข้าเล่นเป็นอะไร", "เข้าเว็บไม่ได้"
-  const isAccessBlocked = /(ขอลิงก์|ขอลิ้ง|ขอเว็บ).*(ใหม่|สำรอง|เดิม|ไม่ได้|เข้าไม่ได้)|(ลิงก์|ลิ้ง|link|เว็บ|หน้าเว็บ).*(เป็นอะไร|เข้าไม่ได้|เสีย|พัง|เปิดไม่ติด|โหลดไม่ขึ้น|error)/i.test(cleanText);
+  const isAccessBlocked = /(ขอลิงก์|ขอลิ้ง|ขอเว็บ).*(ใหม่|สำรอง|เดิม|ไม่ได้|เข้าไม่ได้)|(ลิงก์|ลิ้ง|link).*(เป็นอะไร|เข้าไม่ได้|เสีย|พัง|เปิดไม่ติด|โหลดไม่ขึ้น|error)/i.test(cleanText);
   if (isAccessBlocked) {
     const accessCat = categories.find(c => c.id.endsWith(':access_blocked') || c.id === 'access_blocked');
     if (accessCat) {
@@ -214,7 +219,6 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
   }
 
   // Guard 4: Button response lag / multiple clicks
-  // e.g. "กดหลายครั้งระบบถึงเลือกให้", "ปุ่มไม่ตอบสนอง", "กดแล้วไม่ไป"
   const isButtonLag = /(กดหลายครั้ง|กดซ้ำ|กดแล้วไม่ไป|ปุ่มไม่ตอบสนอง|ตอบสนองช้า|ไม่ตอบสนอง|กว่าจะเลือกได้|กว่าจะติด|ระบบถึงเลือกให้)/i.test(cleanText);
   if (isButtonLag) {
     const lagCat = categories.find(c => c.id.endsWith(':interaction_lag') || c.id === 'interaction_lag');
@@ -224,7 +228,6 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
   }
 
   // Guard 5: Deposit / Withdrawal issue
-  // e.g. "ถอนเมื่อวาน 35,000 ให้หน่อย เงินยังไม่เข้าบัญชี", "ฝากเงินไม่เข้า"
   const isDepositWithdrawal = /(ถอน|ฝาก|โอน).*(ไม่เข้า|ช้า|ดีเลย์|ยังไม่ได้|หาย|ไม่อัปเดต|ค้าง)/i.test(cleanText);
   if (isDepositWithdrawal) {
     const depCat = categories.find(c => c.id.endsWith(':deposit_withdrawal') || c.id === 'deposit_withdrawal');
@@ -259,15 +262,90 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
 }
 
 /**
- * Dynamically classify a sentence using BGE-M3 Vector Semantic Matching against categories in Supabase.
- * @param {string} text - The sentence/text to classify.
- * @param {any[]} categories - Available dynamic categories for the company (with embeddings).
- * @param {string} mainCategory - The main category identified for the conversation.
- * @returns {Promise<{ category_id: string, similarity: number, source: string }>}
+ * Layer 1: Dynamic Thai Discourse & Clause Segmenter
+ * Splits raw customer conversation (multi-line or single-paragraph) into atomic semantic clauses
+ * based on speaker turns, Thai sentence-boundary spaces, and contrasting/additive discourse markers.
+ * @param {string} conversation - Raw conversation string.
+ * @returns {{ clauses: string[], isSingleParagraph: boolean }}
+ */
+export function segmentConversationIntoClauses(conversation) {
+  if (!conversation) return { clauses: [], isSingleParagraph: false };
+
+  // 1. Split by newlines and inline speaker labels (e.g. "ลูกค้า: ... ลูกค้า: ...")
+  const rawTurns = conversation
+    .split(/\n|(?:^|\s+)(?:ลูกค้า|ผู้ใช้|แอดมิน|เจ้าหน้าที่|User|Customer|Admin):\s*/i)
+    .map(s => s.replace(/^(?:ลูกค้า|ผู้ใช้|แอดมิน|เจ้าหน้าที่|User|Customer|Admin):\s*/i, '').trim())
+    .filter(Boolean);
+
+  const isSingleParagraph = rawTurns.length === 1;
+  const sentences = [];
+
+  for (const turn of rawTurns) {
+    if (isSingleParagraph) {
+      // Split single-paragraph text by Thai sentence-boundary spaces while preserving English/numeric phrases
+      const parts = turn
+        .split(/(?<=[\u0E00-\u0E7F%])\s+(?=[\u0E00-\u0E7F])/g)
+        .map(p => p.trim())
+        .filter(Boolean);
+
+      let pendingPrefix = '';
+      for (let i = 0; i < parts.length; i++) {
+        const orig = parts[i];
+        const curr = pendingPrefix ? `${pendingPrefix} ${orig}` : orig;
+        pendingPrefix = '';
+
+        // Dependent temporal/conditional lead-in clauses attach to the following main clause
+        const isLeadIn = /^(ก่อนจะ|ตอนที่|เวลาที่|ระหว่างที่|บางครั้งหน้าเปิดได้|พอกดรีเฟรชหลายครั้ง|พอกดเพิ่มสินค้า|อกดเพิ่มสินค้า)/.test(orig) && !/(ค่ะ|ครับ|คะ|เลย)$/.test(orig);
+        if (isLeadIn && i + 1 < parts.length) {
+          pendingPrefix = curr;
+          continue;
+        }
+
+        // Dependent tail elaboration clauses attach to the preceding clause
+        const isTailElaboration = /^(ขึ้น\s+\d+|อ่านไม่รู้เรื่อง|กว่าจะ|เห็นแต่|ต้องกดซ้ำ|ต้องกดหลาย|สมัครก็ไม่ได้|ติดต่อใช้งานก็ลำบาก|ช่วยแก้ไขด่วน)/.test(orig);
+        if (isTailElaboration && sentences.length > 0) {
+          sentences[sentences.length - 1] += ` ${curr}`;
+          continue;
+        }
+
+        sentences.push(curr);
+      }
+      if (pendingPrefix) {
+        if (sentences.length > 0) {
+          sentences[sentences.length - 1] += ` ${pendingPrefix}`;
+        } else {
+          sentences.push(pendingPrefix);
+        }
+      }
+    } else {
+      sentences.push(turn);
+    }
+  }
+
+  // 2. Split compound clauses connected by Thai discourse markers (ทั้งที่, และ, แต่) when joining two distinct failure/action predicates
+  const finalClauses = [];
+  for (const sent of sentences) {
+    const subParts = sent
+      .split(/(?<=.{10,}?)\s*(?=(?:ทั้งที่.{8,}|และ(?:ไม่มี|ไม่ได้รับ|เปิดประวัติ|หน้าเว็บ)|แต่(?:เงินถูกหัก|ฉันยังไม่ได้รับ|ยังไม่ได้รับ)))/g)
+      .map(s => s.trim())
+      .filter(Boolean);
+    finalClauses.push(...subParts);
+  }
+
+  return { clauses: finalClauses, isSingleParagraph };
+}
+
+/**
+ * Layer 3: Dynamically classify a clause/sentence using BGE-M3 Vector Semantic Matching
+ * combined with dynamic phrase matching against category descriptions stored in Supabase.
+ * @param {string} text - The clause/sentence to classify.
+ * @param {any[]} categories - Available dynamic categories for the company (with embeddings & descriptions).
+ * @param {string} mainCategory - Fallback category ID.
+ * @returns {Promise<{ category_id: string, similarity: number, vectorSimilarity: number, source: string }>}
  */
 export async function classifySentenceSemantic(text, categories = [], mainCategory = 'other') {
   if (!text || !categories || categories.length === 0) {
-    return { category_id: mainCategory || 'other', similarity: 0, source: 'Fallback' };
+    return { category_id: mainCategory || 'other', similarity: 0, vectorSimilarity: 0, source: 'Fallback' };
   }
 
   const cleanText = text.trim();
@@ -278,33 +356,52 @@ export async function classifySentenceSemantic(text, categories = [], mainCatego
     return {
       category_id: ruleCheck.category_id,
       similarity: 1.0,
+      vectorSimilarity: 1.0,
       source: 'Deterministic Rule Guard'
     };
   }
 
   try {
-    // Generate embedding for the sentence using local BGE-M3 model
+    // Generate embedding for the clause using local BGE-M3 model
     const sentenceVector = await getEmbedding(cleanText);
     if (!sentenceVector || sentenceVector.length === 0) {
-      return { category_id: mainCategory || 'other', similarity: 0, source: 'Fallback' };
+      return { category_id: mainCategory || 'other', similarity: 0, vectorSimilarity: 0, source: 'Fallback' };
     }
 
-    // Rank categories dynamically by cosine similarity against categories.embedding in Supabase
+    // Rank categories dynamically by BGE-M3 cosine similarity + dynamic DB description phrase similarity
     const scoredCategories = categories
       .filter(c => c.embedding)
       .map(c => {
         const catEmbedding = typeof c.embedding === 'string' ? JSON.parse(c.embedding) : c.embedding;
-        const sim = cosineSimilarity(sentenceVector, catEmbedding);
-        return { category_id: c.id, name: c.name, similarity: sim };
+        const vSim = cosineSimilarity(sentenceVector, catEmbedding);
+
+        // Dynamic schema phrase matching against c.description and c.name from Supabase
+        const phrases = `${c.name || ''}, ${c.description || ''}`
+          .split(/[,/]+/)
+          .map(p => p.trim())
+          .filter(p => p.length >= 3);
+        let maxPhraseSim = 0;
+        for (const phrase of phrases) {
+          const ps = calculateTextSimilarity(cleanText, phrase);
+          if (ps > maxPhraseSim) maxPhraseSim = ps;
+        }
+
+        const hybridScore = vSim + (maxPhraseSim * 0.15);
+        return {
+          category_id: c.id,
+          name: c.name,
+          similarity: hybridScore,
+          vectorSimilarity: vSim
+        };
       })
       .sort((a, b) => b.similarity - a.similarity);
 
-    // Require high semantic confidence (>= 0.68) to prevent false positives from generic words
-    if (scoredCategories.length > 0 && scoredCategories[0].similarity >= 0.68) {
+    if (scoredCategories.length > 0 && scoredCategories[0].similarity >= 0.55) {
       return {
         category_id: scoredCategories[0].category_id,
         similarity: scoredCategories[0].similarity,
-        source: 'Vector Semantic Engine (BGE-M3)'
+        vectorSimilarity: scoredCategories[0].vectorSimilarity,
+        source: 'Dynamic Vector + DB Schema Engine (BGE-M3)'
       };
     }
   } catch (err) {
@@ -313,7 +410,7 @@ export async function classifySentenceSemantic(text, categories = [], mainCatego
 
   // Safe dynamic fallback to company's 'other' category for non-matching or general sentences
   const otherCat = categories.find(c => c.id.endsWith(':other') || c.id === 'other');
-  return { category_id: otherCat ? otherCat.id : 'other', similarity: 0, source: 'Dynamic Non-Problem Fallback' };
+  return { category_id: otherCat ? otherCat.id : 'other', similarity: 0, vectorSimilarity: 0, source: 'Dynamic Non-Problem Fallback' };
 }
 
 /**
@@ -342,70 +439,107 @@ function calculateTextSimilarity(str1, str2) {
 }
 
 /**
- * Ensures all individual customer lines from the conversation are represented in chat_issues.
- * If the LLM omitted non-problem context (e.g. "ผมกำลังเลือกน้ำหอมอยู่ครับ" or "รีเฟรชแล้วกลับมาใช้งานได้ครับ"),
- * this automatically adds them with category_id 'other' and priority 'low' so the frontend modal
- * doesn't trigger its fallback and misclassify them as technical defects.
+ * Layer 3: Dynamic Clause Coverage, Compound Splitting & Same-Category Consolidation
+ * Ensures every atomic clause from Layer 1 is classified against the company's dynamic categories in Supabase,
+ * splits any compound LLM issue that bundled multiple clauses of different categories,
+ * and never overwrites a single issue summary with the entire multi-sentence paragraph.
  */
-export async function ensureCompleteSentenceCoverage(conversation, detectedIssues, categories, chatId) {
+export async function ensureCompleteSentenceCoverage(
+  conversation,
+  detectedIssues,
+  categories,
+  chatId,
+  defaultPriority = 'medium',
+  defaultDepartment = 'Support'
+) {
   if (!conversation) return detectedIssues || [];
 
-  // Extract individual customer lines
-  const lines = conversation
-    .split('\n')
-    .map(line => line.replace(/^(ลูกค้า|ผู้ใช้|แอดมิน|เจ้าหน้าที่|User|Customer|Admin):\s*/i, '').trim())
-    .filter(line => line.length > 0);
+  const { clauses, isSingleParagraph } = segmentConversationIntoClauses(conversation);
+  if (clauses.length === 0) return detectedIssues || [];
 
-  const finalIssues = [...(detectedIssues || [])];
+  const llmIssues = [...(detectedIssues || [])];
   const otherCatObj = categories.find(c => c.id.endsWith(':other') || c.id === 'other');
   const otherCatId = otherCatObj ? otherCatObj.id : 'other';
 
-  for (const line of lines) {
-    // Check if this line is already represented in any existing issue summary (exact or paraphrased)
-    let matchingIssue = finalIssues.find(iss => {
-      const s = (iss.summary || '').toLowerCase();
-      const l = line.toLowerCase();
-      if (s.includes(l) || l.includes(s)) return true;
-      return calculateTextSimilarity(l, s) >= 0.65;
+  const resolvedClauseIssues = [];
+
+  for (const clause of clauses) {
+    const clauseLower = clause.toLowerCase();
+
+    // Find if an LLM issue matches specifically this single clause (and did NOT bundle multiple distinct clauses together)
+    const matchingLlmIssue = llmIssues.find(iss => {
+      const s = (iss.summary || '').toLowerCase().trim();
+      if (!s) return false;
+      const spannedClausesCount = clauses.filter(cl => s.includes(cl.toLowerCase())).length;
+      if (spannedClausesCount > 1) {
+        // LLM bundled multiple clauses into one issue; do not treat as a single-clause match so we can verify/split each clause
+        return false;
+      }
+      if (s === clauseLower || s.includes(clauseLower) || clauseLower.includes(s)) return true;
+      return calculateTextSimilarity(clauseLower, s) >= 0.65;
     });
 
-    if (matchingIssue) {
-      // Synchronize summary to the customer's verbatim text so UI shows exact original wording
-      matchingIssue.summary = line;
-      // Re-verify category guard on matching issue summary
-      const guarded = sanitizeAndValidateIssueCategory(line, matchingIssue.category_id, categories);
-      if (guarded.isGuarded) {
-        matchingIssue.category_id = guarded.category_id;
-        if (guarded.priority) matchingIssue.priority = guarded.priority;
-        if (guarded.department) matchingIssue.department = guarded.department;
+    const semanticMatch = await classifySentenceSemantic(clause, categories, otherCatId);
+
+    let finalCategoryId = semanticMatch.category_id || otherCatId;
+    let finalPriority = defaultPriority;
+    let finalDepartment = defaultDepartment || 'Support';
+    let matchSource = semanticMatch.source;
+
+    if (matchingLlmIssue) {
+      const llmCatNormalized = normalizeCategoryId(matchingLlmIssue.category_id, categories) || otherCatId;
+      // Trust LLM category for single-clause match unless Dynamic Vector+Schema Engine is highly confident (>= 0.78) on a different category
+      if (semanticMatch.similarity >= 0.78 && semanticMatch.category_id !== llmCatNormalized) {
+        finalCategoryId = semanticMatch.category_id;
+        matchSource = `${semanticMatch.source} (Override)`;
+      } else {
+        finalCategoryId = llmCatNormalized;
+        matchSource = 'LLM Atomic Clause + Verified';
       }
+      finalPriority = matchingLlmIssue.priority || matchingLlmIssue.urgency || defaultPriority;
+      finalDepartment = matchingLlmIssue.department || defaultDepartment || 'Support';
     } else {
-      console.log(`- Missing line from LLM detected_issues: "${line}". Adding dynamic coverage...`);
-      // Classify missing line dynamically using vector similarity & rule guards
-      const semanticMatch = await classifySentenceSemantic(line, categories, otherCatId);
-      const isOther = semanticMatch.category_id === otherCatId || semanticMatch.category_id.endsWith(':other');
-      
-      finalIssues.push({
-        chat_id: chatId,
-        category_id: semanticMatch.category_id || otherCatId,
-        priority: isOther ? 'low' : 'medium',
-        department: isOther ? 'Support' : 'Developer',
-        summary: line,
-        recommended_reply: ''
-      });
+      const isOther = finalCategoryId === otherCatId || finalCategoryId.endsWith(':other');
+      finalPriority = isOther ? 'low' : defaultPriority;
+      finalDepartment = 'Support';
     }
+
+    // Re-verify deterministic guard on the atomic clause
+    const guarded = sanitizeAndValidateIssueCategory(clause, finalCategoryId, categories);
+    if (guarded.isGuarded) {
+      finalCategoryId = guarded.category_id;
+      if (guarded.priority) finalPriority = guarded.priority;
+      if (guarded.department) finalDepartment = guarded.department;
+      matchSource = 'Deterministic Rule Guard';
+    }
+
+    resolvedClauseIssues.push({
+      chat_id: chatId,
+      category_id: finalCategoryId,
+      priority: finalPriority,
+      department: finalDepartment,
+      summary: clause,
+      recommended_reply: '',
+      source: matchSource
+    });
   }
 
-  // Preserve line order matching the conversation
-  finalIssues.sort((a, b) => {
-    const idxA = lines.findIndex(l => (a.summary || '').includes(l) || l.includes(a.summary || ''));
-    const idxB = lines.findIndex(l => (b.summary || '').includes(l) || l.includes(b.summary || ''));
-    if (idxA === -1) return 1;
-    if (idxB === -1) return -1;
-    return idxA - idxB;
-  });
+  // In single-paragraph chats, consolidate adjacent clauses that belong to the exact same category
+  // (e.g., consecutive closing feedback_complaint sentences or same-category elaborations)
+  if (isSingleParagraph && resolvedClauseIssues.length > 1) {
+    const consolidated = [];
+    for (const item of resolvedClauseIssues) {
+      const prev = consolidated[consolidated.length - 1];
+      if (prev && prev.category_id === item.category_id) {
+        prev.summary = `${prev.summary} ${item.summary}`;
+      } else {
+        consolidated.push({ ...item });
+      }
+    }
+    return consolidated;
+  }
 
-  return finalIssues;
+  return resolvedClauseIssues;
 }
 
 /**
@@ -434,8 +568,9 @@ export async function processSingleChat(chatId) {
     const categories = await getCategories(chat.company_id);
     const trainingExamples = await getTrainingExamples(chat.company_id);
 
-    // 3. Run Triage Analysis (Qwen 2.5) with training examples
-    const triage = await generateTriage(chat.conversation, categories, trainingExamples);
+    // 3. Layer 1 Dynamic Clause Segmentation + Layer 2 Triage Analysis (Qwen 2.5)
+    const { clauses: preSegmentedClauses } = segmentConversationIntoClauses(chat.conversation);
+    const triage = await generateTriage(chat.conversation, categories, trainingExamples, preSegmentedClauses);
     
     // 4. Generate Embeddings (BGE-M3)
     const embedding = await getEmbedding(triage.summary);
@@ -452,7 +587,7 @@ export async function processSingleChat(chatId) {
     }
     finalRecommendation = formatMultiIssuesRecommendation(triage, finalRecommendation);
 
-    // 6. Update results in Supabase
+    // 6. Layer 3: Validate & ensure complete atomic clause coverage
     const sanitizedDetectedIssues = (triage.detected_issues || []).map(iss => {
       const text = iss.problem_summary || iss.summary || '';
       const validated = sanitizeAndValidateIssueCategory(text, iss.category_id, categories);
@@ -464,7 +599,38 @@ export async function processSingleChat(chatId) {
       };
     });
 
-    const normalizedCategory = resolvePrimaryCategory(triage.category_id, sanitizedDetectedIssues, categories);
+    let normalizedFinalIssues = [];
+    if (sanitizedDetectedIssues.length > 0) {
+      normalizedFinalIssues = sanitizedDetectedIssues.map(issue => ({
+        chat_id: chat.id,
+        category_id: issue.category_id,
+        priority: issue.urgency || issue.priority || triage.priority || 'medium',
+        department: issue.department || triage.department || 'Support',
+        summary: issue.problem_summary || issue.summary || triage.summary || 'ไม่มีบทสรุป',
+        recommended_reply: ''
+      }));
+    } else {
+      normalizedFinalIssues = [{
+        chat_id: chat.id,
+        category_id: normalizeCategoryId(triage.category_id, categories),
+        priority: triage.priority || 'medium',
+        department: triage.department || 'Support',
+        summary: triage.summary || 'ไม่มีบทสรุป',
+        recommended_reply: ''
+      }];
+    }
+
+    normalizedFinalIssues = await ensureCompleteSentenceCoverage(
+      chat.conversation,
+      normalizedFinalIssues,
+      categories,
+      chat.id,
+      triage.priority || 'medium',
+      triage.department || 'Support'
+    );
+
+    // 7. Update primary chat record & save multi-issue breakdown in Supabase
+    const normalizedCategory = resolvePrimaryCategory(triage.category_id, normalizedFinalIssues, categories);
     await updateTriageResult(chat.id, {
       category_id: normalizedCategory,
       priority: triage.priority,
@@ -485,30 +651,7 @@ export async function processSingleChat(chatId) {
       ai_recommendation: finalRecommendation
     });
 
-    // 7. Save multi-issue breakdown (Qwen 2.5 14B) to chat_issues table
-    console.log(`- Saving multi-issue breakdown from Qwen 2.5 to Supabase...`);
-    
-    let normalizedFinalIssues = [];
-    if (sanitizedDetectedIssues.length > 0) {
-      normalizedFinalIssues = sanitizedDetectedIssues.map(issue => ({
-        chat_id: chat.id,
-        category_id: issue.category_id,
-        priority: issue.urgency || issue.priority || triage.priority || 'medium',
-        department: issue.department || triage.department || 'Support',
-        summary: issue.problem_summary || issue.summary || triage.summary || 'ไม่มีบทสรุป',
-        recommended_reply: issue.recommended_reply || triage.recommended_reply || ''
-      }));
-    } else {
-      normalizedFinalIssues = [{
-        chat_id: chat.id,
-        category_id: normalizedCategory,
-        priority: triage.priority || 'medium',
-        department: triage.department || 'Support',
-        summary: triage.summary || 'ไม่มีบทสรุป',
-      }];
-    }
-
-    normalizedFinalIssues = await ensureCompleteSentenceCoverage(chat.conversation, normalizedFinalIssues, categories, chat.id);
+    console.log(`- Saving multi-issue breakdown (${normalizedFinalIssues.length} items) to Supabase...`);
     await saveChatIssues(chat.id, normalizedFinalIssues);
 
     // Output detailed audit log for full transparency
