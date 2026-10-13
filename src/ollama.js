@@ -118,7 +118,7 @@ const MODEL_EMBEDDING = process.env.MODEL_EMBEDDING || 'bge-m3';
  * @param {Array<{id: string, name: string, description: string}>} availableCategories - Dynamic categories list.
  * @returns {Promise<{category_id: string, priority: string, summary: string}>}
  */
-export async function generateTriage(conversation, availableCategories = [], trainingExamples = []) {
+export async function generateTriage(conversation, availableCategories = [], trainingExamples = [], segmentedClauses = []) {
   // Build dynamic categories text for LLM prompt
   const categoriesPromptList = availableCategories.map(
     c => `- "${c.id}": ${c.name} ${c.description ? `(${c.description})` : ''}`
@@ -132,6 +132,10 @@ Expected Output JSON:
 ${ex.expected_output}`).join('\n\n')}\n`;
   }
 
+  const clausesBlock = Array.isArray(segmentedClauses) && segmentedClauses.length > 0
+    ? `\nPRE-SEGMENTED ATOMIC CLAUSES (DISCOURSE TOKENIZER OUTPUT - CLASSIFY EACH CLAUSE AGAINST AVAILABLE CATEGORIES):\n${segmentedClauses.map((cl, idx) => `${idx + 1}. "${cl}"`).join('\n')}\n`
+    : '';
+
   const systemPrompt = `You are an AI Customer Intelligence & Triage Platform.
 Analyze the customer chat conversation and respond with a strictly formatted JSON object.
 Do NOT include any markdown code blocks, explanation, or extra characters. Only output the raw JSON object.
@@ -144,12 +148,12 @@ You must classify customer statements strictly based on the AVAILABLE CATEGORIES
 ${categoriesPromptList || '- "other": เรื่องอื่นๆ (สอบถามทั่วไป/ไม่ใช่ปัญหาของระบบ)'}
 
 CORE PRINCIPLE 1: ATOMIC MULTI-ISSUE EXTRACTION (STRICT CATEGORY SEPARATION)
-- Break down the customer conversation into distinct statements/clauses.
-- EVERY distinct issue or topic reported in the chat MUST be extracted as its own separate object in the "detected_issues" array.
+- Break down the customer conversation into distinct statements/clauses (use the PRE-SEGMENTED ATOMIC CLAUSES when provided).
+- If a sentence contains connectors (such as "ทั้งที่...", "และ...", "แต่...", "แถม...") that describe two different symptoms matching DIFFERENT categories in AVAILABLE CATEGORIES (e.g. payment failure vs money already deducted, or page freeze vs missing confirmation email), they MUST be separated into distinct objects in "detected_issues".
+- NEVER omit closing complaint/dissatisfaction/service improvement statements (classify them under the matching complaint/feedback category in AVAILABLE CATEGORIES).
 - STRICT CATEGORY PURITY: 1 issue object in "detected_issues" can ONLY contain statements that belong to the EXACT SAME category_id.
 - NEVER combine sentences belonging to DIFFERENT categories into the same issue object!
 - Do NOT join sentences across different categories with " / ".
-- Sentences may ONLY be joined with " / " if they describe the exact same symptom and map to the exact same category_id.
 - Example 1 (E-Commerce Web Performance & Button Lag):
   - "ผมกำลังจะซื้อน้ำหอมครับ" -> Category "other" (Context / general action, urgency: "low", Dept: Support)
   - "หน้าเว็บเปิดได้แต่โหลดรายละเอียดกลิ่นนานมาก" -> Category "page_load_freeze" (Loading delay, urgency: "medium", Dept: Support)
@@ -177,11 +181,9 @@ CORE PRINCIPLE 2: QUESTIONS & INQUIRIES ARE NOT PROBLEMS (คำถาม/ข้
   * If a statement is merely asking a question without reporting that an actual transaction failed or a feature broke, you MUST classify it under "other" (เรื่องอื่นๆ / สอบถามข้อมูลทั่วไป / ไม่ใช่ปัญหาของระบบ), with urgency: "low", priority: "low", department: "Support", resolution: "Solved".
   * NEVER classify inquiries under defect categories like "deposit_withdrawal", "login_issue", or "promo_bonus"! Those categories are strictly for ACTUAL FAILURES (e.g. "โอนเงินแล้วยอดไม่เข้า", "ถอนเงินแล้วดีเลย์ 2 ชั่วโมง", "เข้าสู่ระบบไม่ได้รหัสผ่านผิด", "ยอดโบนัสไม่เข้า").
 
-CORE PRINCIPLE 3: CUSTOMER FEEDBACK & COMPLAINTS vs TECHNICAL BUGS (การบ่นเรื่องดวง vs บั๊ก)
-- If a customer complains, vents, or expresses dissatisfaction about luck, winning rate, or game payouts (e.g. "เกมไม่เห็นแตกเลย มีแต่กินเอา", "เล่นแล้วเสียตลอด", "กินเงินอย่างเดียว", "ไม่แจกเลย"):
-  * This is CUSTOMER FEEDBACK / VENTING, NOT a broken game engine or developer bug!
-  * Classify under "feedback_complaint" (ข้อเสนอแนะและร้องเรียน) or "other", with urgency: "low" or "medium", and department: "Support".
-  * NEVER route to "Developer" or classify as "game_issue"!
+CORE PRINCIPLE 3: CUSTOMER FEEDBACK & COMPLAINTS vs TECHNICAL BUGS (การบ่น/ร้องเรียนการบริการ vs บั๊ก)
+- If a customer complains, vents, expresses dissatisfaction about service/waiting time, or tells the store what it should do (e.g. "ต้องเสียเวลาตามเรื่องเองแบบนี้ไม่โอเคมาก", "ร้านควรตรวจสอบยอดเงินและแจ้งสถานะให้ลูกค้าทราบ", "แบบนี้บริการแย่มากค่ะ", "ใช้งานยากมากค่ะ ช่วยปรับปรุงระบบด้วยนะคะ"):
+  * Classify under "feedback_complaint" (ข้อเสนอแนะและร้องเรียน), with department: "Support".
 
 CORE PRINCIPLE 4: ACCOUNT SECURITY & SENSITIVE DATA CHANGES (ความปลอดภัยบัญชีและการเปลี่ยนข้อมูลสำคัญ)
 - When a customer reports that account info was altered without their authorization (e.g. "แต่ผมไม่ได้เป็นคนเปลี่ยนครับ", "ไม่ได้ทำรายการเอง", "ไม่ได้กดเปลี่ยน", "สงสัยว่าโดนแฮก", "กังวลว่าบัญชีอาจมีปัญหา/โดนแฮก", "มีคนอื่นเข้าใช้") OR requests to modify sensitive account credentials or financial accounts (e.g. "ขอเปลี่ยนบัญชีธนาคาร", "เปลี่ยนบัญชีธนาคารให้หน่อย", "เปลี่ยนเลขบัญชี", "ขอแก้เลขที่บัญชี", "ผูกบัญชีใหม่", "ขอเปลี่ยนเบอร์โทรศัพท์"):
@@ -190,12 +192,9 @@ CORE PRINCIPLE 4: ACCOUNT SECURITY & SENSITIVE DATA CHANGES (ความปล�
   * NEVER classify changing bank account, phone number, or credentials under "other" or "deposit_withdrawal"!
 
 CORE PRINCIPLE 5: NOTIFICATIONS & OTP ALERTS vs REGISTRATION/LOGIN (การแจ้งเตือนและระบบส่ง OTP)
-- When a customer mentions OTP / SMS / email notification problems (e.g. "ทำไม otp ไม่มา", "ไม่ได้รับ OTP", "otp ไม่เข้า", "otp ไม่ส่ง", "ขอ otp แล้วไม่ได้", "sms ไม่เข้า", "ก่อนหน้านี้ผมได้รับอีเมลแจ้งเตือน"):
-  * OTP / SMS / Notification failure is an issue with the notification/SMS gateway.
+- When a customer mentions OTP / SMS / email notification problems (e.g. "ทำไม otp ไม่มา", "ไม่ได้รับ OTP", "otp ไม่เข้า", "otp ไม่ส่ง", "ขอ otp แล้วไม่ได้", "sms ไม่เข้า", "และไม่มีอีเมลยืนยันเลยค่ะ", "ยังไม่ได้รับอีเมลยืนยัน"):
+  * OTP / SMS / Email Notification failure is an issue with the notification/email gateway.
   * You MUST classify under "notification_issue" (ปัญหาการแจ้งเตือน), department: "Support".
-  * PRECEDENCE RULE FOR OTP: Even if the user mentions registering, applying, or logging in (e.g. "ตอนนี้สมัครได้ไหม ทำไม otp ไม่มา", "สมัครสมาชิกแต่ otp ไม่ส่ง", "ล็อกอินแล้ว otp ไม่เข้า"):
-    - The actual defect that is failing is the OTP delivery!
-    - You MUST classify under "notification_issue", NEVER "registration" and NEVER "login_issue"!
 
 CORE PRINCIPLE 6: TOP-LEVEL CATEGORY & PRIORITY
 - The top-level "category_id" of the JSON must represent the PRIMARY / HIGHEST SEVERITY system defect that blocks or impacts the user.
@@ -219,17 +218,12 @@ The JSON object must have exactly these keys:
 - "business_impact": Risk level: "Revenue Risk", "Customer Risk", "None".
 - "business_impact_score": Float between 0.0 and 100.0.
 - "ai_recommendation": Actionable recommendation for admin/support in Thai.
-- "detected_issues": An array of objects representing EVERY customer statement in the chat. You MUST include EVERY customer line without skipping or omitting any sentence! Each object MUST have:
+- "detected_issues": An array of objects representing EVERY customer clause/statement in the chat without skipping any clause! Each object MUST have:
   - "issue_no": Integer (1, 2, ...).
-  - "problem_summary": The verbatim sentence from the customer belonging strictly to this single category.
-  - "category_id": The exact category ID for this specific issue from the available list:
-    * For user context / actions (e.g. "ผมกำลังเลือกน้ำหอมอยู่ครับ", "ผมกำลังจะซื้อน้ำหอมครับ", "ผมเข้า Account เพื่อเช็คออเดอร์ครับ"), greetings, or recovery status ("รีเฟรชแล้วกลับมาใช้งานได้ครับ"), you MUST use category_id "other" (เรื่องอื่นๆ / ไม่ใช่ปัญหา).
-    * For button clicking / response lag (e.g. "กดเลือกขนาด 50ml แล้วปุ่มไม่ตอบสนอง", "พอกดหลายครั้งระบบถึงเลือกให้", "กดแล้วไม่ไป"), you MUST use category_id "interaction_lag" (ระบบการทำงานล่าช้า). NEVER classify button/clicking statements as "registration"!
-    * For account security concerns or changing bank account / phone number (e.g. "เปลี่ยนบัญชีธนาคารให้หน่อย", "ขอเปลี่ยนเลขบัญชี", "ขอเปลี่ยนเบอร์โทร", "แต่ผมไม่ได้เป็นคนเปลี่ยนครับ"), you MUST use category_id "account_security" (urgency: "high").
-    * For OTP / notification failures even during registration/login (e.g. "ตอนนี้สมัครได้ไหม ทำไม otp ไม่มา", "otp ไม่ส่ง", "otp ไม่เข้า", "ไม่ได้รับ otp"), you MUST use category_id "notification_issue" (urgency: "high").
-    * For defect statements, use the category matching the symptom.
+  - "problem_summary": The verbatim clause from the customer belonging strictly to this single category.
+  - "category_id": The exact category ID for this specific issue from the available list.
   - "urgency": Urgency for this specific issue ("low", "medium", "high", "urgent"). For "other"/non-problem, use "low".
-  - "department": Department for this specific issue ("Support", "Developer", "Finance", etc.). For "other", use "Support".
+  - "department": Department for this specific issue ("Support", "Developer", "Finance", etc.).
 `;
 
   try {
@@ -237,7 +231,7 @@ The JSON object must have exactly these keys:
       model: MODEL_LLM,
       messages: [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: `Analyze this conversation:\n${conversation}` }
+        { role: 'user', content: `Analyze this conversation:\n${conversation}${clausesBlock}` }
       ],
       stream: false,
       format: 'json',
