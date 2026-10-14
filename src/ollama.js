@@ -157,7 +157,7 @@ CORE PRINCIPLE 1: ATOMIC MULTI-ISSUE EXTRACTION (STRICT CATEGORY SEPARATION)
 - NEVER EXTRACT INCOMPLETE NOUN PHRASES (ห้ามสร้างประเด็นจากคำนามลอยๆ ที่ไม่มีกริยาบอกปัญหา):
   * Standalone phrases like "การส่งอีเมลยืนยัน", "และการเข้าสู่ระบบ", "ขั้นตอนสมัครสมาชิก" that lack a predicate (no verb indicating a failure or broken feature) MUST NEVER be extracted as independent issues.
   * When a customer writes an enumerated suggestion/request: "อยากให้ตรวจสอบขั้นตอนสมัครสมาชิก การส่งอีเมลยืนยัน และการเข้าสู่ระบบ พร้อมปรับปรุงข้อความแจ้งข้อผิดพลาดให้ลูกค้าเข้าใจว่าต้องทำอะไรต่อ", keep this ENTIRE statement as a SINGLE issue under "feedback_complaint"! Do NOT break the list items into separate issues!
-- Example 1 (E-Commerce Web Performance & Button Lag):
+- Example 1 (Web Browsing, Freeze, UI Rendering & Lag):
   - "ผมกำลังจะซื้อน้ำหอมครับ" -> Category "other" (Context / general action, urgency: "low", Dept: Support)
   - "หน้าเว็บเปิดได้แต่โหลดรายละเอียดกลิ่นนานมาก" -> Category "page_load_freeze" (Loading delay, urgency: "medium", Dept: Support)
   - "รูปสินค้าบางรูปไม่ขึ้นครับ" -> Category "ui_rendering_issue" (Graphics / image rendering issue, urgency: "low", Dept: Support)
@@ -236,6 +236,90 @@ The JSON object must have exactly these keys:
   - "department": Department for this specific issue ("Support", "Developer", "Finance", etc.).
 `;
 
+  // Dynamically extract all valid category IDs from Supabase for this company to build strict enum
+  const validCategoryIds = Array.from(new Set([
+    ...availableCategories.map(c => c.id).filter(Boolean),
+    ...availableCategories.map(c => (c.id || '').split(':').pop().trim()).filter(Boolean),
+    'other'
+  ]));
+
+  const dynamicJsonSchema = {
+    type: 'object',
+    properties: {
+      category_id: {
+        type: 'string',
+        enum: validCategoryIds
+      },
+      sub_category: { type: 'string' },
+      intent: {
+        type: 'string',
+        enum: ['refund', 'withdraw', 'deposit', 'register', 'verify', 'promotion', 'report_issue', 'complain', 'inquire', 'follow_up']
+      },
+      root_cause: { type: 'string' },
+      sentiment: {
+        type: 'string',
+        enum: ['โกรธ', 'ไม่พอใจ', 'สับสน', 'สงสัย', 'ชมเชย', 'ปกติ']
+      },
+      urgency: {
+        type: 'string',
+        enum: ['low', 'medium', 'high', 'urgent']
+      },
+      priority: {
+        type: 'string',
+        enum: ['low', 'medium', 'high', 'urgent']
+      },
+      department: {
+        type: 'string',
+        enum: ['Finance', 'Support', 'Developer', 'Marketing', 'Admin', 'Head Admin', 'VIP']
+      },
+      summary: { type: 'string' },
+      keywords: {
+        type: 'array',
+        items: { type: 'string' }
+      },
+      confidence: { type: 'number' },
+      recommended_reply: { type: 'string' },
+      resolution: {
+        type: 'string',
+        enum: ['Solved', 'Pending', 'Escalated', 'Rejected', 'Duplicate']
+      },
+      business_impact: {
+        type: 'string',
+        enum: ['Revenue Risk', 'Customer Risk', 'None']
+      },
+      business_impact_score: { type: 'number' },
+      ai_recommendation: { type: 'string' },
+      detected_issues: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            issue_no: { type: 'integer' },
+            problem_summary: { type: 'string' },
+            category_id: {
+              type: 'string',
+              enum: validCategoryIds
+            },
+            urgency: {
+              type: 'string',
+              enum: ['low', 'medium', 'high', 'urgent']
+            },
+            department: {
+              type: 'string',
+              enum: ['Finance', 'Support', 'Developer', 'Marketing', 'Admin', 'Head Admin', 'VIP']
+            }
+          },
+          required: ['problem_summary', 'category_id', 'urgency', 'department']
+        }
+      }
+    },
+    required: [
+      'category_id',
+      'summary',
+      'detected_issues'
+    ]
+  };
+
   try {
     const response = await postRequest(`${OLLAMA_URL}/api/chat`, {
       model: MODEL_LLM,
@@ -244,7 +328,7 @@ The JSON object must have exactly these keys:
         { role: 'user', content: `Analyze this conversation:\n${conversation}${clausesBlock}` }
       ],
       stream: false,
-      format: 'json',
+      format: dynamicJsonSchema,
       options: {
         num_ctx: 4096,
         temperature: 0.1
