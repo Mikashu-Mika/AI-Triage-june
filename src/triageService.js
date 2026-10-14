@@ -212,7 +212,7 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
   }
 
   // Guard 3: Customer feedback, complaints, and service improvement suggestions
-  const isFeedbackOrComplaint = /(ปัญหาแบบนี้ทำให้|ทำให้การเริ่มใช้งาน|ยุ่งยากมาก|เกือบจะเปลี่ยน|บริการแย่มาก|ไม่โอเคมาก|เสียเวลามาก|อยากให้ตรวจสอบ|อยากให้ปรับปรุง|ช่วยปรับปรุงระบบ|ช่วยตรวจสอบ|ปรับปรุงข้อความแจ้งข้อผิดพลาด)/i.test(cleanText);
+  const isFeedbackOrComplaint = /(ปัญหาแบบนี้ทำให้|ทำให้การเริ่มใช้งาน|ยุ่งยากมาก|เกือบจะเปลี่ยน|บริการแย่|ไม่โอเคมาก|เสียเวลา|ลองซ้ำ|จนไม่สามารถตัดสินใจซื้อได้|รู้สึกผิดหวัง|ผิดหวัง|ท้อ|ไม่ประทับใจ|อยากให้ตรวจสอบ|อยากให้ปรับปรุง|ช่วยปรับปรุงระบบ|ช่วยตรวจสอบ|ปรับปรุงข้อความแจ้งข้อผิดพลาด)/i.test(cleanText);
   if (isFeedbackOrComplaint) {
     const feedbackCat = categories.find(c => c.id.endsWith(':feedback_complaint') || c.id === 'feedback_complaint');
     if (feedbackCat) {
@@ -238,12 +238,12 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
     }
   }
 
-  // Guard 6: Access blocked / broken links
-  const isAccessBlocked = /(ขอลิงก์|ขอลิ้ง|ขอเว็บ).*(ใหม่|สำรอง|เดิม|ไม่ได้|เข้าไม่ได้)|(ลิงก์|ลิ้ง|link).*(เป็นอะไร|เข้าไม่ได้|เสีย|พัง|เปิดไม่ติด|โหลดไม่ขึ้น|error)/i.test(cleanText);
+  // Guard 6: Access blocked / broken links / 403 / 404 / 500
+  const isAccessBlocked = /(ขอลิงก์|ขอลิ้ง|ขอเว็บ).*(ใหม่|สำรอง|เดิม|ไม่ได้|เข้าไม่ได้)|(ลิงก์|ลิ้ง|link).*(เป็นอะไร|เข้าไม่ได้|เสีย|พัง|เปิดไม่ติด|โหลดไม่ขึ้น|error)|(เข้าเว็บไม่ได้|เข้าเว็บไซต์ไม่ได้|เข้าหน้าเว็บไม่ได้|เข้า web ไม่ได้|เปิดเว็บไม่ได้|เปิดเว็บไซต์ไม่ได้|403|404|500|502|forbidden|access denied|blocked)/i.test(cleanText);
   if (isAccessBlocked) {
     const accessCat = categories.find(c => c.id.endsWith(':access_blocked') || c.id === 'access_blocked');
     if (accessCat) {
-      return { category_id: accessCat.id, priority: 'medium', department: 'Support', isGuarded: true };
+      return { category_id: accessCat.id, priority: 'high', department: 'Support', isGuarded: true };
     }
   }
 
@@ -265,16 +265,34 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
     }
   }
 
-  // Guard 9: Refresh page / display update
-  const isRefreshIssue = /(รีเฟรช|refresh).*(ถึงจะเห็น|ถึงจะขึ้น|ถึงจะอัปเดต)/i.test(cleanText);
-  if (isRefreshIssue) {
-    const freezeCat = categories.find(c => c.id.endsWith(':page_load_freeze') || c.id === 'page_load_freeze');
+  // Guard 9: Page load freeze / loading delay / refresh
+  const isPageFreeze = /(รีเฟรช|refresh).*(ถึงจะเห็น|ถึงจะขึ้น|ถึงจะอัปเดต)|(หน้าเว็บ|เว็บ).*(โหลดช้า|ค้าง|หมุน|ช้ามาก|เปิดช้า|โหลดรายละเอียด)|(โหลดช้ามาก|โหลดนานมาก|ค้างบ่อย|หมุนติ้ว)/i.test(cleanText);
+  if (isPageFreeze) {
+    const freezeCat = categories.find(c => c.id.endsWith(':page_load_freeze') || c.id === 'page_load_freeze' || c.id.endsWith(':performance_issue') || c.id === 'performance_issue');
     if (freezeCat) {
       return { category_id: freezeCat.id, priority: 'medium', department: 'Support', isGuarded: true };
     }
   }
 
-  // Guard 10: General context or inquiries without problems -> other
+  // Guard 10: Graphics / UI Rendering Issue
+  const isUiRendering = /(รูป|รูปภาพ|ภาพสินค้า|รูปสินค้า|กราฟิก|การแสดงผล|ตัวหนังสือ|ฟอนต์|หน้าจอ).*(ไม่ขึ้น|หาย|ว่าง|เป็นพื้นที่ว่าง|กลายเป็นพื้นที่ว่าง|เพี้ยน|ไม่แสดง|โหลดไม่ขึ้น|ภาพแตก|จอขาว|จอดำ)/i.test(cleanText);
+  if (isUiRendering) {
+    const uiCat = categories.find(c => c.id.endsWith(':ui_rendering_issue') || c.id === 'ui_rendering_issue');
+    if (uiCat) {
+      return { category_id: uiCat.id, priority: 'low', department: 'Support', isGuarded: true };
+    }
+  }
+
+  // Guard 11: Device / Browser compatibility
+  const isDeviceComp = /(เบราว์เซอร์อื่น|บราวเซอร์อื่น|browser อื่น|ลองเปิดผ่าน|เปิดผ่านเบราว์เซอร์|เปิดผ่านบราวเซอร์|ลองเปลี่ยนเบราว์เซอร์|ลองเปลี่ยนบราวเซอร์|chrome|safari|firefox|edge|อุปกรณ์อื่น|ลองเครื่องอื่น|มือถือกับคอม|เปิดในคอม|เปิดในมือถือ)/i.test(cleanText);
+  if (isDeviceComp) {
+    const devCat = categories.find(c => c.id.endsWith(':device_compatibility') || c.id === 'device_compatibility');
+    if (devCat) {
+      return { category_id: devCat.id, priority: 'medium', department: 'Support', isGuarded: true };
+    }
+  }
+
+  // Guard 12: General context or inquiries without problems -> other
   const isGenericGreeting = /^(สวัสดี(ครับ|ค่ะ)?|ขอบคุณ(ครับ|ค่ะ)?|หวัดดี(ครับ|ค่ะ)?|ขอสอบถามหน่อย(ครับ|ค่ะ)?)$/i.test(lower);
   const isShoppingContext = /^(ผม|ดิฉัน|หนู)?\s*(กำลัง|จะ|กำลังจะ|ลอง)\s*(ซื้อ|เลือก|ดู|หา|สั่งซื้อ|สั่ง)/i.test(cleanText);
   if (isGenericGreeting || isShoppingContext) {
@@ -578,6 +596,13 @@ export async function ensureCompleteSentenceCoverage(
     const isOrphanNounPhrase = /^(\s*(และการ|การ|และ|หรือ|พร้อม)\s*[\u0E00-\u0E7F]{2,20}\s*)$/.test(item.summary) &&
       !/(ไม่ได้|ไม่สำเร็จ|ล้มเหลว|พัง|ค้าง|ช้า|เออเร่อ|หลุด|หาย|เกิดข้อผิดพลาด|แจ้งว่า|ถูกใช้งาน)/.test(item.summary);
     if (isOrphanNounPhrase) continue;
+
+    // RULE: NEVER consolidate 'other' category across clauses into a monster issue!
+    const isOtherCat = (item.category_id || '').split(':').pop().trim().toLowerCase() === 'other';
+    if (isOtherCat) {
+      consolidatedByCategory.push({ ...item });
+      continue;
+    }
 
     const existing = consolidatedByCategory.find(c => c.category_id === item.category_id);
     if (existing) {
