@@ -154,6 +154,9 @@ CORE PRINCIPLE 1: ATOMIC MULTI-ISSUE EXTRACTION (STRICT CATEGORY SEPARATION)
 - STRICT CATEGORY PURITY: 1 issue object in "detected_issues" can ONLY contain statements that belong to the EXACT SAME category_id.
 - NEVER combine sentences belonging to DIFFERENT categories into the same issue object!
 - Do NOT join sentences across different categories with " / ".
+- NEVER EXTRACT INCOMPLETE NOUN PHRASES (ห้ามสร้างประเด็นจากคำนามลอยๆ ที่ไม่มีกริยาบอกปัญหา):
+  * Standalone phrases like "การส่งอีเมลยืนยัน", "และการเข้าสู่ระบบ", "ขั้นตอนสมัครสมาชิก" that lack a predicate (no verb indicating a failure or broken feature) MUST NEVER be extracted as independent issues.
+  * When a customer writes an enumerated suggestion/request: "อยากให้ตรวจสอบขั้นตอนสมัครสมาชิก การส่งอีเมลยืนยัน และการเข้าสู่ระบบ พร้อมปรับปรุงข้อความแจ้งข้อผิดพลาดให้ลูกค้าเข้าใจว่าต้องทำอะไรต่อ", keep this ENTIRE statement as a SINGLE issue under "feedback_complaint"! Do NOT break the list items into separate issues!
 - Example 1 (E-Commerce Web Performance & Button Lag):
   - "ผมกำลังจะซื้อน้ำหอมครับ" -> Category "other" (Context / general action, urgency: "low", Dept: Support)
   - "หน้าเว็บเปิดได้แต่โหลดรายละเอียดกลิ่นนานมาก" -> Category "page_load_freeze" (Loading delay, urgency: "medium", Dept: Support)
@@ -163,7 +166,14 @@ CORE PRINCIPLE 1: ATOMIC MULTI-ISSUE EXTRACTION (STRICT CATEGORY SEPARATION)
   - "ผมเพิ่มลงตะกร้าแล้วจำนวนสินค้าไม่อัปเดตทันที" -> Category "page_load_freeze" (Data update / cart freeze, urgency: "medium", Dept: Support)
   - "ต้องรีเฟรชหน้าถึงจะเห็นจำนวนที่ถูกต้อง" -> Category "ui_rendering_issue" (Display / UI rendering update, urgency: "low", Dept: Support)
 
-- Example 2 (Login, Alerts & Account Security Separation):
+- Example 2 (Registration, Lag, Alerts, Login & Feedback 5-Issue Separation):
+  - "กรอกข้อมูลครบแล้วกดสมัครทีไรก็ขึ้นข้อความว่าระบบเกิดข้อผิดพลาดทุกครั้ง" / "หลังจากลองใหม่หลายรอบกลับมีข้อความแจ้งว่าอีเมลนี้ถูกใช้งานแล้ว" -> Category "registration" (Urgency: high, Dept: Support)
+  - "บางครั้งปุ่มสมัครก็ค้างและไม่มีการตอบสนอง" -> Category "interaction_lag" (Urgency: medium, Dept: Support)
+  - "ทั้งที่ฉันยังไม่ได้รับอีเมลยืนยันบัญชีเลยค่ะ" -> Category "notification_issue" (Urgency: medium, Dept: Support)
+  - "พอลองเข้าสู่ระบบก็ถูกแจ้งว่ายังไม่สามารถใช้งานบัญชีได้เพราะไม่ได้ยืนยันอีเมล" -> Category "login_issue" (Urgency: high, Dept: Support)
+  - "ปัญหาแบบนี้ทำให้การเริ่มใช้งานร้านยุ่งยากมากจนฉันเกือบจะเปลี่ยนไปซื้อจากร้านอื่นแล้วค่ะ อยากให้ตรวจสอบขั้นตอนสมัครสมาชิก การส่งอีเมลยืนยัน และการเข้าสู่ระบบ พร้อมปรับปรุงข้อความแจ้งข้อผิดพลาดให้ลูกค้าเข้าใจว่าต้องทำอะไรต่อ" -> Category "feedback_complaint" (Urgency: medium, Dept: Support)
+
+- Example 3 (Login, Alerts & Account Security Separation):
   - "ระบบบอกว่า Session หมดอายุ" / "พอล็อกอินใหม่ก็ถูกเด้งออกอีก" / "ลองเปลี่ยนรหัสผ่านแล้วก็ยังเข้าไม่ได้" -> Category matching login failures (e.g., login_issue) (Urgency: high, Dept: Support)
   - "ก่อนหน้านี้ผมได้รับอีเมลแจ้งว่ามีการเปลี่ยนข้อมูลบัญชี" -> Category matching notifications/alerts (e.g., notification_issue) (Urgency: low/medium, Dept: Support)
   - "แต่ผมไม่ได้เป็นคนเปลี่ยนครับ" / "ตอนนี้ผมกังวลว่าบัญชีอาจมีปัญหา" -> Category matching account security / unauthorized actions / suspected compromise (e.g., account_security) (Urgency: high/urgent, Dept: Support)
@@ -192,7 +202,7 @@ CORE PRINCIPLE 4: ACCOUNT SECURITY & SENSITIVE DATA CHANGES (ความปล�
   * NEVER classify changing bank account, phone number, or credentials under "other" or "deposit_withdrawal"!
 
 CORE PRINCIPLE 5: NOTIFICATIONS & OTP ALERTS vs REGISTRATION/LOGIN (การแจ้งเตือนและระบบส่ง OTP)
-- When a customer mentions OTP / SMS / email notification problems (e.g. "ทำไม otp ไม่มา", "ไม่ได้รับ OTP", "otp ไม่เข้า", "otp ไม่ส่ง", "ขอ otp แล้วไม่ได้", "sms ไม่เข้า", "และไม่มีอีเมลยืนยันเลยค่ะ", "ยังไม่ได้รับอีเมลยืนยัน"):
+- When a customer mentions OTP / SMS / email notification problems (e.g. "ทำไม otp ไม่มา", "ไม่ได้รับ OTP", "otp ไม่เข้า", "otp ไม่ส่ง", "ขอ otp แล้วไม่ได้", "sms ไม่เข้า", "และไม่มีอีเมลยืนยันเลยค่ะ", "ยังไม่ได้รับอีเมลยืนยัน", "ทั้งที่ฉันยังไม่ได้รับอีเมลยืนยันบัญชีเลยค่ะ"):
   * OTP / SMS / Email Notification failure is an issue with the notification/email gateway.
   * You MUST classify under "notification_issue" (ปัญหาการแจ้งเตือน), department: "Support".
 
@@ -236,7 +246,7 @@ The JSON object must have exactly these keys:
       stream: false,
       format: 'json',
       options: {
-        num_ctx: 8192,
+        num_ctx: 4096,
         temperature: 0.1
       }
     }, 900000);
