@@ -191,16 +191,45 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
   const cleanText = text.trim();
   const lower = cleanText.toLowerCase();
 
-  // Guard 1: OTP / SMS / Notification failure rule
-  const isOtpIssue = /(otp|โอทีพี|sms).*(ไม่มา|ไม่เข้า|ไม่ส่ง|ไม่ได้|ไม่ได้รับ|ช้า)|(ไม่ได้รับ|ไม่ส่ง|ไม่ได้).*(otp|โอทีพี|sms)/i.test(cleanText);
-  if (isOtpIssue) {
+  // Guard 1: OTP / SMS / Missing Confirmation Email failure rule
+  const isOtpOrEmailIssue = /(otp|โอทีพี|sms).*(ไม่มา|ไม่เข้า|ไม่ส่ง|ไม่ได้|ไม่ได้รับ|ช้า)|(ไม่ได้รับ|ไม่ส่ง|ไม่ได้).*(otp|โอทีพี|sms)/i.test(cleanText) ||
+    /(ไม่ได้รับ|ยังไม่ได้รับ|ไม่มี).*(อีเมลยืนยัน|อีเมล์ยืนยัน|email ยืนยัน|การแจ้งเตือน|sms|otp)/i.test(cleanText) ||
+    /(อีเมล|อีเมล์|email).*(ไม่เข้า|ไม่ส่ง|ไม่มา|ไม่ได้รับ)/i.test(cleanText);
+  if (isOtpOrEmailIssue) {
     const notifCat = categories.find(c => c.id.endsWith(':notification_issue') || c.id === 'notification_issue');
     if (notifCat) {
-      return { category_id: notifCat.id, priority: 'high', department: 'Support', isGuarded: true };
+      return { category_id: notifCat.id, priority: 'medium', department: 'Support', isGuarded: true };
     }
   }
 
-  // Guard 2: Account security / change sensitive info (bank account, phone number, password, credentials)
+  // Guard 2: Login failure / blocked account / unverified status on login attempt
+  const isLoginIssue = /(พอลองเข้าสู่ระบบ|ลองเข้าสู่ระบบ|เข้าสู่ระบบ|ล็อกอิน|login).*(ยังไม่สามารถใช้งาน|ใช้งานไม่ได้|เข้าไม่ได้|ไม่ได้ยืนยัน|เซสชันหมดอายุ|รหัสผ่านผิด|โดนระงับ|ถูกระงับ|ถูกบล็อก|วนกลับไปหน้า)/i.test(cleanText);
+  if (isLoginIssue) {
+    const loginCat = categories.find(c => c.id.endsWith(':login_issue') || c.id === 'login_issue');
+    if (loginCat) {
+      return { category_id: loginCat.id, priority: 'high', department: 'Support', isGuarded: true };
+    }
+  }
+
+  // Guard 3: Customer feedback, complaints, and service improvement suggestions
+  const isFeedbackOrComplaint = /(ปัญหาแบบนี้ทำให้|ทำให้การเริ่มใช้งาน|ยุ่งยากมาก|เกือบจะเปลี่ยน|บริการแย่มาก|ไม่โอเคมาก|เสียเวลามาก|อยากให้ตรวจสอบ|อยากให้ปรับปรุง|ช่วยปรับปรุงระบบ|ช่วยตรวจสอบ|ปรับปรุงข้อความแจ้งข้อผิดพลาด)/i.test(cleanText);
+  if (isFeedbackOrComplaint) {
+    const feedbackCat = categories.find(c => c.id.endsWith(':feedback_complaint') || c.id === 'feedback_complaint');
+    if (feedbackCat) {
+      return { category_id: feedbackCat.id, priority: 'medium', department: 'Support', isGuarded: true };
+    }
+  }
+
+  // Guard 4: Registration errors / email already registered
+  const isRegistrationIssue = /(สมัครสมาชิก|กดสมัคร|ปุ่มสมัคร).*(เกิดข้อผิดพลาด|ผิดพลาด|ไม่ได้|ล้มเหลว)|(อีเมลนี้|อีเมล์นี้|เบอร์นี้).*(ถูกใช้งานแล้ว|ถูกใช้แล้ว|ซ้ำ)/i.test(cleanText);
+  if (isRegistrationIssue) {
+    const regCat = categories.find(c => c.id.endsWith(':registration') || c.id === 'registration');
+    if (regCat) {
+      return { category_id: regCat.id, priority: 'high', department: 'Support', isGuarded: true };
+    }
+  }
+
+  // Guard 5: Account security / change sensitive info (bank account, phone number, password, credentials)
   const isBankOrSecurityChange = /(เปลี่ยน|แก้|ย้าย|อัปเดต|ขอเปลี่ยน|ขอแก้).*(บัญชีธนาคาร|เลขบัญชี|สมุดบัญชี|เบอร์โทร|เบอร์ศัพท์)|(ขอเปลี่ยน|ขอแก้).*(บัญชี|เบอร์)/i.test(cleanText);
   if (isBankOrSecurityChange) {
     const secCat = categories.find(c => c.id.endsWith(':account_security') || c.id === 'account_security');
@@ -209,7 +238,7 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
     }
   }
 
-  // Guard 3: Access blocked / broken links
+  // Guard 6: Access blocked / broken links
   const isAccessBlocked = /(ขอลิงก์|ขอลิ้ง|ขอเว็บ).*(ใหม่|สำรอง|เดิม|ไม่ได้|เข้าไม่ได้)|(ลิงก์|ลิ้ง|link).*(เป็นอะไร|เข้าไม่ได้|เสีย|พัง|เปิดไม่ติด|โหลดไม่ขึ้น|error)/i.test(cleanText);
   if (isAccessBlocked) {
     const accessCat = categories.find(c => c.id.endsWith(':access_blocked') || c.id === 'access_blocked');
@@ -218,8 +247,8 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
     }
   }
 
-  // Guard 4: Button response lag / multiple clicks
-  const isButtonLag = /(กดหลายครั้ง|กดซ้ำ|กดแล้วไม่ไป|ปุ่มไม่ตอบสนอง|ตอบสนองช้า|ไม่ตอบสนอง|กว่าจะเลือกได้|กว่าจะติด|ระบบถึงเลือกให้)/i.test(cleanText);
+  // Guard 7: Button response lag / multiple clicks / freeze
+  const isButtonLag = /(กดหลายครั้ง|กดซ้ำ|กดแล้วไม่ไป|ปุ่มไม่ตอบสนอง|ตอบสนองช้า|ไม่ตอบสนอง|ไม่มีการตอบสนอง|กว่าจะเลือกได้|กว่าจะติด|ระบบถึงเลือกให้|ปุ่ม.*ค้าง)/i.test(cleanText);
   if (isButtonLag) {
     const lagCat = categories.find(c => c.id.endsWith(':interaction_lag') || c.id === 'interaction_lag');
     if (lagCat) {
@@ -227,7 +256,7 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
     }
   }
 
-  // Guard 5: Deposit / Withdrawal issue
+  // Guard 8: Deposit / Withdrawal issue
   const isDepositWithdrawal = /(ถอน|ฝาก|โอน).*(ไม่เข้า|ช้า|ดีเลย์|ยังไม่ได้|หาย|ไม่อัปเดต|ค้าง)/i.test(cleanText);
   if (isDepositWithdrawal) {
     const depCat = categories.find(c => c.id.endsWith(':deposit_withdrawal') || c.id === 'deposit_withdrawal');
@@ -236,7 +265,7 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
     }
   }
 
-  // Guard 6: Refresh page / display update
+  // Guard 9: Refresh page / display update
   const isRefreshIssue = /(รีเฟรช|refresh).*(ถึงจะเห็น|ถึงจะขึ้น|ถึงจะอัปเดต)/i.test(cleanText);
   if (isRefreshIssue) {
     const freezeCat = categories.find(c => c.id.endsWith(':page_load_freeze') || c.id === 'page_load_freeze');
@@ -245,7 +274,7 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
     }
   }
 
-  // Guard 7: General context or inquiries without problems -> other
+  // Guard 10: General context or inquiries without problems -> other
   const isGenericGreeting = /^(สวัสดี(ครับ|ค่ะ)?|ขอบคุณ(ครับ|ค่ะ)?|หวัดดี(ครับ|ค่ะ)?|ขอสอบถามหน่อย(ครับ|ค่ะ)?)$/i.test(lower);
   const isShoppingContext = /^(ผม|ดิฉัน|หนู)?\s*(กำลัง|จะ|กำลังจะ|ลอง)\s*(ซื้อ|เลือก|ดู|หา|สั่งซื้อ|สั่ง)/i.test(cleanText);
   if (isGenericGreeting || isShoppingContext) {
@@ -295,14 +324,28 @@ export function segmentConversationIntoClauses(conversation) {
         pendingPrefix = '';
 
         // Dependent temporal/conditional lead-in clauses attach to the following main clause
-        const isLeadIn = /^(ก่อนจะ|ตอนที่|เวลาที่|ระหว่างที่|บางครั้งหน้าเปิดได้|พอกดรีเฟรชหลายครั้ง|พอกดเพิ่มสินค้า|อกดเพิ่มสินค้า)/.test(orig) && !/(ค่ะ|ครับ|คะ|เลย)$/.test(orig);
+        const isLeadIn = /^(ก่อนจะ|ตอนที่|เวลาที่|ระหว่างที่|บางครั้งหน้าเปิดได้|พอกดรีเฟรชหลายครั้ง|พอกดเพิ่มสินค้า|อกดเพิ่มสินค้า|(ฉัน|ผม|หนู|ดิฉัน)?\s*(พยายาม|ลอง|กำลัง|จะ|ได้ทำการ|ได้ลอง))/.test(orig) && !/(ค่ะ|ครับ|คะ|เลย)$/.test(orig);
         if (isLeadIn && i + 1 < parts.length) {
           pendingPrefix = curr;
           continue;
         }
 
-        // Dependent tail elaboration clauses attach to the preceding clause
-        const isTailElaboration = /^(ขึ้น\s+\d+|อ่านไม่รู้เรื่อง|กว่าจะ|เห็นแต่|ต้องกดซ้ำ|ต้องกดหลาย|สมัครก็ไม่ได้|ติดต่อใช้งานก็ลำบาก|ช่วยแก้ไขด่วน)/.test(orig);
+        const prevSent = sentences.length > 0 ? sentences[sentences.length - 1] : '';
+        const prevHasRequest = /(อยากให้|รบกวน|ช่วย|ขอให้|เสนอแนะให้|ปรับปรุง|แก้ไข|ตรวจสอบ)/.test(prevSent);
+
+        const isNounPhraseWithoutFailure = /^การ(?!.+?(ไม่ได้|ไม่สำเร็จ|ล้มเหลว|พัง|ค้าง|ช้า|เออเร่อ|หลุด|หาย))/.test(orig);
+        const isConjunctionOrContinuation = /^(และการ|และ(?!ไม่มี|ไม่ได้รับ)|หรือ|รวมถึง|ตลอดจน|พร้อม(ทั้ง|ปรับปรุง)?|เพื่อ)/.test(orig);
+        const isElaborationOrFeeling = /^(ฉันไม่รู้ว่า|ไม่แน่ใจว่า|และไม่อยาก|ไม่อยากเสี่ยง|กลัวว่า|กลัวเกิด)/.test(orig);
+        const isClosingFeedbackChain = /^(อยากให้|รบกวน|ช่วยปรับปรุง|ช่วยแก้ไข)/.test(orig) && /(ปัญหาแบบนี้|ยุ่งยากมาก|เกือบจะเปลี่ยน|บริการแย่|เสียเวลามาก)/.test(prevSent);
+
+        // Dependent tail elaboration, continuation & enumerated items attach to preceding clause
+        const isTailElaboration = /^(ขึ้น\s+\d+|อ่านไม่รู้เรื่อง|กว่าจะ|เห็นแต่|ต้องกดซ้ำ|ต้องกดหลาย|สมัครก็ไม่ได้|ติดต่อใช้งานก็ลำบาก|ช่วยแก้ไขด่วน)/.test(orig) ||
+          isNounPhraseWithoutFailure ||
+          (prevHasRequest && (isConjunctionOrContinuation || /^(ขั้นตอน|ระบบ)/.test(orig))) ||
+          isConjunctionOrContinuation ||
+          isElaborationOrFeeling ||
+          isClosingFeedbackChain;
+
         if (isTailElaboration && sentences.length > 0) {
           sentences[sentences.length - 1] += ` ${curr}`;
           continue;
@@ -326,7 +369,7 @@ export function segmentConversationIntoClauses(conversation) {
   const finalClauses = [];
   for (const sent of sentences) {
     const subParts = sent
-      .split(/(?<=.{10,}?)\s*(?=(?:ทั้งที่.{8,}|และ(?:ไม่มี|ไม่ได้รับ|เปิดประวัติ|หน้าเว็บ)|แต่(?:เงินถูกหัก|ฉันยังไม่ได้รับ|ยังไม่ได้รับ)))/g)
+      .split(/(?<=.{10,}?)\s*(?=(?:ทั้งที่.{8,}|และ(?:ไม่มี(?!การตอบสนอง)|ไม่ได้รับ|เปิดประวัติ|หน้าเว็บ)|แต่(?:เงินถูกหัก|ฉันยังไม่ได้รับ|ยังไม่ได้รับ)))/g)
       .map(s => s.trim())
       .filter(Boolean);
     finalClauses.push(...subParts);
@@ -524,22 +567,34 @@ export async function ensureCompleteSentenceCoverage(
     });
   }
 
-  // In single-paragraph chats, consolidate adjacent clauses that belong to the exact same category
-  // (e.g., consecutive closing feedback_complaint sentences or same-category elaborations)
-  if (isSingleParagraph && resolvedClauseIssues.length > 1) {
-    const consolidated = [];
-    for (const item of resolvedClauseIssues) {
-      const prev = consolidated[consolidated.length - 1];
-      if (prev && prev.category_id === item.category_id) {
-        prev.summary = `${prev.summary} ${item.summary}`;
-      } else {
-        consolidated.push({ ...item });
+  // Consolidate issues by category_id across the chat session
+  // So that each distinct problem category has ONE unified, comprehensive issue
+  // and no orphan incomplete noun phrases are stored
+  const consolidatedByCategory = [];
+  const priorityRank = { urgent: 4, high: 3, medium: 2, low: 1 };
+
+  for (const item of resolvedClauseIssues) {
+    // Skip standalone incomplete noun fragments without predicates (e.g. "การส่งอีเมลยืนยัน", "และการเข้าสู่ระบบ")
+    const isOrphanNounPhrase = /^(\s*(และการ|การ|และ|หรือ|พร้อม)\s*[\u0E00-\u0E7F]{2,20}\s*)$/.test(item.summary) &&
+      !/(ไม่ได้|ไม่สำเร็จ|ล้มเหลว|พัง|ค้าง|ช้า|เออเร่อ|หลุด|หาย|เกิดข้อผิดพลาด|แจ้งว่า|ถูกใช้งาน)/.test(item.summary);
+    if (isOrphanNounPhrase) continue;
+
+    const existing = consolidatedByCategory.find(c => c.category_id === item.category_id);
+    if (existing) {
+      if (!existing.summary.includes(item.summary)) {
+        existing.summary = `${existing.summary} ${item.summary}`.trim();
       }
+      const existingRank = priorityRank[existing.priority] || 2;
+      const newRank = priorityRank[item.priority] || 2;
+      if (newRank > existingRank) {
+        existing.priority = item.priority;
+      }
+    } else {
+      consolidatedByCategory.push({ ...item });
     }
-    return consolidated;
   }
 
-  return resolvedClauseIssues;
+  return consolidatedByCategory.length > 0 ? consolidatedByCategory : resolvedClauseIssues;
 }
 
 /**
