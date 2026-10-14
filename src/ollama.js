@@ -178,6 +178,13 @@ CORE PRINCIPLE 1: ATOMIC MULTI-ISSUE EXTRACTION (STRICT CATEGORY SEPARATION)
   - "ก่อนหน้านี้ผมได้รับอีเมลแจ้งว่ามีการเปลี่ยนข้อมูลบัญชี" -> Category matching notifications/alerts (e.g., notification_issue) (Urgency: low/medium, Dept: Support)
   - "แต่ผมไม่ได้เป็นคนเปลี่ยนครับ" / "ตอนนี้ผมกังวลว่าบัญชีอาจมีปัญหา" -> Category matching account security / unauthorized actions / suspected compromise (e.g., account_security) (Urgency: high/urgent, Dept: Support)
   - "ผมเข้า Account เพื่อเช็คออเดอร์ครับ" -> Category matching general user actions/inquiry (e.g., other) (Urgency: low, Dept: Support)
+
+- Example 4 (UI Rendering, Device Compatibility, Lag, Feedback & Feature Request Separation):
+  - "ฉันกำลังเลือกซื้อเครื่องใช้ไฟฟ้าผ่านโทรศัพท์มือถือ แต่หน้าเว็บของร้านแสดงผลผิดปกติหลายอย่างค่ะ รูปเครื่องดูดฝุ่นถูกตัดจนเห็นสินค้าไม่ครบ ข้อมูลกำลังไฟและขนาดตัวเครื่องแสดงไม่จบประโยค และปุ่มเลือกสีบางปุ่มอยู่เลยขอบหน้าจอออกไปจนกดไม่ได้" -> Category "ui_rendering_issue" (Graphics / responsive UI rendering defect)
+  - "พอลองเปิดเว็บไซต์เดียวกันบนคอมพิวเตอร์กลับเห็นข้อมูลครบกว่าและเลือกสินค้าได้ตามปกติ ฉันต้องสลับไปใช้คอมพิวเตอร์เพื่อซื้อของ ทั้งที่ต้องการความสะดวกในการสั่งซื้อผ่านมือถือ" -> Category "device_compatibility" (Mobile vs Desktop / browser differences)
+  - "นอกจากนี้เมื่อกดเปลี่ยนตัวเลือกสินค้าในมือถือ ระบบยังตอบสนองช้าจนไม่แน่ใจว่ากดสำเร็จหรือไม่" -> Category "interaction_lag" (Button lag / interaction delay)
+  - "ปัญหาแบบนี้ไม่ควรเกิดขึ้นกับร้านค้าออนไลน์ในปัจจุบันเลยค่ะ อยากให้ปรับปรุงการแสดงผลให้รองรับหน้าจอมือถืออย่างเหมาะสม" -> Category "feedback_complaint" (Customer complaint / dissatisfaction)
+  - "และเพิ่มฟังก์ชันเปรียบเทียบสเปกกับราคาของเครื่องใช้ไฟฟ้าหลายรุ่นในหน้าเดียว เพื่อช่วยให้ลูกค้าตัดสินใจได้ง่ายขึ้น" -> Category "feature_request" (New feature / functionality request)
   You MUST output SEPARATE issue objects for different categories! NEVER bundle them into a single string under one category!
 
 CORE PRINCIPLE 2: QUESTIONS & INQUIRIES ARE NOT PROBLEMS (คำถาม/ข้อสงสัย ไม่ใช่ปัญหา)

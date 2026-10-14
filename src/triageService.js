@@ -211,8 +211,17 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
     }
   }
 
+  // Guard 2b: Feature request & function additions
+  const isFeatureRequest = /(เพิ่มฟังก์ชัน|ขอเพิ่มฟังก์ชัน|อยากให้มีฟังก์ชัน|อยากให้มีระบบ|เพิ่มระบบ|ขอเพิ่มระบบ|ฟังก์ชันเปรียบเทียบ|ระบบเปรียบเทียบ|ขอให้มีปุ่ม|อยากให้ทำฟีเจอร์|ขอฟีเจอร์|เพิ่มตัวเลือก)/i.test(cleanText);
+  if (isFeatureRequest) {
+    const featCat = categories.find(c => c.id.endsWith(':feature_request') || c.id === 'feature_request');
+    if (featCat) {
+      return { category_id: featCat.id, priority: 'medium', department: 'Developer', isGuarded: true };
+    }
+  }
+
   // Guard 3: Customer feedback, complaints, and service improvement suggestions
-  const isFeedbackOrComplaint = /(ปัญหาแบบนี้ทำให้|ทำให้การเริ่มใช้งาน|ยุ่งยากมาก|เกือบจะเปลี่ยน|บริการแย่|ไม่โอเคมาก|เสียเวลา|ลองซ้ำ|จนไม่สามารถตัดสินใจซื้อได้|รู้สึกผิดหวัง|ผิดหวัง|ท้อ|ไม่ประทับใจ|อยากให้ตรวจสอบ|อยากให้ปรับปรุง|ช่วยปรับปรุงระบบ|ช่วยตรวจสอบ|ปรับปรุงข้อความแจ้งข้อผิดพลาด)/i.test(cleanText);
+  const isFeedbackOrComplaint = /(ปัญหาแบบนี้ทำให้|ทำให้การเริ่มใช้งาน|ยุ่งยากมาก|เกือบจะเปลี่ยน|บริการแย่|ไม่โอเคมาก|เสียเวลา|ลองซ้ำ|จนไม่สามารถตัดสินใจซื้อได้|รู้สึกผิดหวัง|ผิดหวัง|ท้อ|ไม่ประทับใจ|ปัญหาแบบนี้ไม่ควรเกิดขึ้น|อยากให้ปรับปรุง|ช่วยปรับปรุงระบบ|ช่วยตรวจสอบ|ปรับปรุงข้อความแจ้งข้อผิดพลาด)/i.test(cleanText);
   if (isFeedbackOrComplaint) {
     const feedbackCat = categories.find(c => c.id.endsWith(':feedback_complaint') || c.id === 'feedback_complaint');
     if (feedbackCat) {
@@ -238,8 +247,8 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
     }
   }
 
-  // Guard 6: Access blocked / broken links / 403 / 404 / 500
-  const isAccessBlocked = /(ขอลิงก์|ขอลิ้ง|ขอเว็บ).*(ใหม่|สำรอง|เดิม|ไม่ได้|เข้าไม่ได้)|(ลิงก์|ลิ้ง|link).*(เป็นอะไร|เข้าไม่ได้|เสีย|พัง|เปิดไม่ติด|โหลดไม่ขึ้น|error)|(เข้าเว็บไม่ได้|เข้าเว็บไซต์ไม่ได้|เข้าหน้าเว็บไม่ได้|เข้า web ไม่ได้|เปิดเว็บไม่ได้|เปิดเว็บไซต์ไม่ได้|403|404|500|502|forbidden|access denied|blocked)/i.test(cleanText);
+  // Guard 6: Access blocked / broken links / 403 / 404 / 500 / outage
+  const isAccessBlocked = /(ขอลิงก์|ขอลิ้ง|ขอเว็บ).*(ใหม่|สำรอง|เดิม|ไม่ได้|เข้าไม่ได้)|(ลิงก์|ลิ้ง|link).*(เป็นอะไร|เข้าไม่ได้|เสีย|พัง|เปิดไม่ติด|โหลดไม่ขึ้น|error)|(เข้าเว็บ|เข้าเว็บไซต์|เข้าหน้าเว็บ|เข้า web|เปิดเว็บ|เปิดเว็บไซต์).*(ไม่ได้|ไม่สำเร็จ|ไม่ติด| error| 403| 404)|(403|404|500|502|forbidden|access denied|blocked)/i.test(cleanText);
   if (isAccessBlocked) {
     const accessCat = categories.find(c => c.id.endsWith(':access_blocked') || c.id === 'access_blocked');
     if (accessCat) {
@@ -247,26 +256,8 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
     }
   }
 
-  // Guard 7: Button response lag / multiple clicks / freeze
-  const isButtonLag = /(กดหลายครั้ง|กดซ้ำ|กดแล้วไม่ไป|ปุ่มไม่ตอบสนอง|ตอบสนองช้า|ไม่ตอบสนอง|ไม่มีการตอบสนอง|กว่าจะเลือกได้|กว่าจะติด|ระบบถึงเลือกให้|ปุ่ม.*ค้าง)/i.test(cleanText);
-  if (isButtonLag) {
-    const lagCat = categories.find(c => c.id.endsWith(':interaction_lag') || c.id === 'interaction_lag');
-    if (lagCat) {
-      return { category_id: lagCat.id, priority: 'medium', department: 'Support', isGuarded: true };
-    }
-  }
-
-  // Guard 8: Deposit / Withdrawal issue
-  const isDepositWithdrawal = /(ถอน|ฝาก|โอน).*(ไม่เข้า|ช้า|ดีเลย์|ยังไม่ได้|หาย|ไม่อัปเดต|ค้าง)/i.test(cleanText);
-  if (isDepositWithdrawal) {
-    const depCat = categories.find(c => c.id.endsWith(':deposit_withdrawal') || c.id === 'deposit_withdrawal');
-    if (depCat) {
-      return { category_id: depCat.id, priority: 'high', department: 'Support', isGuarded: true };
-    }
-  }
-
-  // Guard 9: Page load freeze / loading delay / refresh
-  const isPageFreeze = /(รีเฟรช|refresh).*(ถึงจะเห็น|ถึงจะขึ้น|ถึงจะอัปเดต)|(หน้าเว็บ|เว็บ).*(โหลดช้า|ค้าง|หมุน|ช้ามาก|เปิดช้า|โหลดรายละเอียด)|(โหลดช้ามาก|โหลดนานมาก|ค้างบ่อย|หมุนติ้ว)/i.test(cleanText);
+  // Guard 7: Page load freeze / loading delay / refresh
+  const isPageFreeze = /(รีเฟรช|refresh).*(ถึงจะเห็น|ถึงจะขึ้น|ถึงจะอัปเดต)|(หน้าเว็บ|เว็บ|หน้าเว็บไซต์).*(โหลดช้า|ค้าง|หมุน|ช้ามาก|เปิดช้า|โหลดรายละเอียด)|(โหลดช้ามาก|โหลดนานมาก|ค้างบ่อย|หมุนติ้ว)/i.test(cleanText);
   if (isPageFreeze) {
     const freezeCat = categories.find(c => c.id.endsWith(':page_load_freeze') || c.id === 'page_load_freeze' || c.id.endsWith(':performance_issue') || c.id === 'performance_issue');
     if (freezeCat) {
@@ -274,8 +265,17 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
     }
   }
 
-  // Guard 10: Graphics / UI Rendering Issue
-  const isUiRendering = /(รูป|รูปภาพ|ภาพสินค้า|รูปสินค้า|กราฟิก|การแสดงผล|ตัวหนังสือ|ฟอนต์|หน้าจอ).*(ไม่ขึ้น|หาย|ว่าง|เป็นพื้นที่ว่าง|กลายเป็นพื้นที่ว่าง|เพี้ยน|ไม่แสดง|โหลดไม่ขึ้น|ภาพแตก|จอขาว|จอดำ)/i.test(cleanText);
+  // Guard 8: Button response lag / multiple clicks / freeze
+  const isButtonLag = /(กดหลายครั้ง|กดซ้ำ|กดแล้วไม่ไป|ปุ่มไม่ตอบสนอง|ตอบสนองช้า|ไม่ตอบสนอง|ไม่มีการตอบสนอง|กว่าจะเลือกได้|กว่าจะติด|ระบบถึงเลือกให้|ปุ่ม.*ค้าง|ระบบยังตอบสนองช้า)/i.test(cleanText);
+  if (isButtonLag) {
+    const lagCat = categories.find(c => c.id.endsWith(':interaction_lag') || c.id === 'interaction_lag');
+    if (lagCat) {
+      return { category_id: lagCat.id, priority: 'medium', department: 'Support', isGuarded: true };
+    }
+  }
+
+  // Guard 9: Graphics / UI Rendering Issue
+  const isUiRendering = /(แสดงผลผิดปกติ|แสดงผลเพี้ยน|ตัดทอน|ถูกตัด|ไม่จบประโยค|ตกขอบ|ล้นขอบ|เลยขอบ|ล้นจอ|เลยขอบหน้าจอ|ตัวหนังสือซ้อน|ฟอนต์เละ|ปุ่มอยู่เลย|ปุ่มล้น|หลุดกรอบ|รูป.*(ไม่ขึ้น|หาย|ว่าง|ถูกตัด|แตก|เป็นพื้นที่ว่าง|กลายเป็นพื้นที่ว่าง)|การแสดงผล.*(ผิดปกติ|เพี้ยน|ไม่สมบูรณ์|ไม่ตรง)|หน้าเว็บ.*แสดงผลผิดปกติ)/i.test(cleanText);
   if (isUiRendering) {
     const uiCat = categories.find(c => c.id.endsWith(':ui_rendering_issue') || c.id === 'ui_rendering_issue');
     if (uiCat) {
@@ -283,12 +283,21 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
     }
   }
 
-  // Guard 11: Device / Browser compatibility
-  const isDeviceComp = /(เบราว์เซอร์อื่น|บราวเซอร์อื่น|browser อื่น|ลองเปิดผ่าน|เปิดผ่านเบราว์เซอร์|เปิดผ่านบราวเซอร์|ลองเปลี่ยนเบราว์เซอร์|ลองเปลี่ยนบราวเซอร์|chrome|safari|firefox|edge|อุปกรณ์อื่น|ลองเครื่องอื่น|มือถือกับคอม|เปิดในคอม|เปิดในมือถือ)/i.test(cleanText);
+  // Guard 10: Device / Browser compatibility
+  const isDeviceComp = /(เบราว์เซอร์อื่น|บราวเซอร์อื่น|browser อื่น|ลองเปิดผ่าน|เปิดผ่านเบราว์เซอร์|เปิดผ่านบราวเซอร์|ลองเปลี่ยนเบราว์เซอร์|chrome|safari|firefox|edge|อุปกรณ์อื่น|ลองเครื่องอื่น|มือถือกับคอม|เปิดในคอม|เปิดในมือถือ|บนคอมพิวเตอร์|สลับไปใช้คอม|สลับไปใช้มือถือ|ไม่รองรับมือถือ|หน้าจอมือถือ|เฉพาะในมือถือ|สั่งซื้อผ่านมือถือ)/i.test(cleanText);
   if (isDeviceComp) {
     const devCat = categories.find(c => c.id.endsWith(':device_compatibility') || c.id === 'device_compatibility');
     if (devCat) {
       return { category_id: devCat.id, priority: 'medium', department: 'Support', isGuarded: true };
+    }
+  }
+
+  // Guard 11: Deposit / Withdrawal issue
+  const isDepositWithdrawal = /(ถอน|ฝาก|โอน).*(ไม่เข้า|ช้า|ดีเลย์|ยังไม่ได้|หาย|ไม่อัปเดต|ค้าง)/i.test(cleanText);
+  if (isDepositWithdrawal) {
+    const depCat = categories.find(c => c.id.endsWith(':deposit_withdrawal') || c.id === 'deposit_withdrawal');
+    if (depCat) {
+      return { category_id: depCat.id, priority: 'high', department: 'Support', isGuarded: true };
     }
   }
 
@@ -342,7 +351,10 @@ export function segmentConversationIntoClauses(conversation) {
         pendingPrefix = '';
 
         // Dependent temporal/conditional lead-in clauses attach to the following main clause
-        const isLeadIn = /^(ก่อนจะ|ตอนที่|เวลาที่|ระหว่างที่|บางครั้งหน้าเปิดได้|พอกดรีเฟรชหลายครั้ง|พอกดเพิ่มสินค้า|อกดเพิ่มสินค้า|(ฉัน|ผม|หนู|ดิฉัน)?\s*(พยายาม|ลอง|กำลัง|จะ|ได้ทำการ|ได้ลอง))/.test(orig) && !/(ค่ะ|ครับ|คะ|เลย)$/.test(orig);
+        const isLeadIn = (/^(นอกจากนี้|ยิ่งไปกว่านั้น|แถม)?\s*(เมื่อ|เวลา|ตอนที่|ระหว่างที่|ขณะที่)/.test(orig) ||
+          /^(ก่อนจะ|ตอนจะ|เวลาจะ)/.test(orig) ||
+          /^(บางครั้งหน้าเปิดได้|พอกดรีเฟรชหลายครั้ง|พอกดเพิ่มสินค้า|อกดเพิ่มสินค้า|(ฉัน|ผม|หนู|ดิฉัน)?\s*(พยายาม|ลอง|กำลัง|จะ|ได้ทำการ|ได้ลอง))/.test(orig)) &&
+          !/(กลับ|พบว่า|ปรากฏว่า|ได้ตามปกติ|เลยค่ะ|เลยครับ|ค่ะ|ครับ|คะ)$/.test(orig);
         if (isLeadIn && i + 1 < parts.length) {
           pendingPrefix = curr;
           continue;
@@ -351,14 +363,17 @@ export function segmentConversationIntoClauses(conversation) {
         const prevSent = sentences.length > 0 ? sentences[sentences.length - 1] : '';
         const prevHasRequest = /(อยากให้|รบกวน|ช่วย|ขอให้|เสนอแนะให้|ปรับปรุง|แก้ไข|ตรวจสอบ)/.test(prevSent);
 
+        const isFeatureRequestStart = /^(และ\s*)?(เพิ่มฟังก์ชัน|ขอเพิ่มฟังก์ชัน|อยากให้มีฟังก์ชัน|เพิ่มระบบ|ขอเพิ่มระบบ|อยากให้มีระบบ|ขอฟีเจอร์|อยากให้เพิ่ม|ขอเพิ่ม)/.test(orig);
         const isNounPhraseWithoutFailure = /^การ(?!.+?(ไม่ได้|ไม่สำเร็จ|ล้มเหลว|พัง|ค้าง|ช้า|เออเร่อ|หลุด|หาย))/.test(orig);
-        const isConjunctionOrContinuation = /^(และการ|และ(?!ไม่มี|ไม่ได้รับ)|หรือ|รวมถึง|ตลอดจน|พร้อม(ทั้ง|ปรับปรุง)?|เพื่อ)/.test(orig);
+        const isConjunctionOrContinuation = !isFeatureRequestStart && /^(และการ|และ(?!ไม่มี|ไม่ได้รับ)|หรือ|รวมถึง|ตลอดจน|พร้อม(ทั้ง|ปรับปรุง)?|เพื่อ)/.test(orig);
         const isElaborationOrFeeling = /^(ฉันไม่รู้ว่า|ไม่แน่ใจว่า|และไม่อยาก|ไม่อยากเสี่ยง|กลัวว่า|กลัวเกิด)/.test(orig);
         const isClosingFeedbackChain = /^(อยากให้|รบกวน|ช่วยปรับปรุง|ช่วยแก้ไข)/.test(orig) && /(ปัญหาแบบนี้|ยุ่งยากมาก|เกือบจะเปลี่ยน|บริการแย่|เสียเวลามาก)/.test(prevSent);
+        const isButClause = /^(แต่|ทว่า)/.test(orig);
 
         // Dependent tail elaboration, continuation & enumerated items attach to preceding clause
         const isTailElaboration = /^(ขึ้น\s+\d+|อ่านไม่รู้เรื่อง|กว่าจะ|เห็นแต่|ต้องกดซ้ำ|ต้องกดหลาย|สมัครก็ไม่ได้|ติดต่อใช้งานก็ลำบาก|ช่วยแก้ไขด่วน)/.test(orig) ||
           isNounPhraseWithoutFailure ||
+          isButClause ||
           (prevHasRequest && (isConjunctionOrContinuation || /^(ขั้นตอน|ระบบ)/.test(orig))) ||
           isConjunctionOrContinuation ||
           isElaborationOrFeeling ||
