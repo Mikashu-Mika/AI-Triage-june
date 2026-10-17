@@ -1,6 +1,7 @@
 import { supabase, getPendingChats, updateTriageResult, getCategories, findSimilarChats, getTrainingExamples, saveChatIssues } from './supabase.js';
 import { generateTriage, getEmbedding } from './ollama.js';
 import { logTriageAudit } from './triageLogger.js';
+import { checkCompanyQuota } from './quotaService.js';
 
 /**
  * Orchestrate the triage pipeline:
@@ -16,6 +17,16 @@ import { logTriageAudit } from './triageLogger.js';
 export async function runTriagePipeline(companyId) {
   console.log(`Starting AI Triage Pipeline for Company: ${companyId || 'Global'}...`);
   
+  // 0. Quota Check: If company specified, check if monthly quota is exceeded
+  if (companyId) {
+    const quota = await checkCompanyQuota(companyId);
+    if (quota.isExceeded) {
+      const errMsg = `โควต้าแชตประจำเดือนเต็ม: บริษัท ${quota.companyName} ใช้โควต้าครบกำหนดของแพ็กเกจ ${quota.packageName} (${quota.monthlyLimit?.toLocaleString()} แชต) แล้วในรอบนี้`;
+      console.warn(`⛔ [Pipeline Blocked] ${errMsg}`);
+      throw new Error(errMsg);
+    }
+  }
+
   // 1. Fetch active categories & training examples
   let categories = [];
   let trainingExamples = [];
@@ -657,6 +668,28 @@ export async function processSingleChat(chatId) {
     
     if (!chat.conversation) {
       throw new Error(`Chat conversation content is empty`);
+    }
+
+    // 1.1 Quota Enforcement: Check if company has exceeded monthly chat quota
+    if (chat.company_id) {
+      const quota = await checkCompanyQuota(chat.company_id);
+      if (quota.isExceeded) {
+        console.warn(`⛔ [Triage Blocked] Chat ${chatId} skipped: Company "${quota.companyName}" has reached monthly limit (${quota.currentUsage}/${quota.monthlyLimit}).`);
+        await supabase
+          .from('chats')
+          .update({
+            status: 'quota_exceeded',
+            summary: `[โควต้าเต็มประจำเดือน] บริษัท ${quota.companyName} ใช้โควต้าแชตครบกำหนดของแพ็กเกจ ${quota.packageName} (${quota.monthlyLimit?.toLocaleString()} แชต) แล้วในรอบนี้`,
+            resolution: `กรุณาอัปเกรดแพ็กเกจเพื่อขยายโควต้า หรือรอรอบบิลถัดไปในวันที่ ${new Date(quota.billingCycle.resetDate).toLocaleDateString('th-TH')}`
+          })
+          .eq('id', chat.id);
+        return {
+          status: 'quota_exceeded',
+          chatId,
+          companyId: chat.company_id,
+          quota
+        };
+      }
     }
 
     // 2. Fetch available categories & training examples for the chat's company

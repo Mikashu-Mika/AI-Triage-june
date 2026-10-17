@@ -325,7 +325,7 @@ export async function authenticateCompany(clientId, clientSecret) {
   if (!clientId || !clientSecret) return null;
   const { data, error } = await supabase
     .from('companies')
-    .select('id, name')
+    .select('*')
     .eq('client_id', clientId)
     .eq('client_secret', clientSecret)
     .maybeSingle();
@@ -576,11 +576,37 @@ export async function deleteUser(id) {
 export async function getAllCompanies() {
   const { data, error } = await supabase
     .from('companies')
-    .select('id, name, domain, client_id, created_at')
+    .select('*')
     .order('created_at', { ascending: true });
 
   if (error) throw new Error('Failed to fetch companies: ' + error.message);
   return data || [];
+}
+
+/**
+ * Update company subscription package and quota settings.
+ * @param {string} companyId 
+ * @param {object} packageData 
+ * @returns {Promise<object>}
+ */
+export async function updateCompanyPackage(companyId, packageData) {
+  const allowedFields = ['customer_type', 'package_tier', 'custom_quota', 'package_status', 'billing_cycle_anchor', 'telegram_group_limit'];
+  const updatePayload = {};
+  for (const field of allowedFields) {
+    if (packageData[field] !== undefined) {
+      updatePayload[field] = packageData[field];
+    }
+  }
+
+  const { data, error } = await supabase
+    .from('companies')
+    .update(updatePayload)
+    .eq('id', companyId)
+    .select('*')
+    .single();
+
+  if (error) throw new Error('Failed to update company package: ' + error.message);
+  return data;
 }
 
 /**
