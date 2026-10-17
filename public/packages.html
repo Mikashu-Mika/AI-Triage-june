@@ -1,0 +1,889 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sift AI - ระบบจัดการแพ็กเกจและโควต้าบริษัท</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #0f172a;
+      --card-dark: #1e293b;
+      --card-border: #334155;
+      --primary: #6366f1;
+      --primary-hover: #4f46e5;
+      --accent: #06b6d4;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: 'Prompt', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    body {
+      background: radial-gradient(circle at top right, #1e1b4b, #0f172a 60%);
+      color: var(--text-main);
+      min-height: 100vh;
+      padding: 24px;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    /* Header */
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--card-border);
+      margin-bottom: 28px;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .logo-area {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo-icon {
+      font-size: 32px;
+      background: linear-gradient(135deg, #a855f7, #6366f1, #06b6d4);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      filter: drop-shadow(0 0 12px rgba(168, 85, 247, 0.4));
+    }
+
+    .title-area h1 {
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+
+    .title-area p {
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 10px;
+    }
+
+    .btn {
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-weight: 500;
+      font-size: 14px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+      border: none;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--primary), #8b5cf6);
+      color: white;
+      box-shadow: 0 4px 14px rgba(99, 102, 241, 0.4);
+    }
+
+    .btn-primary:hover {
+      background: linear-gradient(135deg, var(--primary-hover), #7c3aed);
+      transform: translateY(-1px);
+    }
+
+    .btn-outline {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--card-border);
+      color: var(--text-main);
+    }
+
+    .btn-outline:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    /* Stats bar */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 28px;
+    }
+
+    .stat-card {
+      background: var(--card-dark);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 18px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .stat-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--primary), var(--accent));
+    }
+
+    .stat-title {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .stat-value {
+      font-size: 26px;
+      font-weight: 700;
+    }
+
+    /* Tabs */
+    .tab-bar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 24px;
+      border-bottom: 1px solid var(--card-border);
+      padding-bottom: 8px;
+    }
+
+    .tab-btn {
+      padding: 8px 16px;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--text-muted);
+      border: none;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 500;
+      transition: all 0.2s;
+    }
+
+    .tab-btn.active {
+      background: rgba(99, 102, 241, 0.15);
+      color: #818cf8;
+      border: 1px solid rgba(99, 102, 241, 0.3);
+    }
+
+    /* Company Table / Cards */
+    .section-title {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .companies-list {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .company-card {
+      background: var(--card-dark);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 20px 24px;
+      display: grid;
+      grid-template-columns: 2fr 1.5fr 2fr 1fr;
+      align-items: center;
+      gap: 20px;
+      transition: border-color 0.2s, transform 0.2s;
+    }
+
+    .company-card:hover {
+      border-color: rgba(99, 102, 241, 0.4);
+      transform: translateY(-2px);
+    }
+
+    @media (max-width: 900px) {
+      .company-card {
+        grid-template-columns: 1fr;
+        gap: 14px;
+      }
+    }
+
+    .company-info h3 {
+      font-size: 17px;
+      font-weight: 600;
+      margin-bottom: 4px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .company-info p {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .badge-group {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .badge-partner {
+      background: rgba(0, 0, 0, 0.5);
+      color: #e2e8f0;
+      border: 1px solid #475569;
+    }
+
+    .badge-standard {
+      background: rgba(255, 255, 255, 0.1);
+      color: #f8fafc;
+      border: 1px solid #94a3b8;
+    }
+
+    .badge-tier {
+      background: rgba(99, 102, 241, 0.2);
+      color: #a5b4fc;
+      border: 1px solid rgba(99, 102, 241, 0.4);
+      text-transform: uppercase;
+      font-size: 11px;
+    }
+
+    .badge-enterprise {
+      background: linear-gradient(135deg, rgba(168, 85, 247, 0.2), rgba(6, 182, 212, 0.2));
+      color: #c084fc;
+      border: 1px solid rgba(168, 85, 247, 0.4);
+    }
+
+    .badge-status-active {
+      background: rgba(16, 185, 129, 0.15);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+
+    .badge-status-exceeded {
+      background: rgba(239, 68, 68, 0.15);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.3);
+    }
+
+    /* Progress bar */
+    .quota-meter {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .quota-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .progress-track {
+      width: 100%;
+      height: 8px;
+      background: rgba(255, 255, 255, 0.08);
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #3b82f6, #06b6d4);
+      border-radius: 4px;
+      transition: width 0.4s ease;
+    }
+
+    .progress-fill.exceeded {
+      background: linear-gradient(90deg, #f59e0b, #ef4444);
+    }
+
+    /* Modal */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      backdrop-filter: blur(4px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      z-index: 100;
+    }
+
+    .modal-backdrop.open {
+      display: flex;
+    }
+
+    .modal-box {
+      background: #1e293b;
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      width: 100%;
+      max-width: 600px;
+      padding: 28px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+      position: relative;
+      animation: modalFadeIn 0.2s ease-out;
+    }
+
+    @keyframes modalFadeIn {
+      from { opacity: 0; transform: scale(0.96); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 20px;
+    }
+
+    .modal-header h2 {
+      font-size: 20px;
+      font-weight: 700;
+    }
+
+    .modal-header p {
+      font-size: 13px;
+      color: var(--text-muted);
+    }
+
+    .modal-close {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 24px;
+      cursor: pointer;
+      line-height: 1;
+    }
+
+    .form-group {
+      margin-bottom: 18px;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 13px;
+      font-weight: 500;
+      margin-bottom: 8px;
+      color: #cbd5e1;
+    }
+
+    /* Option Radios / Grid */
+    .theme-selector {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .theme-card {
+      border: 2px solid var(--card-border);
+      border-radius: 10px;
+      padding: 14px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(15, 23, 42, 0.6);
+      transition: all 0.2s;
+    }
+
+    .theme-card.selected {
+      border-color: var(--primary);
+      background: rgba(99, 102, 241, 0.12);
+    }
+
+    .tier-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+
+    .tier-card {
+      border: 2px solid var(--card-border);
+      border-radius: 10px;
+      padding: 14px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      background: rgba(15, 23, 42, 0.6);
+      transition: all 0.2s;
+    }
+
+    .tier-card.selected {
+      border-color: var(--accent);
+      background: rgba(6, 182, 212, 0.12);
+    }
+
+    .tier-name {
+      font-weight: 600;
+      font-size: 14px;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .tier-price {
+      font-size: 16px;
+      font-weight: 700;
+      color: #38bdf8;
+    }
+
+    .tier-desc {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .input-field {
+      width: 100%;
+      background: #0f172a;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 10px 14px;
+      color: var(--text-main);
+      font-size: 14px;
+    }
+
+    .input-field:focus {
+      outline: none;
+      border-color: var(--primary);
+    }
+
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+      margin-top: 24px;
+    }
+
+    /* Toast */
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #065f46;
+      border: 1px solid #059669;
+      color: white;
+      padding: 14px 22px;
+      border-radius: 10px;
+      font-size: 14px;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.4);
+      display: none;
+      align-items: center;
+      gap: 10px;
+      z-index: 200;
+      animation: slideIn 0.3s ease-out;
+    }
+
+    .toast.show {
+      display: flex;
+    }
+
+    @keyframes slideIn {
+      from { transform: translateY(100%); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <!-- Header -->
+  <header class="header">
+    <div class="logo-area">
+      <div class="logo-icon">💎</div>
+      <div class="title-area">
+        <h1>Sift AI - จัดการแพ็กเกจและโควต้าบริษัท</h1>
+        <p>ปรับเปลี่ยนระดับแพ็กเกจ (Tier) และโควต้าการใช้งานต่อเดือนสำหรับแต่ละบริษัทได้ทันที</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button class="btn btn-outline" onclick="loadCompanies()">🔄 รีเฟรชข้อมูล</button>
+      <a href="/health" target="_blank" class="btn btn-outline">⚡ ตรวจสถานะเซิร์ฟเวอร์</a>
+    </div>
+  </header>
+
+  <!-- Summary Stats -->
+  <div class="stats-grid">
+    <div class="stat-card">
+      <span class="stat-title">🏢 จำนวนบริษัททั้งหมด</span>
+      <span class="stat-value" id="stat-total-companies">5</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-title">💬 แชตรวมที่ใช้งานในเดือนนี้</span>
+      <span class="stat-value" id="stat-total-usage">0</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-title">📊 โควต้ารวมที่จัดสรร</span>
+      <span class="stat-value" id="stat-total-quota">0</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-title">🗓️ วันที่ตัดรอบบิลถัดไป</span>
+      <span class="stat-value" style="font-size: 20px;" id="stat-reset-date">-</span>
+    </div>
+  </div>
+
+  <!-- Companies List -->
+  <div class="section-title">
+    <span>🏢 รายชื่อบริษัทและสิทธิ์การใช้งาน (Company Subscriptions)</span>
+  </div>
+
+  <div class="companies-list" id="companies-container">
+    <div style="text-align: center; padding: 40px; color: var(--text-muted);">
+      ⏳ กำลังโหลดข้อมูลบริษัทและสถิติโควต้าจากระบบ...
+    </div>
+  </div>
+</div>
+
+<!-- Modal: Change Package -->
+<div class="modal-backdrop" id="editModal">
+  <div class="modal-box">
+    <div class="modal-header">
+      <div>
+        <h2>⚙️ ปรับเปลี่ยนแพ็กเกจ</h2>
+        <p id="modal-company-name">บริษัท: -</p>
+      </div>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+
+    <!-- 1. Customer Type (Theme) -->
+    <div class="form-group">
+      <label class="form-label">1. ประเภทลูกค้า (Pricing Theme)</label>
+      <div class="theme-selector">
+        <div class="theme-card selected" id="theme-partner" onclick="selectTheme('partner')">
+          <span style="font-size: 20px;">🖤</span>
+          <div>
+            <strong style="display: block; font-size: 14px;">Partner (สีดำ)</strong>
+            <span style="font-size: 11px; color: var(--text-muted);">ราคาส่วนลดพิเศษสำหรับพาร์ทเนอร์</span>
+          </div>
+        </div>
+        <div class="theme-card" id="theme-standard" onclick="selectTheme('standard')">
+          <span style="font-size: 20px;">🤍</span>
+          <div>
+            <strong style="display: block; font-size: 14px;">ลูกค้าทั่วไป (สีขาว)</strong>
+            <span style="font-size: 11px; color: var(--text-muted);">ราคามาตรฐานลูกค้าทั่วไป</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 2. Package Tier -->
+    <div class="form-group">
+      <label class="form-label">2. ระดับแพ็กเกจ (Tier)</label>
+      <div class="tier-grid">
+        <div class="tier-card" id="tier-starter" onclick="selectTier('starter')">
+          <div class="tier-name"><span>Starter</span> <span class="tier-price" id="price-starter">฿8,000</span></div>
+          <span class="tier-desc">20,000 แชต/เดือน • ไม่รวม Bot</span>
+        </div>
+        <div class="tier-card selected" id="tier-pro" onclick="selectTier('pro')">
+          <div class="tier-name"><span>Pro 🔥</span> <span class="tier-price" id="price-pro">฿15,000</span></div>
+          <span class="tier-desc">50,000 แชต/เดือน • Bot 1 กลุ่ม • เสียงเตือน</span>
+        </div>
+        <div class="tier-card" id="tier-enterprise" onclick="selectTier('enterprise')">
+          <div class="tier-name"><span>Enterprise</span> <span class="tier-price" id="price-enterprise">฿28,000</span></div>
+          <span class="tier-desc">120,000 แชต/เดือน • Bot 3 กลุ่ม • เสียงเตือน</span>
+        </div>
+        <div class="tier-card" id="tier-custom" onclick="selectTier('custom')">
+          <div class="tier-name"><span>Custom</span> <span class="tier-price" id="price-custom">ติดต่อฝ่ายขาย</span></div>
+          <span class="tier-desc">ไม่จำกัดแชต • On-Premise / Bespoke</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 3. Custom Quota Override (Optional) -->
+    <div class="form-group" id="custom-quota-container" style="display: none;">
+      <label class="form-label">โควต้าแชตที่กำหนดเฉพาะ (Custom Quota / เดือน)</label>
+      <input type="number" class="input-field" id="input-custom-quota" placeholder="ระบุจำนวนแชต เช่น 200000">
+    </div>
+
+    <!-- 4. Package Status -->
+    <div class="form-group">
+      <label class="form-label">3. สถานะการใช้งาน (Status)</label>
+      <select class="input-field" id="select-status">
+        <option value="active">🟢 Active (เปิดใช้งานปกติ)</option>
+        <option value="suspended">🟡 Suspended (ระงับชั่วคราว)</option>
+        <option value="cancelled">🔴 Cancelled (ยกเลิกการใช้งาน)</option>
+      </select>
+    </div>
+
+    <!-- Actions -->
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeModal()">ยกเลิก</button>
+      <button class="btn btn-primary" id="btn-save" onclick="savePackageChanges()">💾 บันทึกการเปลี่ยนแปลง</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast">
+  <span>✅</span>
+  <span id="toast-msg">บันทึกสำเร็จเรียบร้อยแล้ว</span>
+</div>
+
+<script>
+  let allCompanies = [];
+  let packagesConfig = null;
+  let currentEditingCompanyId = null;
+  let selectedCustomerType = 'partner';
+  let selectedPackageTier = 'pro';
+
+  // Pricing Matrix for Dynamic Display
+  const PRICING = {
+    partner: {
+      starter: '฿8,000 / ด.',
+      pro: '฿15,000 / ด.',
+      enterprise: '฿28,000 / ด.',
+      custom: 'ติดต่อฝ่ายขาย'
+    },
+    standard: {
+      starter: '฿9,600 / ด.',
+      pro: '฿18,000 / ด.',
+      enterprise: '฿33,600 / ด.',
+      custom: 'ติดต่อฝ่ายขาย'
+    }
+  };
+
+  async function init() {
+    try {
+      const pkgRes = await fetch('/api/packages');
+      const pkgData = await pkgRes.json();
+      packagesConfig = pkgData.packages;
+    } catch (e) {
+      console.warn('Could not load packages config:', e);
+    }
+    await loadCompanies();
+  }
+
+  async function loadCompanies() {
+    const container = document.getElementById('companies-container');
+    container.innerHTML = '<div style="text-align: center; padding: 40px; color: var(--text-muted);">⏳ กำลังโหลดข้อมูลบริษัทและสถิติโควต้า...</div>';
+
+    try {
+      const res = await fetch('/api/companies');
+      allCompanies = await res.json();
+
+      let totalUsage = 0;
+      let totalQuota = 0;
+      let resetDate = '-';
+
+      container.innerHTML = '';
+      allCompanies.forEach(comp => {
+        const q = comp.quota || {};
+        totalUsage += (q.currentUsage || 0);
+        if (q.monthlyLimit) totalQuota += q.monthlyLimit;
+
+        if (q.billingCycle?.resetDate) {
+          resetDate = new Date(q.billingCycle.resetDate).toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' });
+        }
+
+        const isPartner = (q.customerType || comp.customer_type) === 'partner';
+        const tierName = (q.packageName || comp.package_tier || 'Starter').toUpperCase();
+        const usagePercent = q.usagePercent || 0;
+        const limitStr = q.monthlyLimit ? q.monthlyLimit.toLocaleString() : 'Unlimited';
+        const usedStr = (q.currentUsage || 0).toLocaleString();
+        const remainStr = q.remaining !== null ? q.remaining?.toLocaleString() : 'ไม่จำกัด';
+
+        const isExceeded = q.isExceeded;
+        const statusBadge = isExceeded
+          ? '<span class="badge badge-status-exceeded">🔴 โควต้าเต็ม</span>'
+          : '<span class="badge badge-status-active">🟢 ปกติ</span>';
+
+        const tgStr = q.telegramGroupLimit !== null 
+          ? (q.telegramGroupLimit === 0 ? '❌ ไม่รวม Telegram Bot' : `🤖 รองรับ ${q.telegramGroupLimit} กลุ่ม`)
+          : '🤖 Bot ไม่จำกัด';
+
+        const card = document.createElement('div');
+        card.className = 'company-card';
+        card.innerHTML = `
+          <div class="company-info">
+            <h3>🏢 ${comp.name}</h3>
+            <p>🌐 ${comp.domain || '-'} &bull; ID: <code style="font-size: 11px;">${comp.id.substring(0, 8)}...</code></p>
+            <div class="badge-group" style="margin-top: 8px;">
+              <span class="badge ${isPartner ? 'badge-partner' : 'badge-standard'}">${isPartner ? '🖤 Partner (สีดำ)' : '🤍 ลูกค้าทั่วไป (สีขาว)'}</span>
+              <span class="badge badge-tier ${tierName.includes('ENTERPRISE') ? 'badge-enterprise' : ''}">${tierName}</span>
+              ${statusBadge}
+            </div>
+          </div>
+
+          <div>
+            <div style="font-size: 13px; color: #cbd5e1; margin-bottom: 4px;">${tgStr}</div>
+            <div style="font-size: 12px; color: var(--text-muted);">${q.hasSoundAlert ? '🔔 ระบบเสียงเตือน: เปิด' : '🔕 ไม่มีระบบเสียงเตือน'}</div>
+          </div>
+
+          <div class="quota-meter">
+            <div class="quota-header">
+              <span>โควต้าเดือนนี้</span>
+              <strong>${usedStr} / ${limitStr} (${usagePercent}%)</strong>
+            </div>
+            <div class="progress-track">
+              <div class="progress-fill ${isExceeded ? 'exceeded' : ''}" style="width: ${Math.min(100, Math.max(1, usagePercent))}%;"></div>
+            </div>
+            <div style="font-size: 11px; color: var(--text-muted); display: flex; justify-content: space-between;">
+              <span>คงเหลือ: <strong style="color: #38bdf8;">${remainStr}</strong></span>
+              <span>รีเซ็ต: ${resetDate}</span>
+            </div>
+          </div>
+
+          <div style="text-align: right;">
+            <button class="btn btn-primary" onclick="openEditModal('${comp.id}')">
+              ⚙️ ปรับแพ็กเกจ
+            </button>
+          </div>
+        `;
+        container.appendChild(card);
+      });
+
+      // Update Summary Header
+      document.getElementById('stat-total-companies').textContent = allCompanies.length;
+      document.getElementById('stat-total-usage').textContent = totalUsage.toLocaleString() + ' แชต';
+      document.getElementById('stat-total-quota').textContent = totalQuota.toLocaleString() + ' แชต';
+      document.getElementById('stat-reset-date').textContent = resetDate;
+
+    } catch (err) {
+      container.innerHTML = `<div style="text-align: center; color: var(--danger); padding: 40px;">⚠️ เกิดข้อผิดพลาดในการโหลดข้อมูล: ${err.message}</div>`;
+    }
+  }
+
+  function openEditModal(companyId) {
+    const comp = allCompanies.find(c => c.id === companyId);
+    if (!comp) return;
+
+    currentEditingCompanyId = companyId;
+    document.getElementById('modal-company-name').textContent = `บริษัท: ${comp.name} (${comp.domain || '-'})`;
+
+    const q = comp.quota || {};
+    selectTheme(q.customerType || comp.customer_type || 'partner');
+    selectTier(q.packageTier || comp.package_tier || 'pro');
+
+    const customQuotaInput = document.getElementById('input-custom-quota');
+    if (comp.custom_quota) {
+      customQuotaInput.value = comp.custom_quota;
+    } else {
+      customQuotaInput.value = '';
+    }
+
+    document.getElementById('select-status').value = comp.package_status || 'active';
+    document.getElementById('editModal').classList.add('open');
+  }
+
+  function closeModal() {
+    document.getElementById('editModal').classList.remove('open');
+    currentEditingCompanyId = null;
+  }
+
+  function selectTheme(theme) {
+    selectedCustomerType = theme;
+    document.getElementById('theme-partner').classList.toggle('selected', theme === 'partner');
+    document.getElementById('theme-standard').classList.toggle('selected', theme === 'standard');
+
+    // Update prices on tier cards
+    const prices = PRICING[theme];
+    document.getElementById('price-starter').textContent = prices.starter;
+    document.getElementById('price-pro').textContent = prices.pro;
+    document.getElementById('price-enterprise').textContent = prices.enterprise;
+    document.getElementById('price-custom').textContent = prices.custom;
+  }
+
+  function selectTier(tier) {
+    selectedPackageTier = tier;
+    ['starter', 'pro', 'enterprise', 'custom'].forEach(t => {
+      document.getElementById(`tier-${t}`).classList.toggle('selected', t === tier);
+    });
+
+    const customContainer = document.getElementById('custom-quota-container');
+    if (tier === 'custom') {
+      customContainer.style.display = 'block';
+    } else {
+      customContainer.style.display = 'none';
+    }
+  }
+
+  async function savePackageChanges() {
+    if (!currentEditingCompanyId) return;
+
+    const saveBtn = document.getElementById('btn-save');
+    saveBtn.disabled = true;
+    saveBtn.textContent = '⏳ กำลังบันทึก...';
+
+    const customQuotaVal = document.getElementById('input-custom-quota').value;
+    const customQuota = selectedPackageTier === 'custom' || customQuotaVal ? Number(customQuotaVal) || null : null;
+    const packageStatus = document.getElementById('select-status').value;
+
+    // Telegram group limits based on tier
+    let tgLimit = 0;
+    if (selectedPackageTier === 'pro') tgLimit = 1;
+    if (selectedPackageTier === 'enterprise') tgLimit = 3;
+    if (selectedPackageTier === 'custom') tgLimit = null;
+
+    try {
+      const res = await fetch(`/api/companies/${currentEditingCompanyId}/package`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customer_type: selectedCustomerType,
+          package_tier: selectedPackageTier,
+          custom_quota: customQuota,
+          package_status: packageStatus,
+          telegram_group_limit: tgLimit
+        })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'บันทึกไม่สำเร็จ');
+      }
+
+      closeModal();
+      showToast('✅ อัปเดตแพ็กเกจและสิทธิ์ของบริษัทสำเร็จเรียบร้อยแล้ว!');
+      await loadCompanies();
+    } catch (err) {
+      alert('⚠️ เกิดข้อผิดพลาด: ' + err.message);
+    } finally {
+      saveBtn.disabled = false;
+      saveBtn.textContent = '💾 บันทึกการเปลี่ยนแปลง';
+    }
+  }
+
+  function showToast(msg) {
+    const toast = document.getElementById('toast');
+    document.getElementById('toast-msg').textContent = msg;
+    toast.classList.add('show');
+    setTimeout(() => {
+      toast.classList.remove('show');
+    }, 3500);
+  }
+
+  window.addEventListener('DOMContentLoaded', init);
+</script>
+
+</body>
+</html>

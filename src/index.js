@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
@@ -171,6 +172,12 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(express.static('public'));
+
+// Serve web UI for package and quota management
+app.get('/packages', (req, res) => {
+  res.sendFile(path.resolve('public/packages.html'));
+});
 
 const PORT = process.env.PORT || 4000;
 
@@ -781,6 +788,30 @@ app.get('/api/packages', (req, res) => {
     message: 'Sift AI Subscription Packages',
     packages: PACKAGE_CONFIG
   });
+});
+
+// Get all companies with real-time quota and package details
+app.get('/api/companies', async (req, res) => {
+  try {
+    const companies = await getAllCompanies();
+    const withQuotas = await Promise.all(companies.map(async (c) => {
+      try {
+        const quota = await checkCompanyQuota(c.id);
+        return {
+          ...c,
+          quota
+        };
+      } catch (e) {
+        return {
+          ...c,
+          quota: null
+        };
+      }
+    }));
+    res.json(withQuotas);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 });
 
 // Get current authenticated company quota and usage
