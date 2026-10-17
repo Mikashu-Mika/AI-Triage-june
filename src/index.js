@@ -5,12 +5,13 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
-import { supabase, getPendingChats, updateTriageResult, updateChatIssues, authenticateCompany, initializeCompanyCategories, getCategories, authenticateUser, getAllUsers, createUser, updateUser, deleteUser, getAllCompanies, getAllCustomers, createCustomer, updateCustomer, deleteCustomer, ROLE_HIERARCHY } from './supabase.js';
+import { supabase, getPendingChats, updateTriageResult, updateChatIssues, authenticateCompany, initializeCompanyCategories, getCategories, authenticateUser, getAllUsers, createUser, updateUser, deleteUser, getAllCompanies, getAllCustomers, createCustomer, updateCustomer, deleteCustomer, updateCompanyPackage, ROLE_HIERARCHY } from './supabase.js';
 import { getEmbedding } from './ollama.js';
 import { runTriagePipeline, processSingleChat } from './triageService.js';
 import { extractTextFromImage } from './ocr.js';
 import { processAgentQuery } from './agentService.js';
 import { handleTelegramMessage, handleTelegramCallbackQuery, startTelegramPolling, initTelegramBot, setTelegramWebhook } from './telegramBot.js';
+import { enforceCompanyQuota, checkCompanyQuota, PACKAGE_CONFIG } from './quotaService.js';
 
 dotenv.config();
 
@@ -56,6 +57,7 @@ async function scanAndEnqueuePendingChats(isStartup = false) {
       .from('chats')
       .select('id, status, embedding, summary, category_id, chat_issues(id, recommended_reply)')
       .or('status.eq.pending,embedding.is.null')
+      .neq('status', 'quota_exceeded')
       .order('created_at', { ascending: false })
       .limit(50);
 
@@ -85,6 +87,7 @@ async function scanAndEnqueuePendingChats(isStartup = false) {
     const { data: allRecent, error: err2 } = await supabase
       .from('chats')
       .select('id, summary, chat_issues(id, recommended_reply)')
+      .neq('status', 'quota_exceeded')
       .order('created_at', { ascending: false })
       .limit(30);
 
@@ -382,7 +385,7 @@ app.get('/api/chats/pending', authCompany, async (req, res) => {
 });
 
 // REST API: Trigger batch triage for authenticated company
-app.post('/api/triage/run', authCompany, async (req, res) => {
+app.post('/api/triage/run', authCompany, enforceCompanyQuota, async (req, res) => {
   try {
     const report = await runTriagePipeline(req.company.id);
     res.json(report);
@@ -407,7 +410,7 @@ app.post('/api/triage/save', async (req, res) => {
 });
 
 // REST API: Ingest a new chat session from live chat (Real-time Seam) - Authenticated
-app.post('/api/chats/ingest', authCompany, async (req, res) => {
+app.post('/api/chats/ingest', authCompany, enforceCompanyQuota, async (req, res) => {
   const { id, customer_id, conversation } = req.body;
   if (!id || !customer_id || !conversation) {
     return res.status(400).json({ error: 'Missing parameters: id, customer_id, conversation' });
@@ -463,6 +466,19 @@ app.post('/api/chats/:id/triage', async (req, res) => {
     return res.status(400).json({ error: 'Missing parameter: id is required' });
   }
   try {
+    // Check if chat's company has exceeded quota before triggering
+    const { data: chatRec } = await supabase.from('chats').select('company_id').eq('id', id).maybeSingle();
+    if (chatRec?.company_id) {
+      const quota = await checkCompanyQuota(chatRec.company_id);
+      if (quota.isExceeded) {
+        return res.status(429).json({
+          error: 'โควต้าการใช้งานต่อเดือนครบแล้ว (Monthly Chat Quota Exceeded)',
+          message: `บริษัท ${quota.companyName} ใช้โควต้าแชตครบกำหนดของแพ็กเกจ ${quota.packageName} (${quota.monthlyLimit?.toLocaleString()} แชต) แล้วในรอบนี้`,
+          quota
+        });
+      }
+    }
+
     console.log(`[API] Triggering on-demand triage for chat: ${id}...`);
     await processSingleChat(id);
 
@@ -749,6 +765,71 @@ app.post('/api/companies/register', async (req, res) => {
         client_id: newCompany.client_id,
         client_secret: newCompany.client_secret
       }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
+// REST API: Subscription Packages & Quotas
+// ==========================================
+
+// Get all subscription packages & pricing specs (Partner & Standard)
+app.get('/api/packages', (req, res) => {
+  res.json({
+    message: 'Sift AI Subscription Packages',
+    packages: PACKAGE_CONFIG
+  });
+});
+
+// Get current authenticated company quota and usage
+app.get('/api/quota/status', authCompany, async (req, res) => {
+  try {
+    const quota = await checkCompanyQuota(req.company.id);
+    res.json(quota);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get quota for specific company (for Admin/Dashboard)
+app.get('/api/companies/:id/quota', async (req, res) => {
+  try {
+    const quota = await checkCompanyQuota(req.params.id);
+    res.json(quota);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update company package & quota settings (Admin)
+app.put('/api/companies/:id/package', async (req, res) => {
+  const { id } = req.params;
+  const { customer_type, package_tier, custom_quota, package_status, billing_cycle_anchor, telegram_group_limit } = req.body;
+  
+  if (customer_type && !['partner', 'standard'].includes(customer_type)) {
+    return res.status(400).json({ error: 'Invalid customer_type. Must be "partner" or "standard"' });
+  }
+  if (package_tier && !['starter', 'pro', 'enterprise', 'custom'].includes(package_tier)) {
+    return res.status(400).json({ error: 'Invalid package_tier. Must be "starter", "pro", "enterprise", or "custom"' });
+  }
+
+  try {
+    const updated = await updateCompanyPackage(id, {
+      customer_type,
+      package_tier,
+      custom_quota,
+      package_status,
+      billing_cycle_anchor,
+      telegram_group_limit
+    });
+
+    const quota = await checkCompanyQuota(id);
+    res.json({
+      message: 'Company package updated successfully',
+      company: updated,
+      quota
     });
   } catch (error) {
     res.status(500).json({ error: error.message });

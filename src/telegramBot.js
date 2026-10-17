@@ -14,6 +14,7 @@ import {
   getDefaultCompanyId, 
   getPeriodThaiText 
 } from './categoryHelper.js';
+import { checkCompanyQuota } from './quotaService.js';
 
 dotenv.config();
 
@@ -383,6 +384,62 @@ export async function handleTelegramMessage(message) {
 
     await sendTelegramMessage(chatId, unauthorizedReply);
     return { ok: false, error: 'Unauthorized User ID' };
+  }
+
+  // Handle /quota command or quota check queries
+  const isQuotaCmd = text.startsWith('/quota') || 
+                     text.toLowerCase() === 'โควต้า' || 
+                     text.toLowerCase() === 'เช็คโควต้า' || 
+                     text.toLowerCase() === 'ตรวจสอบโควต้า' ||
+                     text.toLowerCase() === 'แพ็กเกจ';
+
+  if (isQuotaCmd) {
+    try {
+      const quota = await checkCompanyQuota(companyId);
+      const resetDateTh = new Date(quota.billingCycle.resetDate).toLocaleDateString('th-TH', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
+      const limitStr = quota.monthlyLimit !== null ? `${quota.monthlyLimit.toLocaleString()} แชต` : 'ไม่จำกัด (Unlimited)';
+      const remainStr = quota.remaining !== null ? `${quota.remaining.toLocaleString()} แชต` : 'ไม่จำกัด (Unlimited)';
+      const statusIcon = quota.isExceeded ? '🔴 โควต้าเต็มแล้ว' : (quota.packageStatus === 'active' ? '🟢 ใช้งานได้ปกติ' : '🟡 ' + quota.packageStatus);
+      const tgLimitStr = quota.telegramGroupLimit !== null 
+        ? (quota.telegramGroupLimit === 0 ? '❌ ไม่รวมในแพ็กเกจ' : `✅ ${quota.telegramGroupLimit} กลุ่ม`)
+        : '✅ ไม่จำกัด';
+
+      const reply = `📊 **ข้อมูลแพ็กเกจและโควต้าการใช้งาน (Sift AI)**\n\n` +
+        `🏢 **บริษัท:** ${quota.companyName}\n` +
+        `🏷️ **ประเภทลูกค้า:** ${quota.themeName}\n` +
+        `💎 **แพ็กเกจปัจจุบัน:** **${quota.packageName}** (${statusIcon})\n\n` +
+        `📈 **การใช้งานในรอบเดือนนี้:**\n` +
+        `• ใช้งานไปแล้ว: **${quota.currentUsage.toLocaleString()}** แชต\n` +
+        `• โควต้าทั้งหมด: **${limitStr}**\n` +
+        `• โควต้าคงเหลือ: **${remainStr}**\n` +
+        `• คิดเป็น: **${quota.usagePercent}%** ของโควต้า\n\n` +
+        `🤖 **สิทธิ์ AI Telegram Bot:** ${tgLimitStr}\n` +
+        `🔔 **ระบบเสียงเตือน:** ${quota.hasSoundAlert ? '✅ รองรับ' : '❌ ไม่รองรับ'}\n` +
+        `🔄 **วันเริ่มรอบบิลถัดไป:** ${resetDateTh}`;
+
+      await sendTelegramMessage(chatId, reply);
+      return { ok: true, quota };
+    } catch (quotaErr) {
+      console.error('Error fetching quota for Telegram:', quotaErr.message);
+    }
+  }
+
+  // Telegram Group Check: Verify if company's package supports Telegram Bot in groups
+  if (isGroup) {
+    try {
+      const quota = await checkCompanyQuota(companyId);
+      if (quota.telegramGroupLimit === 0) {
+        const noGroupReply = `🔒 *แจ้งเตือนแพ็กเกจ*: แพ็กเกจ Starter ของบริษัท **${quota.companyName}** ยังไม่รองรับการใช้งาน AI Telegram Bot ในกลุ่มค่ะ\n\n💡 แนะนำอัปเกรดเป็นแพ็กเกจ **Pro** (รองรับ 1 กลุ่ม) หรือ **Enterprise** (รองรับ 3 กลุ่ม) เพื่อเปิดใช้งานนะคะ ✨`;
+        await sendTelegramMessage(chatId, noGroupReply);
+        return { ok: false, error: 'Telegram group not supported in package' };
+      }
+    } catch (qErr) {
+      console.warn('Could not check telegram group limit:', qErr.message);
+    }
   }
 
   // Send immediate progress acknowledgment if it is a text-typed summary/drilldown query and not coming from callback
