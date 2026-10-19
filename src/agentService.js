@@ -33,6 +33,7 @@ import {
 } from './categoryHelper.js';
 import http from 'http';
 import dotenv from 'dotenv';
+import { registerInteractiveStart, registerInteractiveEnd } from './aiScheduler.js';
 dotenv.config();
 
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
@@ -150,6 +151,7 @@ export async function logAgentActivity({ query, reply, toolUsed, durationMs, sen
  * Enqueue AI Agent Query Task (Queue Management Engine)
  */
 export function enqueueAgentQuery(task) {
+  registerInteractiveStart(task.channel || 'Telegram');
   return new Promise((resolve, reject) => {
     queryQueue.push({ task, resolve, reject });
     processQueue();
@@ -189,6 +191,8 @@ async function processQueue() {
           reply: '⚠️ ขออภัยค่ะ เกิดข้อผิดพลาดในการประมวลผลคำสั่ง กรุณาลองใหม่อีกครั้งนะคะ',
           toolUsed: 'queue_error'
         });
+      } finally {
+        registerInteractiveEnd(task.channel || 'Telegram');
       }
     }
   } finally {
