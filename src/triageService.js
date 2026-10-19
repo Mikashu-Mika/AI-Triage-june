@@ -2,6 +2,7 @@ import { supabase, getPendingChats, updateTriageResult, getCategories, findSimil
 import { generateTriage, getEmbedding } from './ollama.js';
 import { logTriageAudit } from './triageLogger.js';
 import { checkCompanyQuota } from './quotaService.js';
+import { waitForInteractiveIdle } from './aiScheduler.js';
 
 /**
  * Orchestrate the triage pipeline:
@@ -67,11 +68,13 @@ export async function runTriagePipeline(companyId) {
       // Step 3a: Layer 1 Dynamic Clause Segmentation + Layer 2 Triage Analysis (qwen2.5:14b)
       const { clauses: preSegmentedClauses } = segmentConversationIntoClauses(chat.conversation);
       console.log(`- Running Triage Analysis (Qwen 2.5) across ${preSegmentedClauses.length} dynamic clauses...`);
+      await waitForInteractiveIdle(`runTriagePipeline (${chat.id}) - Qwen Triage`);
       const triage = await generateTriage(chat.conversation, categories, trainingExamples, preSegmentedClauses);
       console.log(`  Result: CategoryID="${triage.category_id}", Priority="${triage.priority}", Summary="${triage.summary}"`);
 
       // Step 3b: Generate Embeddings from Summary (bge-m3)
       console.log(`- Generating vector embedding (BGE-M3)...`);
+      await waitForInteractiveIdle(`runTriagePipeline (${chat.id}) - BGE-M3 Embedding`);
       const embedding = await getEmbedding(triage.summary);
       console.log(`  Result: Vector generated successfully (length: ${embedding.length})`);
 
@@ -698,9 +701,11 @@ export async function processSingleChat(chatId) {
 
     // 3. Layer 1 Dynamic Clause Segmentation + Layer 2 Triage Analysis (Qwen 2.5)
     const { clauses: preSegmentedClauses } = segmentConversationIntoClauses(chat.conversation);
+    await waitForInteractiveIdle(`processSingleChat (${chatId}) - Qwen Triage`);
     const triage = await generateTriage(chat.conversation, categories, trainingExamples, preSegmentedClauses);
     
     // 4. Generate Embeddings (BGE-M3)
+    await waitForInteractiveIdle(`processSingleChat (${chatId}) - BGE-M3 Embedding`);
     const embedding = await getEmbedding(triage.summary);
     
     // 5. Search for similar cases (pgvector)

@@ -13,6 +13,7 @@ import { extractTextFromImage } from './ocr.js';
 import { processAgentQuery } from './agentService.js';
 import { handleTelegramMessage, handleTelegramCallbackQuery, startTelegramPolling, initTelegramBot, setTelegramWebhook } from './telegramBot.js';
 import { enforceCompanyQuota, checkCompanyQuota, PACKAGE_CONFIG } from './quotaService.js';
+import { waitForInteractiveIdle, isInteractiveActive, getInteractiveCount } from './aiScheduler.js';
 
 dotenv.config();
 
@@ -32,6 +33,16 @@ let currentProcessingChatId = null;
 
 async function processTriageQueue() {
   if (isQueueProcessing || triageQueue.length === 0) return;
+
+  // Priority Check: If any Telegram query is active or waiting, PAUSE background triage!
+  if (isInteractiveActive()) {
+    console.log(`⏸️ [Priority Queue] Telegram task is active (${getInteractiveCount()} pending). Pausing triage queue...`);
+    await waitForInteractiveIdle('Triage Queue');
+    console.log(`▶️ [Priority Queue] Resuming triage queue after Telegram completed.`);
+  }
+
+  if (triageQueue.length === 0) return;
+
   isQueueProcessing = true;
 
   const nextChatId = triageQueue.shift();
@@ -51,6 +62,12 @@ async function processTriageQueue() {
 // Background scanner to auto-enqueue any un-triaged or incomplete chats from database
 let isScanningPending = false;
 async function scanAndEnqueuePendingChats(isStartup = false) {
+  // If Telegram query is currently active or waiting, skip background scan to yield CPU/DB
+  if (isInteractiveActive()) {
+    console.log(`⏸️ [Priority Scanner] Telegram query active. Skipping background scan.`);
+    return;
+  }
+
   if (isScanningPending) return;
   isScanningPending = true;
   try {
