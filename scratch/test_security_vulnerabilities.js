@@ -184,7 +184,8 @@ async function runSecurityTestSuite() {
     const nonExecRes = await handleTelegramMessage({
       text: 'ขอยอดเงินคงเหลือและยอดฝากถอนทั้งหมดหน่อย',
       from: { id: 999999999, first_name: 'Guest User' },
-      chat: { id: -5495142610, type: 'supergroup' }
+      chat: { id: -5495142610, type: 'supergroup' },
+      _dryRun: true
     });
 
     console.assert(nonExecRes && nonExecRes.ok === false, 'Non-executive must be blocked');

@@ -21,7 +21,7 @@ export async function getDefaultCompanyId() {
     const { data, error } = await supabase
       .from('companies')
       .select('id')
-      .limit(1)
+      .ilike('name', '%mika%')
       .maybeSingle();
     if (!error && data && data.id) {
       defaultCompanyIdCache = data.id;
@@ -30,7 +30,8 @@ export async function getDefaultCompanyId() {
   } catch (err) {
     console.warn('Failed to fetch default company id:', err.message);
   }
-  return '2c3f46cc-fae8-4ef8-99e1-874dec8b2af2';
+  defaultCompanyIdCache = '2c3f46cc-fae8-4ef8-99e1-874dec8b2af2';
+  return defaultCompanyIdCache;
 }
 
 export const THAI_MONTHS = [
