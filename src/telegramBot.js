@@ -2,7 +2,7 @@ import https from 'https';
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
-import { processAgentQuery, logAgentActivity } from './agentService.js';
+import { processAgentQuery, logAgentActivity, detectPromptInjection } from './agentService.js';
 import { generateExcelReport } from './excelService.js';
 import { 
   getCachedCategories, 
@@ -398,6 +398,37 @@ export async function handleTelegramMessage(message) {
 
     await sendTelegramMessage(chatId, unauthorizedReply);
     return { ok: false, error: 'Unauthorized User ID' };
+  }
+
+  // Prompt Injection Pre-check in Telegram
+  const injection = detectPromptInjection(text);
+  if (injection.isMalicious) {
+    console.warn(`🛡️ [Telegram Security] Prompt Injection detected from ${senderName} (ID: ${senderId}): "${text}"`);
+    const injectionReply = `🛡️ *แจ้งเตือนความปลอดภัย*: ตรวจพบข้อความที่ไม่ปลอดภัยหรือพยายามแทรกแซงคำสั่งระบบ ขอปฏิเสธการประมวลผลคำสั่งนี้ค่ะ ✨`;
+    await sendTelegramMessage(chatId, injectionReply);
+    return { ok: false, error: 'Prompt Injection Blocked' };
+  }
+
+  // Sensitive Data Access Control (Financial & Customer PII restricted to Executives)
+  const lowerText = text.toLowerCase();
+  const isSensitiveFinancial = lowerText.includes('ยอดเงิน') || 
+                               lowerText.includes('ยอดฝาก') || 
+                               lowerText.includes('ยอดถอน') || 
+                               lowerText.includes('รายรับ') || 
+                               lowerText.includes('รายจ่าย') || 
+                               lowerText.includes('การเงิน') ||
+                               lowerText.includes('ยอดสุทธิ') ||
+                               lowerText.includes('กำไร') ||
+                               lowerText.includes('ขาดทุน');
+  const isSensitiveCustomerPii = (lowerText.includes('รายชื่อ') && (lowerText.includes('ลูกค้า') || lowerText.includes('สมาชิก'))) ||
+                                 lowerText.includes('เบอร์โทร') ||
+                                 lowerText.includes('อีเมลลูกค้า');
+
+  if (isGroup && !isExec && (isSensitiveFinancial || isSensitiveCustomerPii)) {
+    console.warn(`🔒 [Security Guard] Non-executive ${senderName} (ID: ${senderId}) attempted to access sensitive company data: "${text}"`);
+    const restrictedReply = `🔒 *สิทธิ์การเข้าถึง*: ข้อมูลสรุปการเงินและข้อมูลลูกค้าระดับลึก สงวนสิทธิ์การสืบค้นเฉพาะผู้บริหารเท่านั้นค่ะ`;
+    await sendTelegramMessage(chatId, restrictedReply);
+    return { ok: false, error: 'Restricted Data: Executive Only' };
   }
 
   // Handle /quota command or quota check queries

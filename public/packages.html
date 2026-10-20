@@ -1021,7 +1021,10 @@
     try {
       const res = await fetch(`/api/companies/${currentEditingCompanyId}/package`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-Admin-Key': 'sift-admin-secret-2026'
+        },
         body: JSON.stringify({
           customer_type: selectedCustomerType,
           package_tier: selectedPackageTier,
