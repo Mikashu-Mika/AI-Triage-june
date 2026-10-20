@@ -371,6 +371,15 @@ export async function handleTelegramMessage(message) {
 
   console.log(`📥 Received Telegram Message [${message.chat.type}] from ${senderName}${isExec ? ' 👑[EXECUTIVE VIP]' : ''} (ID: ${senderId}, Chat ID: ${chatId}): "${text}"`);
 
+  // Safe message sender that honors _dryRun flag to prevent accidental test messages to live groups
+  const sendMessage = async (cId, mText, mParseMode = 'Markdown', mReplyMarkup = null) => {
+    if (message._dryRun) {
+      console.log(`[DRY-RUN] Suppressed Telegram message to ${cId}: "${(mText || '').slice(0, 60)}..."`);
+      return { ok: true, result: { message_id: 99999 } };
+    }
+    return await sendTelegramMessage(cId, mText, mParseMode, mReplyMarkup);
+  };
+
   const companyId = process.env.DEFAULT_COMPANY_ID || await getDefaultCompanyId();
 
   // Security & VIP Authorization Check (Evaluated Dynamically with VIP Whitelist):
@@ -396,7 +405,7 @@ export async function handleTelegramMessage(message) {
       chatId
     });
 
-    await sendTelegramMessage(chatId, unauthorizedReply);
+    await sendMessage(chatId, unauthorizedReply);
     return { ok: false, error: 'Unauthorized User ID' };
   }
 
@@ -405,21 +414,32 @@ export async function handleTelegramMessage(message) {
   if (injection.isMalicious) {
     console.warn(`🛡️ [Telegram Security] Prompt Injection detected from ${senderName} (ID: ${senderId}): "${text}"`);
     const injectionReply = `🛡️ *แจ้งเตือนความปลอดภัย*: ตรวจพบข้อความที่ไม่ปลอดภัยหรือพยายามแทรกแซงคำสั่งระบบ ขอปฏิเสธการประมวลผลคำสั่งนี้ค่ะ ✨`;
-    await sendTelegramMessage(chatId, injectionReply);
+    await sendMessage(chatId, injectionReply);
     return { ok: false, error: 'Prompt Injection Blocked' };
   }
 
   // Sensitive Data Access Control (Financial & Customer PII restricted to Executives)
   const lowerText = text.toLowerCase();
-  const isSensitiveFinancial = lowerText.includes('ยอดเงิน') || 
-                               lowerText.includes('ยอดฝาก') || 
-                               lowerText.includes('ยอดถอน') || 
-                               lowerText.includes('รายรับ') || 
-                               lowerText.includes('รายจ่าย') || 
-                               lowerText.includes('การเงิน') ||
-                               lowerText.includes('ยอดสุทธิ') ||
-                               lowerText.includes('กำไร') ||
-                               lowerText.includes('ขาดทุน');
+  const isProblemStatsQuery = lowerText.includes('ปัญหา') || 
+                              lowerText.includes('เคส') || 
+                              lowerText.includes('แชท') || 
+                              lowerText.includes('แชต') ||
+                              lowerText.includes('กี่ครั้ง') || 
+                              lowerText.includes('กี่เคส') ||
+                              lowerText.includes('กี่คน') ||
+                              lowerText.includes('อันดับ');
+
+  const isSensitiveFinancial = !isProblemStatsQuery && (
+    lowerText.includes('ยอดเงิน') || 
+    lowerText.includes('ยอดฝาก') || 
+    lowerText.includes('ยอดถอน') || 
+    lowerText.includes('รายรับ') || 
+    lowerText.includes('รายจ่าย') || 
+    lowerText.includes('การเงิน') ||
+    lowerText.includes('ยอดสุทธิ') ||
+    lowerText.includes('กำไร') ||
+    lowerText.includes('ขาดทุน')
+  );
   const isSensitiveCustomerPii = (lowerText.includes('รายชื่อ') && (lowerText.includes('ลูกค้า') || lowerText.includes('สมาชิก'))) ||
                                  lowerText.includes('เบอร์โทร') ||
                                  lowerText.includes('อีเมลลูกค้า');
@@ -427,7 +447,7 @@ export async function handleTelegramMessage(message) {
   if (isGroup && !isExec && (isSensitiveFinancial || isSensitiveCustomerPii)) {
     console.warn(`🔒 [Security Guard] Non-executive ${senderName} (ID: ${senderId}) attempted to access sensitive company data: "${text}"`);
     const restrictedReply = `🔒 *สิทธิ์การเข้าถึง*: ข้อมูลสรุปการเงินและข้อมูลลูกค้าระดับลึก สงวนสิทธิ์การสืบค้นเฉพาะผู้บริหารเท่านั้นค่ะ`;
-    await sendTelegramMessage(chatId, restrictedReply);
+    await sendMessage(chatId, restrictedReply);
     return { ok: false, error: 'Restricted Data: Executive Only' };
   }
 
@@ -466,7 +486,7 @@ export async function handleTelegramMessage(message) {
         `🔔 **ระบบเสียงเตือน:** ${quota.hasSoundAlert ? '✅ รองรับ' : '❌ ไม่รองรับ'}\n` +
         `🔄 **วันเริ่มรอบบิลถัดไป:** ${resetDateTh}`;
 
-      await sendTelegramMessage(chatId, reply);
+      await sendMessage(chatId, reply);
       return { ok: true, quota };
     } catch (quotaErr) {
       console.error('Error fetching quota for Telegram:', quotaErr.message);
@@ -479,7 +499,7 @@ export async function handleTelegramMessage(message) {
       const quota = await checkCompanyQuota(companyId);
       if (quota.telegramGroupLimit === 0) {
         const noGroupReply = `🔒 *แจ้งเตือนแพ็กเกจ*: แพ็กเกจ Starter ของบริษัท **${quota.companyName}** ยังไม่รองรับการใช้งาน AI Telegram Bot ในกลุ่มค่ะ\n\n💡 แนะนำอัปเกรดเป็นแพ็กเกจ **Pro** (รองรับ 1 กลุ่ม) หรือ **Enterprise** (รองรับ 3 กลุ่ม) เพื่อเปิดใช้งานนะคะ ✨`;
-        await sendTelegramMessage(chatId, noGroupReply);
+        await sendMessage(chatId, noGroupReply);
         return { ok: false, error: 'Telegram group not supported in package' };
       }
     } catch (qErr) {
@@ -562,7 +582,7 @@ export async function handleTelegramMessage(message) {
     }
 
     if (textProgressMsg) {
-      await sendTelegramMessage(chatId, textProgressMsg);
+      await sendMessage(chatId, textProgressMsg);
     }
   }
 
@@ -597,7 +617,7 @@ export async function handleTelegramMessage(message) {
     }
 
     // Send formatted response to Telegram
-    const result = await sendTelegramMessage(chatId, agentResponse.reply, 'Markdown', replyMarkup);
+    const result = await sendMessage(chatId, agentResponse.reply, 'Markdown', replyMarkup);
 
     // If Excel export requested (more than 20 items), generate and send Excel document
     if (agentResponse && agentResponse.excelExport && Array.isArray(agentResponse.excelExport.items) && agentResponse.excelExport.items.length > 0) {
@@ -611,8 +631,10 @@ export async function handleTelegramMessage(message) {
 
         if (excelFilePath && fs.existsSync(excelFilePath)) {
           const docCaption = `📎 **ไฟล์รายงานสถิติปัญหาฉบับเต็ม (.xlsx)**\nประจำ${agentResponse.excelExport.periodLabel || 'ปัจจุบัน'} (รวม **${agentResponse.excelExport.items.length} รายการ**)`;
-          await sendTelegramDocument(chatId, excelFilePath, docCaption);
-          console.log(`✅ Telegram Excel document sent successfully to chat ${chatId}: ${excelFilePath}`);
+          if (!message._dryRun) {
+            await sendTelegramDocument(chatId, excelFilePath, docCaption);
+            console.log(`✅ Telegram Excel document sent successfully to chat ${chatId}: ${excelFilePath}`);
+          }
         }
       } catch (excelErr) {
         console.error('Error sending Telegram Excel document:', excelErr.message);
@@ -622,11 +644,12 @@ export async function handleTelegramMessage(message) {
     return result;
   } catch (err) {
     console.error('Error processing Telegram message:', err.message);
-    await sendTelegramMessage(chatId, '⚠️ ขออภัยค่ะ เกิดข้อผิดพลาดในการประมวลผลคำสั่ง กรุณาลองใหม่อีกครั้งนะคะ');
+    await sendMessage(chatId, '⚠️ ขออภัยค่ะ เกิดข้อผิดพลาดในการประมวลผลคำสั่ง กรุณาลองใหม่อีกครั้งนะคะ');
     return { ok: false, error: err.message };
   } finally {
     clearInterval(typingInterval);
   }
+
 }
 
 /**
