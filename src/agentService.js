@@ -151,7 +151,7 @@ export async function logAgentActivity({ query, reply, toolUsed, durationMs, sen
  * Enqueue AI Agent Query Task (Queue Management Engine)
  */
 export function enqueueAgentQuery(task) {
-  registerInteractiveStart(task.channel || 'Telegram');
+  registerInteractiveStart(task.channel || 'Telegram', task.isExecutive, task.senderName);
   return new Promise((resolve, reject) => {
     queryQueue.push({ task, resolve, reject });
     processQueue();
@@ -192,7 +192,7 @@ async function processQueue() {
           toolUsed: 'queue_error'
         });
       } finally {
-        registerInteractiveEnd(task.channel || 'Telegram');
+        registerInteractiveEnd(task.channel || 'Telegram', task.isExecutive);
       }
     }
   } finally {
@@ -1369,6 +1369,7 @@ export async function processAgentQuery(userQuery, companyId, options = {}) {
     senderName: options.senderName || 'API User',
     senderId: options.senderId || null,
     channel: options.channel || 'api',
-    chatId: options.chatId || null
+    chatId: options.chatId || null,
+    isExecutive: !!options.isExecutive
   });
 }

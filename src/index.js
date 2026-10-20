@@ -13,13 +13,21 @@ import { extractTextFromImage } from './ocr.js';
 import { processAgentQuery } from './agentService.js';
 import { handleTelegramMessage, handleTelegramCallbackQuery, startTelegramPolling, initTelegramBot, setTelegramWebhook } from './telegramBot.js';
 import { enforceCompanyQuota, checkCompanyQuota, PACKAGE_CONFIG } from './quotaService.js';
-import { waitForInteractiveIdle, isInteractiveActive, getInteractiveCount } from './aiScheduler.js';
+import { waitForInteractiveIdle, isInteractiveActive, getInteractiveCount, setTriageQueueStateGetter, getQueueMetrics } from './aiScheduler.js';
 
 dotenv.config();
 
 // Simple background triage queue to process requests sequentially and avoid overloading CPU/Ollama
 const triageQueue = [];
 let isQueueProcessing = false;
+let currentProcessingChatId = null;
+
+// Connect AI Scheduler with Triage Queue state for real-time monitoring & metrics
+setTriageQueueStateGetter(() => ({
+  queueLength: triageQueue.length,
+  currentChatId: currentProcessingChatId,
+  isProcessing: isQueueProcessing
+}));
 
 function enqueueTriage(chatId) {
   // Avoid duplicate entries in queue
@@ -28,8 +36,6 @@ function enqueueTriage(chatId) {
   }
   processTriageQueue();
 }
-
-let currentProcessingChatId = null;
 
 async function processTriageQueue() {
   if (isQueueProcessing || triageQueue.length === 0) return;
@@ -396,6 +402,11 @@ app.post('/api/telegram/webhook', async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+});
+
+// REST API: Live Priority Queue Status & Monitor (For Dashboard & QA Testers)
+app.get('/api/queue/status', (req, res) => {
+  res.json(getQueueMetrics());
 });
 
 // REST API: Get pending chats for authenticated company

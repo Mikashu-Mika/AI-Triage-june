@@ -26,6 +26,19 @@ export const DEFAULT_ALLOWED_CHAT_IDS = [
   '6266062853'     // พี่เดล (P'Del)
 ];
 
+// Explicit Executive / VIP Identification
+export const EXECUTIVE_USER_IDS = [
+  '834472739',     // คุณมิกะ (JUNE 🐰)
+  '6266062853',    // พี่เดล (P'Del)
+  '1848586712',    // Core Admin / Team
+  '8167753903'     // Fr€nzy
+];
+
+export function isExecutiveSender(senderId) {
+  if (!senderId) return false;
+  return EXECUTIVE_USER_IDS.includes(String(senderId));
+}
+
 export function getAllowedChatIds() {
   const envIds = (process.env.TELEGRAM_ALLOWED_CHAT_IDS || '').split(',').map(id => id.trim()).filter(Boolean);
   return Array.from(new Set([...DEFAULT_ALLOWED_CHAT_IDS, ...envIds]));
@@ -354,8 +367,9 @@ export async function handleTelegramMessage(message) {
   if (!text) return null; // Ignore empty message after tag removal
 
   const senderName = message.from ? `${message.from.first_name || ''} ${message.from.last_name || ''}`.trim() : 'User';
+  const isExec = isExecutiveSender(senderId);
 
-  console.log(`📥 Received Telegram Message [${message.chat.type}] from ${senderName} (ID: ${senderId}, Chat ID: ${chatId}): "${text}"`);
+  console.log(`📥 Received Telegram Message [${message.chat.type}] from ${senderName}${isExec ? ' 👑[EXECUTIVE VIP]' : ''} (ID: ${senderId}, Chat ID: ${chatId}): "${text}"`);
 
   const companyId = process.env.DEFAULT_COMPANY_ID || await getDefaultCompanyId();
 
@@ -508,6 +522,14 @@ export async function handleTelegramMessage(message) {
       }
     }
 
+    if (isExec) {
+      if (!textProgressMsg) {
+        textProgressMsg = '👑⚡ **ผู้บริหารสอบถาม**: กำลังดึงข้อมูลและประมวลผลให้เป็นอันดับแรกค่ะ...\nรบกวนรอสักครู่นะคะ ✨';
+      } else {
+        textProgressMsg = '👑⚡ **ผู้บริหารสอบถาม**: ' + textProgressMsg.replace(/^⏳ \*\*/, '**');
+      }
+    }
+
     if (textProgressMsg) {
       await sendTelegramMessage(chatId, textProgressMsg);
     }
@@ -533,7 +555,8 @@ export async function handleTelegramMessage(message) {
       senderName,
       senderId,
       channel: isGroup ? 'telegram_group' : 'telegram_direct',
-      chatId
+      chatId,
+      isExecutive: isExec
     });
 
     // Format optional Inline Keyboard Buttons if attached
