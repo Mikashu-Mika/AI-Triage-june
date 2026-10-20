@@ -157,6 +157,74 @@
       font-weight: 700;
     }
 
+    /* Priority & Live Queue Monitor */
+    .queue-monitor-card {
+      background: linear-gradient(135deg, rgba(30, 41, 59, 0.95), rgba(15, 23, 42, 0.95));
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 16px 20px;
+      margin-bottom: 24px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+    }
+    .queue-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .queue-title-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .queue-pulse-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #10b981;
+      display: inline-block;
+      box-shadow: 0 0 10px #10b981;
+      animation: pulseAnim 1.8s infinite;
+    }
+    .queue-pulse-dot.busy {
+      background: #c084fc;
+      box-shadow: 0 0 10px #c084fc;
+    }
+    .queue-pulse-dot.triage {
+      background: #fbbf24;
+      box-shadow: 0 0 10px #fbbf24;
+    }
+    @keyframes pulseAnim {
+      0% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.85); }
+      100% { opacity: 1; transform: scale(1); }
+    }
+    .queue-metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px;
+      background: rgba(15, 23, 42, 0.6);
+      border-radius: 10px;
+      padding: 12px 16px;
+      border: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .queue-metric-item {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .metric-label {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .metric-val {
+      font-size: 18px;
+      font-weight: 700;
+    }
+
     /* Tabs */
     .tab-bar {
       display: flex;
@@ -532,6 +600,41 @@
     </div>
   </header>
 
+  <!-- Live AI Priority Queue Monitor Widget -->
+  <div class="queue-monitor-card" id="queue-monitor-card">
+    <div class="queue-header">
+      <div class="queue-title-group">
+        <span class="queue-pulse-dot" id="queue-pulse-dot"></span>
+        <strong style="font-size: 15px; letter-spacing: -0.3px;">⚡ สถานะคิวประมวลผล AI (Priority & Live Queue Monitor)</strong>
+        <span class="badge" id="queue-mode-badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4);">
+          🟢 ระบบว่าง พร้อมใช้งาน
+        </span>
+      </div>
+      <div style="font-size: 12px; color: var(--text-muted); display: flex; align-items: center; gap: 8px;">
+        <span id="queue-last-sync">อัปเดตล่าสุด: กำลังเชื่อมต่อ...</span>
+        <button onclick="fetchQueueStatus()" title="รีเฟรชสถานะทันที" style="background: transparent; border: none; color: #94a3b8; cursor: pointer; font-size: 14px;">🔄</button>
+      </div>
+    </div>
+    <div class="queue-metrics-grid">
+      <div class="queue-metric-item">
+        <span class="metric-label">👑 ผู้บริหารรอ/กำลังประมวลผล</span>
+        <span class="metric-val" id="metric-executive-count" style="color: #c084fc;">0</span>
+      </div>
+      <div class="queue-metric-item">
+        <span class="metric-label">⚡ Telegram Interactive รวม</span>
+        <span class="metric-val" id="metric-telegram-count" style="color: #38bdf8;">0</span>
+      </div>
+      <div class="queue-metric-item">
+        <span class="metric-label">🔄 แชต Triage ค้างรอในคิว</span>
+        <span class="metric-val" id="metric-triage-count" style="color: #fbbf24;">0</span>
+      </div>
+      <div class="queue-metric-item">
+        <span class="metric-label">⚙️ สถานะ Triage หลังบ้าน</span>
+        <span class="metric-val" id="metric-triage-status" style="font-size: 14px; color: #34d399;">IDLE</span>
+      </div>
+    </div>
+  </div>
+
   <!-- Summary Stats -->
   <div class="stats-grid">
     <div class="stat-card">
@@ -681,6 +784,77 @@
       console.warn('Could not load packages config:', e);
     }
     await loadCompanies();
+    await fetchQueueStatus();
+    setInterval(fetchQueueStatus, 2500);
+  }
+
+  async function fetchQueueStatus() {
+    try {
+      const res = await fetch('/api/queue/status');
+      if (!res.ok) return;
+      const data = await res.json();
+
+      const execCountEl = document.getElementById('metric-executive-count');
+      const tgCountEl = document.getElementById('metric-telegram-count');
+      const triageCountEl = document.getElementById('metric-triage-count');
+      const triageStatusEl = document.getElementById('metric-triage-status');
+      const modeBadgeEl = document.getElementById('queue-mode-badge');
+      const pulseDotEl = document.getElementById('queue-pulse-dot');
+      const syncEl = document.getElementById('queue-last-sync');
+
+      if (execCountEl) execCountEl.textContent = data.executiveWaitingCount || 0;
+      if (tgCountEl) tgCountEl.textContent = data.interactiveWaitingCount || 0;
+      if (triageCountEl) triageCountEl.textContent = data.triageQueueLength || 0;
+
+      // Status text
+      let statusTh = '🟢 IDLE (ว่าง)';
+      let statusColor = '#34d399';
+      if (data.triageStatus === 'PAUSED_FOR_TELEGRAM') {
+        statusTh = '⏸️ หยุดรอ Telegram';
+        statusColor = '#f59e0b';
+      } else if (data.triageStatus === 'PROCESSING') {
+        statusTh = '🔄 กำลังประมวลผล';
+        statusColor = '#38bdf8';
+      }
+      if (triageStatusEl) {
+        triageStatusEl.textContent = statusTh;
+        triageStatusEl.style.color = statusColor;
+      }
+
+      // Mode Badge & Pulse Dot
+      if (data.isExecutiveActive || data.executiveWaitingCount > 0) {
+        modeBadgeEl.innerHTML = `👑 ตอบคำถามผู้บริหาร (${data.lastExecutiveSender || 'VIP'})`;
+        modeBadgeEl.style.background = 'rgba(192, 132, 252, 0.2)';
+        modeBadgeEl.style.color = '#c084fc';
+        modeBadgeEl.style.border = '1px solid rgba(192, 132, 252, 0.4)';
+        if (pulseDotEl) pulseDotEl.className = 'queue-pulse-dot busy';
+      } else if (data.isInteractiveActive || data.interactiveWaitingCount > 0) {
+        modeBadgeEl.innerHTML = '⚡ กำลังตอบคำถาม Telegram (Priority 1)';
+        modeBadgeEl.style.background = 'rgba(56, 189, 248, 0.2)';
+        modeBadgeEl.style.color = '#38bdf8';
+        modeBadgeEl.style.border = '1px solid rgba(56, 189, 248, 0.4)';
+        if (pulseDotEl) pulseDotEl.className = 'queue-pulse-dot busy';
+      } else if (data.triageStatus === 'PROCESSING') {
+        modeBadgeEl.innerHTML = '🔄 กำลังคัดแยกแชต Triage (Priority 2)';
+        modeBadgeEl.style.background = 'rgba(251, 191, 36, 0.2)';
+        modeBadgeEl.style.color = '#fbbf24';
+        modeBadgeEl.style.border = '1px solid rgba(251, 191, 36, 0.4)';
+        if (pulseDotEl) pulseDotEl.className = 'queue-pulse-dot triage';
+      } else {
+        modeBadgeEl.innerHTML = '🟢 ระบบว่าง พร้อมใช้งาน';
+        modeBadgeEl.style.background = 'rgba(16, 185, 129, 0.2)';
+        modeBadgeEl.style.color = '#34d399';
+        modeBadgeEl.style.border = '1px solid rgba(16, 185, 129, 0.4)';
+        if (pulseDotEl) pulseDotEl.className = 'queue-pulse-dot';
+      }
+
+      if (syncEl) {
+        const now = new Date();
+        syncEl.textContent = `อัปเดตล่าสุด: ${now.toLocaleTimeString('th-TH')}`;
+      }
+    } catch (e) {
+      console.warn('Queue status sync error:', e);
+    }
   }
 
   async function loadCompanies() {
