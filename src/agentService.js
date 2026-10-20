@@ -158,6 +158,38 @@ export function enqueueAgentQuery(task) {
   });
 }
 
+/**
+ * Detect adversarial prompt injection attempts (Jailbreak, System Prompt Leak, Prompt Override).
+ * @param {string} text - User input string
+ * @returns {{ isMalicious: boolean, matchedPattern: string|null }}
+ */
+export function detectPromptInjection(text = '') {
+  if (!text || typeof text !== 'string') return { isMalicious: false, matchedPattern: null };
+
+  const lower = text.toLowerCase();
+  const injectionPatterns = [
+    /ignore\s+(all\s+)?(previous|prior|above|safety|security)?\s*(instructions|directives|prompts|rules)/i,
+    /disregard\s+(all\s+)?(previous|prior|above|safety|security)?\s*(instructions|directives|prompts|rules)/i,
+    /forget\s+(all\s+)?(previous|prior|above|safety|security|system)?\s*(instructions|rules|protocols|prompts)/i,
+    /override\s+(all\s+)?(system|safety|security)\s+(rules|prompts|protocols)/i,
+    /you\s+are\s+now\s+(in\s+developer\s+mode|dan|jailbreak|an\s+unrestricted\s+ai)/i,
+    /reveal\s+(your\s+)?(system\s+prompt|instructions|initial\s+prompt|hidden\s+rules|database|secret|password)/i,
+    /show\s+me\s+(your\s+)?(system\s+prompt|secret\s+key|database\s+password|client_secret)/i,
+    /dump\s+(all\s+)?(passwords|secrets|database|env|credentials)/i,
+    /ลืมคำสั่ง(ก่อนหน้า|ทั้งหมด|เดิม|ความปลอดภัย)/i,
+    /ยกเลิกกฎ(ความปลอดภัย|ทั้งหมด|ของระบบ)/i,
+    /แสดง\s*(system\s*prompt|รหัสผ่าน|ความลับของระบบ|client_secret)/i
+  ];
+
+  for (const pattern of injectionPatterns) {
+    if (pattern.test(lower)) {
+      return { isMalicious: true, matchedPattern: pattern.toString() };
+    }
+  }
+
+  return { isMalicious: false, matchedPattern: null };
+}
+
 async function processQueue() {
   if (isProcessingQueue || queryQueue.length === 0) return;
   isProcessingQueue = true;
@@ -167,6 +199,31 @@ async function processQueue() {
       const { task, resolve, reject } = queryQueue.shift();
       const startTime = Date.now();
       try {
+        // Step 0: Prompt Injection & Adversarial Attack Detection Guard
+        const injectionCheck = detectPromptInjection(task.userQuery);
+        if (injectionCheck.isMalicious) {
+          console.warn(`🛡️ [Security Guard] Blocked Prompt Injection attempt: "${task.userQuery}" (Pattern: ${injectionCheck.matchedPattern})`);
+          const blockedResult = {
+            reply: '🛡️ **แจ้งเตือนความปลอดภัย (Security Guard)**: ตรวจพบรูปแบบข้อความที่ไม่ปลอดภัยหรือพยายามแทรกแซงคำสั่งของระบบ จึงขอปฏิเสธการประมวลผลคำสั่งนี้ค่ะ ✨',
+            toolUsed: 'prompt_injection_blocked',
+            confidence: 10
+          };
+          await logAgentActivity({
+            query: task.userQuery,
+            reply: blockedResult.reply,
+            toolUsed: blockedResult.toolUsed,
+            durationMs: Date.now() - startTime,
+            senderName: task.senderName,
+            senderId: task.senderId,
+            channel: task.channel,
+            companyId: task.companyId,
+            chatId: task.chatId,
+            confidence: 10
+          });
+          resolve(blockedResult);
+          continue;
+        }
+
         const result = await processAgentQueryDirect(task.userQuery, task.companyId, task);
         const durationMs = Date.now() - startTime;
 
