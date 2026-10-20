@@ -420,16 +420,16 @@ export async function authenticateUser(email, password) {
 
   // Fetch company info if user belongs to one
   let company = null;
-  if (data.company_id) {
+  if (user.company_id) {
     const { data: comp } = await supabase
       .from('companies')
-      .select('id, name, domain, client_id, client_secret')
-      .eq('id', data.company_id)
+      .select('id, name, domain, client_id')
+      .eq('id', user.company_id)
       .single();
     company = comp;
   }
 
-  return { ...data, company };
+  return { ...user, company };
 }
 
 /**
@@ -570,13 +570,18 @@ export async function deleteUser(id) {
 }
 
 /**
- * Get all companies (for system_admin).
+ * Get all companies (sanitized by default to prevent client_secret credential leaks).
+ * @param {boolean} [includeSecrets=false]
  * @returns {Promise<any[]>}
  */
-export async function getAllCompanies() {
+export async function getAllCompanies(includeSecrets = false) {
+  const fields = includeSecrets 
+    ? '*' 
+    : 'id, name, domain, customer_type, package_tier, custom_quota, package_status, telegram_group_limit, billing_cycle_anchor, created_at';
+
   const { data, error } = await supabase
     .from('companies')
-    .select('*')
+    .select(fields)
     .order('created_at', { ascending: true });
 
   if (error) throw new Error('Failed to fetch companies: ' + error.message);

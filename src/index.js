@@ -225,6 +225,80 @@ async function authCompany(req, res, next) {
   }
 }
 
+const ADMIN_API_KEY = process.env.ADMIN_API_KEY || 'sift-admin-secret-2026';
+
+// Middleware: Authenticate admin using X-Admin-Key or user credentials (system_admin / super_admin)
+async function authAdminOrKey(req, res, next) {
+  const adminKey = req.headers['x-admin-key'] || req.query.admin_key || req.body?.admin_key;
+  if (adminKey && adminKey === ADMIN_API_KEY) {
+    req.isAdmin = true;
+    return next();
+  }
+
+  // Fallback to user credentials if provided
+  const email = req.headers['x-user-email'];
+  const password = req.headers['x-user-password'];
+  if (email && password) {
+    try {
+      const user = await authenticateUser(email, password);
+      if (user && (user.role === 'system_admin' || user.role === 'super_admin')) {
+        req.user = user;
+        req.isAdmin = true;
+        return next();
+      }
+      return res.status(403).json({ error: 'Forbidden: Admin privileges required.' });
+    } catch (err) {
+      return res.status(500).json({ error: 'Auth error: ' + err.message });
+    }
+  }
+
+  return res.status(401).json({ error: 'Unauthorized: Admin authentication required (X-Admin-Key or admin credentials).' });
+}
+
+// Middleware: Authenticate either Company (Client ID/Secret) or Admin (X-Admin-Key / User credentials)
+async function authCompanyOrAdmin(req, res, next) {
+  const adminKey = req.headers['x-admin-key'] || req.query.admin_key || req.body?.admin_key;
+  if (adminKey && adminKey === ADMIN_API_KEY) {
+    req.isAdmin = true;
+    req.company = { id: req.body?.company_id || req.query?.company_id || null, name: 'Admin Override' };
+    return next();
+  }
+
+  const email = req.headers['x-user-email'];
+  const password = req.headers['x-user-password'];
+  if (email && password) {
+    try {
+      const user = await authenticateUser(email, password);
+      if (user) {
+        req.user = user;
+        req.company = { id: user.company_id, name: user.name };
+        return next();
+      }
+      return res.status(401).json({ error: 'Unauthorized: Invalid email or password.' });
+    } catch (err) {
+      return res.status(500).json({ error: 'Auth error: ' + err.message });
+    }
+  }
+
+  const clientId = req.headers['x-client-id'] || req.body?.client_id || req.query?.client_id;
+  const clientSecret = req.headers['x-client-secret'] || req.body?.client_secret || req.query?.client_secret;
+
+  if (clientId && clientSecret) {
+    try {
+      const company = await authenticateCompany(clientId, clientSecret);
+      if (company) {
+        req.company = company;
+        return next();
+      }
+      return res.status(401).json({ error: 'Unauthorized: Invalid Client ID or Client Secret.' });
+    } catch (err) {
+      return res.status(500).json({ error: 'Authentication error: ' + err.message });
+    }
+  }
+
+  return res.status(401).json({ error: 'Unauthorized: Missing company credentials or Admin key.' });
+}
+
 // Setup MCP Server instance
 const mcpServer = new Server(
   {
@@ -377,30 +451,51 @@ app.get('/health', async (req, res) => {
   res.json(status);
 });
 
-// REST API: AI Interactive Agent Chat (Process Thai questions/commands)
-app.post('/api/agent/chat', async (req, res) => {
+// REST API: AI Interactive Agent Chat (Process Thai questions/commands) - Protected
+app.post('/api/agent/chat', authCompanyOrAdmin, async (req, res) => {
   const { query, company_id } = req.body;
   if (!query) {
     return res.status(400).json({ error: 'Missing parameter: query is required.' });
   }
+  // Enforce company boundary: non-admins cannot query other companies
+  const targetCompanyId = req.isAdmin ? (company_id || req.company?.id) : req.company?.id;
   try {
-    const response = await processAgentQuery(query, company_id);
+    const response = await processAgentQuery(query, targetCompanyId);
     res.json(response);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// REST API: Telegram Bot Webhook Endpoint
+// REST API: Telegram Bot Webhook Endpoint (Secured & Consolidated)
 app.post('/api/telegram/webhook', async (req, res) => {
-  try {
-    const update = req.body;
-    if (update && update.message) {
-      handleTelegramMessage(update.message).catch(err => console.error('Telegram Webhook error:', err));
+  // Webhook Secret Token Verification if TELEGRAM_WEBHOOK_SECRET is configured
+  const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
+  if (webhookSecret) {
+    const headerToken = req.headers['x-telegram-bot-api-secret-token'];
+    if (headerToken !== webhookSecret) {
+      console.warn('🔒 [Security Alert] Unauthorized Telegram Webhook call rejected: invalid secret token.');
+      return res.status(403).json({ error: 'Forbidden: Invalid webhook secret token.' });
     }
-    res.status(200).send('OK');
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+  }
+
+  res.status(200).send('OK'); // Acknowledge Telegram Webhook instantly to prevent timeouts
+
+  const update = req.body;
+  if (!update || typeof update !== 'object') return;
+
+  try {
+    if (update.message) {
+      handleTelegramMessage(update.message).catch(err => {
+        console.error('Error in Telegram Webhook Message Handler:', err.message);
+      });
+    } else if (update.callback_query) {
+      handleTelegramCallbackQuery(update.callback_query).catch(err => {
+        console.error('Error in Telegram Callback Query Handler:', err.message);
+      });
+    }
+  } catch (err) {
+    console.error('Error dispatching Telegram webhook:', err.message);
   }
 });
 
@@ -429,8 +524,8 @@ app.post('/api/triage/run', authCompany, enforceCompanyQuota, async (req, res) =
   }
 });
 
-// REST API: Save triage result manually
-app.post('/api/triage/save', async (req, res) => {
+// REST API: Save triage result manually - Protected
+app.post('/api/triage/save', authCompanyOrAdmin, async (req, res) => {
   const { id, category_id, priority, summary } = req.body;
   if (!id || !category_id || !priority || !summary) {
     return res.status(400).json({ error: 'Missing parameters: id, category_id, priority, summary' });
@@ -494,16 +589,25 @@ app.post('/api/chats/ingest', authCompany, enforceCompanyQuota, async (req, res)
   }
 });
 
-// REST API: Trigger on-demand AI Triage for a single chat (Dynamic Real-time Triage)
-app.post('/api/chats/:id/triage', async (req, res) => {
+// REST API: Trigger on-demand AI Triage for a single chat (Dynamic Real-time Triage) - Protected
+app.post('/api/chats/:id/triage', authCompanyOrAdmin, async (req, res) => {
   const { id } = req.params;
   if (!id) {
     return res.status(400).json({ error: 'Missing parameter: id is required' });
   }
   try {
-    // Check if chat's company has exceeded quota before triggering
+    // Check if chat exists and enforce company boundary
     const { data: chatRec } = await supabase.from('chats').select('company_id').eq('id', id).maybeSingle();
-    if (chatRec?.company_id) {
+    if (!chatRec) {
+      return res.status(404).json({ error: `Chat ${id} not found.` });
+    }
+
+    if (chatRec.company_id && !req.isAdmin && req.company?.id && chatRec.company_id !== req.company.id) {
+      return res.status(403).json({ error: 'Forbidden: Cannot trigger triage on another company\'s chat.' });
+    }
+
+    // Check if chat's company has exceeded quota before triggering
+    if (chatRec.company_id) {
       const quota = await checkCompanyQuota(chatRec.company_id);
       if (quota.isExceeded) {
         return res.status(429).json({
@@ -818,20 +922,38 @@ app.get('/api/packages', (req, res) => {
   });
 });
 
-// Get all companies with real-time quota and package details
+// Get all companies with real-time quota and package details (Sanitized, NO client_secret)
 app.get('/api/companies', async (req, res) => {
   try {
-    const companies = await getAllCompanies();
+    const companies = await getAllCompanies(false);
     const withQuotas = await Promise.all(companies.map(async (c) => {
       try {
         const quota = await checkCompanyQuota(c.id);
         return {
-          ...c,
+          id: c.id,
+          name: c.name,
+          domain: c.domain,
+          customer_type: c.customer_type,
+          package_tier: c.package_tier,
+          custom_quota: c.custom_quota,
+          package_status: c.package_status,
+          telegram_group_limit: c.telegram_group_limit,
+          billing_cycle_anchor: c.billing_cycle_anchor,
+          created_at: c.created_at,
           quota
         };
       } catch (e) {
         return {
-          ...c,
+          id: c.id,
+          name: c.name,
+          domain: c.domain,
+          customer_type: c.customer_type,
+          package_tier: c.package_tier,
+          custom_quota: c.custom_quota,
+          package_status: c.package_status,
+          telegram_group_limit: c.telegram_group_limit,
+          billing_cycle_anchor: c.billing_cycle_anchor,
+          created_at: c.created_at,
           quota: null
         };
       }
@@ -852,8 +974,11 @@ app.get('/api/quota/status', authCompany, async (req, res) => {
   }
 });
 
-// Get quota for specific company (for Admin/Dashboard)
-app.get('/api/companies/:id/quota', async (req, res) => {
+// Get quota for specific company (Protected: Admin or own company)
+app.get('/api/companies/:id/quota', authCompanyOrAdmin, async (req, res) => {
+  if (!req.isAdmin && req.company?.id && req.company.id !== req.params.id) {
+    return res.status(403).json({ error: 'Forbidden: Cannot view another company\'s quota.' });
+  }
   try {
     const quota = await checkCompanyQuota(req.params.id);
     res.json(quota);
@@ -862,8 +987,8 @@ app.get('/api/companies/:id/quota', async (req, res) => {
   }
 });
 
-// Update company package & quota settings (Admin)
-app.put('/api/companies/:id/package', async (req, res) => {
+// Update company package & quota settings (Admin only - Protected with X-Admin-Key or Admin session)
+app.put('/api/companies/:id/package', authAdminOrKey, async (req, res) => {
   const { id } = req.params;
   const { customer_type, package_tier, custom_quota, package_status, billing_cycle_anchor, telegram_group_limit } = req.body;
   
@@ -1166,10 +1291,10 @@ app.delete('/api/users/:id', authUser, requireRole('super_admin'), async (req, r
   }
 });
 
-// GET /api/companies - List all companies (system_admin only)
-app.get('/api/companies', authUser, requireRole('system_admin'), async (req, res) => {
+// GET /api/companies - List all companies with full details (system_admin only)
+app.get('/api/admin/companies', authUser, requireRole('system_admin'), async (req, res) => {
   try {
-    const companies = await getAllCompanies();
+    const companies = await getAllCompanies(true);
     res.json(companies);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -1177,34 +1302,36 @@ app.get('/api/companies', authUser, requireRole('system_admin'), async (req, res
 });
 
 // ==========================================
-// CUSTOMER MANAGEMENT REST API ENDPOINTS
+// CUSTOMER MANAGEMENT REST API ENDPOINTS (Protected)
 // ==========================================
 
-// GET /api/customers - List all customer members
-app.get('/api/customers', async (req, res) => {
+// GET /api/customers - List all customer members (Protected: own company only)
+app.get('/api/customers', authCompanyOrAdmin, async (req, res) => {
   try {
-    const companyId = req.query.company_id || undefined;
-    const customers = await getAllCustomers(companyId);
+    const targetCompanyId = req.isAdmin ? (req.query.company_id || undefined) : req.company?.id;
+    const customers = await getAllCustomers(targetCompanyId);
     res.json(customers);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// POST /api/customers - Create a new customer member (for Postman testing & UI)
-app.post('/api/customers', async (req, res) => {
+// POST /api/customers - Create a new customer member (Protected: own company only)
+app.post('/api/customers', authCompanyOrAdmin, async (req, res) => {
   try {
     const { id, name, email, phone, company_id } = req.body;
     if (!name) {
       return res.status(400).json({ error: 'กรุณาระบุชื่อลูกค้า (name)' });
     }
 
+    const targetCompanyId = req.isAdmin ? (company_id || req.company?.id) : req.company?.id;
+
     const newCustomer = await createCustomer({
       id,
       name,
       email,
       phone,
-      company_id
+      company_id: targetCompanyId
     });
 
     res.status(201).json({
@@ -1216,10 +1343,19 @@ app.post('/api/customers', async (req, res) => {
   }
 });
 
-// PUT /api/customers/:id - Update an existing customer
-app.put('/api/customers/:id', async (req, res) => {
+// PUT /api/customers/:id - Update an existing customer (Protected: own company only)
+app.put('/api/customers/:id', authCompanyOrAdmin, async (req, res) => {
   try {
     const { id } = req.params;
+
+    // Verify ownership if not admin
+    if (!req.isAdmin && req.company?.id) {
+      const { data: existing } = await supabase.from('customers').select('company_id').eq('id', id).maybeSingle();
+      if (existing && existing.company_id && existing.company_id !== req.company.id) {
+        return res.status(403).json({ error: 'Forbidden: Cannot edit another company\'s customer.' });
+      }
+    }
+
     const updated = await updateCustomer(id, req.body);
     res.json({ message: 'อัปเดตข้อมูลลูกค้าสำเร็จ', customer: updated });
   } catch (error) {
@@ -1227,32 +1363,23 @@ app.put('/api/customers/:id', async (req, res) => {
   }
 });
 
-// DELETE /api/customers/:id - Delete a customer
-app.delete('/api/customers/:id', async (req, res) => {
+// DELETE /api/customers/:id - Delete a customer (Protected: own company only)
+app.delete('/api/customers/:id', authCompanyOrAdmin, async (req, res) => {
   try {
     const { id } = req.params;
+
+    // Verify ownership if not admin
+    if (!req.isAdmin && req.company?.id) {
+      const { data: existing } = await supabase.from('customers').select('company_id').eq('id', id).maybeSingle();
+      if (existing && existing.company_id && existing.company_id !== req.company.id) {
+        return res.status(403).json({ error: 'Forbidden: Cannot delete another company\'s customer.' });
+      }
+    }
+
     const deleted = await deleteCustomer(id);
     res.json({ message: 'ลบข้อมูลลูกค้าสำเร็จ', customer: deleted });
   } catch (error) {
     res.status(500).json({ error: error.message });
-  }
-});
-
-// POST /api/telegram/webhook - Telegram Webhook Receiver Endpoint
-app.post('/api/telegram/webhook', (req, res) => {
-  res.status(200).send('OK'); // Acknowledge Telegram Webhook instantly to prevent timeouts
-  const update = req.body;
-  console.log('📥 Telegram Webhook Payload Received:', JSON.stringify(update));
-  if (update) {
-    if (update.message) {
-      handleTelegramMessage(update.message).catch(err => {
-        console.error('Error in Telegram Webhook Handler:', err.message);
-      });
-    } else if (update.callback_query) {
-      handleTelegramCallbackQuery(update.callback_query).catch(err => {
-        console.error('Error in Telegram Callback Query Handler:', err.message);
-      });
-    }
   }
 });
 
