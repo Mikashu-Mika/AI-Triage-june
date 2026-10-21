@@ -11,7 +11,7 @@ const KNOWN_CATEGORY_NAMES = {
   api_error:{th:"ข้อผิดพลาดระบบ API",en:"API Error"},
   payment_gateway:{th:"ระบบการชำระเงิน/ธนาคาร",en:"Payment Gateway"},
   notification_issue:{th:"ปัญหาการแจ้งเตือน",en:"Notification Issue"},
-  interaction_lag:{th:"ระบบการทำงานล่าช้า",en:"System Lag"},
+  interaction_lag:{th:"ระบบการทำงานล่าช้า",en:"Interaction Lag"},
   device_compatibility:{th:"ปัญหาบราวเซอร์/อุปกรณ์",en:"Device Compatibility"},
   registration:{th:"การสมัครสมาชิก",en:"Registration"},
   feature_request:{th:"ขอเพิ่มฟีเจอร์",en:"Feature Request"},
