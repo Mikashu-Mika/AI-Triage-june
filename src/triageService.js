@@ -270,12 +270,23 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
     }
   }
 
-  // Guard 7: Page load freeze / loading delay / refresh
-  const isPageFreeze = /(รีเฟรช|refresh).*(ถึงจะเห็น|ถึงจะขึ้น|ถึงจะอัปเดต)|(หน้าเว็บ|เว็บ|หน้าเว็บไซต์).*(โหลดช้า|ค้าง|หมุน|ช้ามาก|เปิดช้า|โหลดรายละเอียด)|(โหลดช้ามาก|โหลดนานมาก|ค้างบ่อย|หมุนติ้ว)/i.test(cleanText);
+  // Guard 7a: Page load freeze / screen freeze / infinite spinning / refresh
+  const isPageFreeze = /(รีเฟรช|refresh).*(ถึงจะเห็น|ถึงจะขึ้น|ถึงจะอัปเดต)|(หน้าเว็บ|เว็บ|หน้าจอ|จอ|ระบบ|แอป|แอพ).*(ค้าง|หมุนติ้ว|หมุนค้าง|หมุนอยู่นานมาก|นิ่งไปเลย|ค้างตลอด|ค้างบ่อย)|(ค้างไปเลย|ค้างสนิท|หมุนค้าง|หมุนติ้ว|หมุนไม่หยุด|ค้างตลอด|หน้าประวัติค้าง)/i.test(cleanText);
   if (isPageFreeze) {
-    const freezeCat = categories.find(c => c.id.endsWith(':page_load_freeze') || c.id === 'page_load_freeze' || c.id.endsWith(':performance_issue') || c.id === 'performance_issue');
+    const freezeCat = categories.find(c => c.id.endsWith(':page_load_freeze') || c.id === 'page_load_freeze') ||
+      categories.find(c => c.id.endsWith(':performance_issue') || c.id === 'performance_issue');
     if (freezeCat) {
       return { category_id: freezeCat.id, priority: 'medium', department: 'Support', isGuarded: true };
+    }
+  }
+
+  // Guard 7b: System performance / slow loading / delay (without freeze/hang)
+  const isPerformanceIssue = /(เข้าได้ช้า|โหลดช้ามาก|โหลดนานมาก|รอโหลดนาน|โหลดนาน|เข้าช้ามาก|เข้าช้า|ระบบช้า|ทำงานช้า|อืดมาก|อืด|ประสิทธิภาพระบบ|ความเร็วตก|ช้ามากคะ|ช้ามากครับ|ช้ามากค่ะ)/i.test(cleanText);
+  if (isPerformanceIssue) {
+    const perfCat = categories.find(c => c.id.endsWith(':performance_issue') || c.id === 'performance_issue') ||
+      categories.find(c => c.id.endsWith(':page_load_freeze') || c.id === 'page_load_freeze');
+    if (perfCat) {
+      return { category_id: perfCat.id, priority: 'medium', department: 'Support', isGuarded: true };
     }
   }
 
@@ -626,6 +637,13 @@ export async function ensureCompleteSentenceCoverage(
       !/(ไม่ได้|ไม่สำเร็จ|ล้มเหลว|พัง|ค้าง|ช้า|เออเร่อ|หลุด|หาย|เกิดข้อผิดพลาด|แจ้งว่า|ถูกใช้งาน)/.test(item.summary);
     if (isOrphanNounPhrase) continue;
 
+    // Skip standalone closing pleas / call to action when real technical issues are present in the conversation
+    // (e.g. "ช่วยแก้ไขหน่อยค่ะ จะสั่งซื้อแต่ทำอะไรไม่ได้สักอย่าง", "ช่วยตรวจสอบให้หน่อยนะคะ ต้องการดูสินค้าก่อนตัดสินใจซื้อ")
+    const isClosingPlea = /^(ช่วยแก้ไข(หน่อย|ด่วน)?|ช่วยดูให้หน่อย|ช่วยตรวจสอบหน่อย|ช่วยแก้ให้หน่อย|รบกวนช่วย(แก้ไข|ตรวจสอบ|ดู)?|ทำอะไรไม่ได้สักอย่าง|ทำอะไรไม่ได้เลย|จะสั่งซื้อแต่ทำอะไรไม่ได้สักอย่าง).*(ค่ะ|ครับ|คะ|นะ|ด้วย)?$/i.test(item.summary) ||
+      /^(ช่วยแก้ไขหน่อยค่ะ|ช่วยแก้ไขหน่อยครับ|ช่วยตรวจสอบให้หน่อยนะคะ|ช่วยตรวจสอบให้หน่อยครับ)\s*(จะสั่งซื้อแต่ทำอะไรไม่ได้สักอย่าง|ต้องการดูสินค้าก่อนตัดสินใจซื้อ)?$/i.test(item.summary);
+    const hasRealTechnicalIssues = resolvedClauseIssues.some(iss => iss !== item && !iss.category_id.endsWith(':other') && !iss.category_id.endsWith(':feedback_complaint'));
+    if (isClosingPlea && hasRealTechnicalIssues) continue;
+
     // RULE: NEVER consolidate 'other' category across clauses into a monster issue!
     const isOtherCat = (item.category_id || '').split(':').pop().trim().toLowerCase() === 'other';
     if (isOtherCat) {
@@ -886,8 +904,15 @@ export function resolvePrimaryCategory(triageCategoryId, detectedIssues, categor
     });
 
     if (problemIssues.length > 0) {
-      // Pick the problem issue with the highest urgency/priority
-      const sorted = [...problemIssues].sort((a, b) => {
+      // Prioritize concrete technical defects over generic feedback/complaint when both are present
+      const technicalIssues = problemIssues.filter(iss => {
+        const clean = (iss.category_id || '').split(':').pop().trim().toLowerCase();
+        return clean !== 'feedback_complaint';
+      });
+      const candidateList = technicalIssues.length > 0 ? technicalIssues : problemIssues;
+
+      // Pick the issue with the highest urgency/priority
+      const sorted = [...candidateList].sort((a, b) => {
         const weightA = priorityWeight[(a.urgency || a.priority || 'medium').toLowerCase()] || 2;
         const weightB = priorityWeight[(b.urgency || b.priority || 'medium').toLowerCase()] || 2;
         return weightB - weightA;
