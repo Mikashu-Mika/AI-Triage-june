@@ -30,7 +30,7 @@ const UNIFIED_CATEGORIES = {
     description: 'เกมค้าง, หลุดกลางคัน, API timeout, โหลดเกมไม่ได้'
   },
   interaction_lag: {
-    name: 'ระบบการทำงานล่าช้า (System Lag)',
+    name: 'ระบบการทำงานล่าช้า (Interaction Lag)',
     description: 'การตอบสนองช้า, ปุ่มกดไม่ติด, หน่วง, คลิกไม่ไป'
   },
   login_issue: {
