@@ -281,7 +281,7 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
   }
 
   // Guard 7b: System performance / slow loading / delay (without freeze/hang)
-  const isPerformanceIssue = /(เข้าได้ช้า|โหลดช้ามาก|โหลดนานมาก|รอโหลดนาน|โหลดนาน|เข้าช้ามาก|เข้าช้า|ระบบช้า|ทำงานช้า|อืดมาก|อืด|ประสิทธิภาพระบบ|ความเร็วตก|หมุนอยู่นานมาก|หมุนอยู่นาน|หมุนนานมาก|หมุนนาน|ช้ามากคะ|ช้ามากครับ|ช้ามากค่ะ)/i.test(cleanText);
+  const isPerformanceIssue = /(เข้าได้ช้า|โหลดช้ามาก|โหลดนานมาก|รอโหลดนาน|โหลดนาน|เข้าช้ามาก|เข้าช้า|ระบบช้า|ทำงานช้า|อืดมาก|อืด|ประสิทธิภาพระบบ|ความเร็วตก|หมุนอยู่นานมาก|หมุนอยู่นาน|หมุนนานมาก|หมุนนาน|ช้ามาก|ต้องรอนาน|กว่าจะ.*ได้ต้องรอ)/i.test(cleanText);
   if (isPerformanceIssue) {
     const perfCat = categories.find(c => c.id.endsWith(':performance_issue') || c.id === 'performance_issue') ||
       categories.find(c => c.id.endsWith(':page_load_freeze') || c.id === 'page_load_freeze');
@@ -291,7 +291,7 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
   }
 
   // Guard 8: Button response lag / multiple clicks / freeze
-  const isButtonLag = /(กดหลายครั้ง|กดซ้ำ|กดแล้วไม่ไป|ปุ่มไม่ตอบสนอง|ตอบสนองช้า|ไม่ตอบสนอง|ไม่มีการตอบสนอง|กว่าจะเลือกได้|กว่าจะติด|ระบบถึงเลือกให้|ปุ่ม.*ค้าง|ระบบยังตอบสนองช้า)/i.test(cleanText);
+  const isButtonLag = /(กดหลายครั้ง|กดซ้ำ|กดแล้วไม่ไป|ปุ่มไม่ตอบสนอง|ตอบสนองช้า|ไม่ตอบสนอง|ไม่มีการตอบสนอง|กว่าจะเลือกได้|กว่าจะติด|ระบบถึงเลือกให้|ปุ่ม.*ค้าง|ระบบยังตอบสนองช้า|เลือก.*(สี|ขนาด|รุ่น|ตัวเลือก).*ไม่ได้|ไม่มีการเปลี่ยนแปลง|ไม่มีอะไรเกิดขึ้น|กด.*ไม่เปลี่ยน|กดแต่ละสีแล้ว|ปุ่มกดไม่ไป)/i.test(cleanText);
   if (isButtonLag) {
     const lagCat = categories.find(c => c.id.endsWith(':interaction_lag') || c.id === 'interaction_lag');
     if (lagCat) {
@@ -300,7 +300,7 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
   }
 
   // Guard 9: Graphics / UI Rendering Issue
-  const isUiRendering = /(แสดงผลผิดปกติ|แสดงผลเพี้ยน|ตัดทอน|ถูกตัด|ไม่จบประโยค|ตกขอบ|ล้นขอบ|เลยขอบ|ล้นจอ|เลยขอบหน้าจอ|ตัวหนังสือซ้อน|ฟอนต์เละ|ปุ่มอยู่เลย|ปุ่มล้น|หลุดกรอบ|รูป.*(ไม่ขึ้น|หาย|ว่าง|ถูกตัด|แตก|เป็นพื้นที่ว่าง|กลายเป็นพื้นที่ว่าง)|(รายละเอียด|ข้อมูล|สเปก|ราคา|ข้อความ).*(หาย|หายไป|ไม่ขึ้น|แสดงไม่ครบ)|การแสดงผล.*(ผิดปกติ|เพี้ยน|ไม่สมบูรณ์|ไม่ตรง)|หน้าเว็บ.*แสดงผลผิดปกติ)/i.test(cleanText);
+  const isUiRendering = /(แสดงผลผิดปกติ|แสดงผลเพี้ยน|ตัดทอน|ถูกตัด|ไม่จบประโยค|ตกขอบ|ล้นขอบ|เลยขอบ|ล้นจอ|เลยขอบหน้าจอ|ตัวหนังสือซ้อน|ฟอนต์เละ|ปุ่มอยู่เลย|ปุ่มล้น|หลุดกรอบ|รูป.*(ไม่ขึ้น|หาย|ว่าง|ถูกตัด|แตก|เป็นพื้นที่ว่าง|กลายเป็นพื้นที่ว่าง)|(รายละเอียด|ข้อมูล|สเปก|ราคา|ข้อความ).*(หาย|หายไป|ไม่ขึ้น|แสดงไม่ครบ|ทับกัน|ซ้อนกัน)|(ข้อความ|ตัวหนังสือ|ฟอนต์|ตัวอักษร).*(ทับกัน|ซ้อนกัน)|อ่านไม่รู้เรื่อง|การแสดงผล.*(ผิดปกติ|เพี้ยน|ไม่สมบูรณ์|ไม่ตรง)|หน้าเว็บ.*แสดงผลผิดปกติ)/i.test(cleanText);
   if (isUiRendering) {
     const uiCat = categories.find(c => c.id.endsWith(':ui_rendering_issue') || c.id === 'ui_rendering_issue');
     if (uiCat) {
@@ -597,8 +597,11 @@ export async function ensureCompleteSentenceCoverage(
 
     if (matchingLlmIssue) {
       const llmCatNormalized = normalizeCategoryId(matchingLlmIssue.category_id, categories) || otherCatId;
-      // Trust LLM category for single-clause match unless Dynamic Vector+Schema Engine is highly confident (>= 0.78) on a different category
-      if (semanticMatch.similarity >= 0.78 && semanticMatch.category_id !== llmCatNormalized) {
+      const isLlmOther = llmCatNormalized === otherCatId || llmCatNormalized.endsWith(':other');
+      // If LLM said 'other' (non-problem), but Dynamic Vector detected a real problem category (similarity >= 0.55), do NOT keep 'other'!
+      // For two competing real categories, require high confidence (>= 0.78) to override LLM.
+      const overrideThreshold = isLlmOther ? 0.55 : 0.78;
+      if (semanticMatch.similarity >= overrideThreshold && semanticMatch.category_id !== llmCatNormalized) {
         finalCategoryId = semanticMatch.category_id;
         matchSource = `${semanticMatch.source} (Override)`;
       } else {
@@ -790,9 +793,13 @@ export async function processSingleChat(chatId) {
 
     // 7. Update primary chat record & save multi-issue breakdown in Supabase
     const normalizedCategory = resolvePrimaryCategory(triage.category_id, normalizedFinalIssues, categories);
+    const primaryIssue = normalizedFinalIssues.find(iss => iss.category_id === normalizedCategory) || normalizedFinalIssues[0];
+    const resolvedPriority = primaryIssue?.priority || triage.priority || 'medium';
+    const resolvedDepartment = primaryIssue?.department || triage.department || 'Support';
+
     await updateTriageResult(chat.id, {
       category_id: normalizedCategory,
-      priority: triage.priority,
+      priority: resolvedPriority,
       summary: triage.summary,
       embedding,
       sub_category: triage.sub_category,
@@ -800,7 +807,7 @@ export async function processSingleChat(chatId) {
       root_cause: triage.root_cause,
       sentiment: triage.sentiment,
       urgency: triage.urgency,
-      department: triage.department,
+      department: resolvedDepartment,
       keywords: triage.keywords,
       confidence: triage.confidence,
       recommended_reply: triage.recommended_reply,
@@ -820,10 +827,10 @@ export async function processSingleChat(chatId) {
       llmDetectedIssues: triage.detected_issues || [],
       sentenceBreakdown: normalizedFinalIssues,
       primaryDecision: {
-        category_id: triage.category_id,
-        priority: triage.priority,
+        category_id: normalizedCategory,
+        priority: resolvedPriority,
         urgency: triage.urgency,
-        department: triage.department,
+        department: resolvedDepartment,
         sentiment: triage.sentiment,
         root_cause: triage.root_cause,
         summary: triage.summary
