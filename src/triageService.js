@@ -281,7 +281,7 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
   }
 
   // Guard 7b: System performance / slow loading / delay (without freeze/hang)
-  const isPerformanceIssue = /(เข้าได้ช้า|โหลดช้ามาก|โหลดนานมาก|รอโหลดนาน|โหลดนาน|เข้าช้ามาก|เข้าช้า|ระบบช้า|ทำงานช้า|อืดมาก|อืด|ประสิทธิภาพระบบ|ความเร็วตก|ช้ามากคะ|ช้ามากครับ|ช้ามากค่ะ)/i.test(cleanText);
+  const isPerformanceIssue = /(เข้าได้ช้า|โหลดช้ามาก|โหลดนานมาก|รอโหลดนาน|โหลดนาน|เข้าช้ามาก|เข้าช้า|ระบบช้า|ทำงานช้า|อืดมาก|อืด|ประสิทธิภาพระบบ|ความเร็วตก|หมุนอยู่นานมาก|หมุนอยู่นาน|หมุนนานมาก|หมุนนาน|ช้ามากคะ|ช้ามากครับ|ช้ามากค่ะ)/i.test(cleanText);
   if (isPerformanceIssue) {
     const perfCat = categories.find(c => c.id.endsWith(':performance_issue') || c.id === 'performance_issue') ||
       categories.find(c => c.id.endsWith(':page_load_freeze') || c.id === 'page_load_freeze');
@@ -300,7 +300,7 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
   }
 
   // Guard 9: Graphics / UI Rendering Issue
-  const isUiRendering = /(แสดงผลผิดปกติ|แสดงผลเพี้ยน|ตัดทอน|ถูกตัด|ไม่จบประโยค|ตกขอบ|ล้นขอบ|เลยขอบ|ล้นจอ|เลยขอบหน้าจอ|ตัวหนังสือซ้อน|ฟอนต์เละ|ปุ่มอยู่เลย|ปุ่มล้น|หลุดกรอบ|รูป.*(ไม่ขึ้น|หาย|ว่าง|ถูกตัด|แตก|เป็นพื้นที่ว่าง|กลายเป็นพื้นที่ว่าง)|การแสดงผล.*(ผิดปกติ|เพี้ยน|ไม่สมบูรณ์|ไม่ตรง)|หน้าเว็บ.*แสดงผลผิดปกติ)/i.test(cleanText);
+  const isUiRendering = /(แสดงผลผิดปกติ|แสดงผลเพี้ยน|ตัดทอน|ถูกตัด|ไม่จบประโยค|ตกขอบ|ล้นขอบ|เลยขอบ|ล้นจอ|เลยขอบหน้าจอ|ตัวหนังสือซ้อน|ฟอนต์เละ|ปุ่มอยู่เลย|ปุ่มล้น|หลุดกรอบ|รูป.*(ไม่ขึ้น|หาย|ว่าง|ถูกตัด|แตก|เป็นพื้นที่ว่าง|กลายเป็นพื้นที่ว่าง)|(รายละเอียด|ข้อมูล|สเปก|ราคา|ข้อความ).*(หาย|หายไป|ไม่ขึ้น|แสดงไม่ครบ)|การแสดงผล.*(ผิดปกติ|เพี้ยน|ไม่สมบูรณ์|ไม่ตรง)|หน้าเว็บ.*แสดงผลผิดปกติ)/i.test(cleanText);
   if (isUiRendering) {
     const uiCat = categories.find(c => c.id.endsWith(':ui_rendering_issue') || c.id === 'ui_rendering_issue');
     if (uiCat) {
@@ -419,7 +419,15 @@ export function segmentConversationIntoClauses(conversation) {
         }
       }
     } else {
-      sentences.push(turn);
+      // For multi-turn conversations, if a turn is an elaboration/troubleshooting action for the preceding issue
+      // (e.g. "ลองออกจากระบบแล้วเข้าใหม่ก็ยังเหมือนเดิม", "ลองรีเฟรชแล้วก็ยังเหมือนเดิม")
+      // attach it to the preceding sentence rather than creating an isolated phantom login/other issue
+      const isTroubleshootingContinuation = /^(ลอง(ออกจากระบบ|ล็อกอิน|รีเฟรช|เข้าใหม่|ทำใหม่|อีกรอบ|เปลี่ยนเครื่อง|สลับไปใช้).*(ก็ยังเหมือนเดิม|ก็ยังเป็นเหมือนเดิม|ยังเหมือนเดิม|ไม่หาย))$/i.test(turn.trim());
+      if (isTroubleshootingContinuation && sentences.length > 0) {
+        sentences[sentences.length - 1] += ` ${turn.trim()}`;
+      } else {
+        sentences.push(turn);
+      }
     }
   }
 
