@@ -235,7 +235,7 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
   }
 
   // Guard 3: Customer feedback, complaints, and service improvement suggestions
-  const isFeedbackOrComplaint = /(ปัญหาแบบนี้ทำให้|ทำให้การเริ่มใช้งาน|ยุ่งยากมาก|เกือบจะเปลี่ยน|บริการแย่|ไม่โอเคมาก|เสียเวลา|ลองซ้ำ|จนไม่สามารถตัดสินใจซื้อได้|รู้สึกผิดหวัง|ผิดหวัง|ท้อ|ไม่ประทับใจ|ปัญหาแบบนี้ไม่ควรเกิดขึ้น|อยากให้ปรับปรุง|ช่วยปรับปรุงระบบ|ช่วยตรวจสอบ|ปรับปรุงข้อความแจ้งข้อผิดพลาด)/i.test(cleanText);
+  const isFeedbackOrComplaint = /(ปัญหาแบบนี้ทำให้|ทำให้การเริ่มใช้งาน|ยุ่งยากมาก|เกือบจะเปลี่ยน|บริการแย่|ไม่โอเคมาก|เสียเวลา|ลองซ้ำ|จนไม่สามารถตัดสินใจซื้อได้|รู้สึกผิดหวัง|ผิดหวัง|ท้อ|ไม่ประทับใจ|ปัญหาแบบนี้ไม่ควรเกิดขึ้น|อยากให้ปรับปรุง|ช่วยปรับปรุงระบบ|ปรับปรุงข้อความแจ้งข้อผิดพลาด)/i.test(cleanText);
   if (isFeedbackOrComplaint) {
     const feedbackCat = categories.find(c => c.id.endsWith(':feedback_complaint') || c.id === 'feedback_complaint');
     if (feedbackCat) {
@@ -252,12 +252,12 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
     }
   }
 
-  // Guard 5: Account security / change sensitive info (bank account, phone number, password, credentials)
-  const isBankOrSecurityChange = /(เปลี่ยน|แก้|ย้าย|อัปเดต|ขอเปลี่ยน|ขอแก้).*(บัญชีธนาคาร|เลขบัญชี|สมุดบัญชี|เบอร์โทร|เบอร์ศัพท์)|(ขอเปลี่ยน|ขอแก้).*(บัญชี|เบอร์)/i.test(cleanText);
-  if (isBankOrSecurityChange) {
+  // Guard 5: Account security / change sensitive info / unauthorized access / suspected hack
+  const isAccountSecurity = /(เปลี่ยน|แก้|ย้าย|อัปเดต|ขอเปลี่ยน|ขอแก้).*(บัญชีธนาคาร|เลขบัญชี|สมุดบัญชี|เบอร์โทร|เบอร์ศัพท์)|(ขอเปลี่ยน|ขอแก้).*(บัญชี|เบอร์)|(มีใครเข้าใช้บัญชี|มีคนเข้าใช้บัญชี|มีคนอื่นเข้าใช้|มีคนแอบเข้า|โดนแฮก|ถูกแฮก|สงสัยว่าโดนแฮก|ตรวจสอบการเข้าถึง)/i.test(cleanText);
+  if (isAccountSecurity) {
     const secCat = categories.find(c => c.id.endsWith(':account_security') || c.id === 'account_security');
     if (secCat) {
-      return { category_id: secCat.id, priority: 'high', department: 'Support', isGuarded: true };
+      return { category_id: secCat.id, priority: 'urgent', department: 'Support', isGuarded: true };
     }
   }
 
@@ -648,15 +648,15 @@ export async function ensureCompleteSentenceCoverage(
       !/(ไม่ได้|ไม่สำเร็จ|ล้มเหลว|พัง|ค้าง|ช้า|เออเร่อ|หลุด|หาย|เกิดข้อผิดพลาด|แจ้งว่า|ถูกใช้งาน)/.test(item.summary);
     if (isOrphanNounPhrase) continue;
 
-    // Skip standalone closing pleas / call to action when real technical issues are present in the conversation
-    // (e.g. "ช่วยแก้ไขหน่อยค่ะ จะสั่งซื้อแต่ทำอะไรไม่ได้สักอย่าง", "ช่วยตรวจสอบให้หน่อยนะคะ ต้องการดูสินค้าก่อนตัดสินใจซื้อ")
-    const isClosingPlea = /^(ช่วยแก้ไข(หน่อย|ด่วน)?|ช่วยดูให้หน่อย|ช่วยตรวจสอบหน่อย|ช่วยแก้ให้หน่อย|รบกวนช่วย(แก้ไข|ตรวจสอบ|ดู)?|ทำอะไรไม่ได้สักอย่าง|ทำอะไรไม่ได้เลย|จะสั่งซื้อแต่ทำอะไรไม่ได้สักอย่าง).*(ค่ะ|ครับ|คะ|นะ|ด้วย)?$/i.test(item.summary) ||
-      /^(ช่วยแก้ไขหน่อยค่ะ|ช่วยแก้ไขหน่อยครับ|ช่วยตรวจสอบให้หน่อยนะคะ|ช่วยตรวจสอบให้หน่อยครับ)\s*(จะสั่งซื้อแต่ทำอะไรไม่ได้สักอย่าง|ต้องการดูสินค้าก่อนตัดสินใจซื้อ)?$/i.test(item.summary);
-    const hasRealTechnicalIssues = resolvedClauseIssues.some(iss => iss !== item && !iss.category_id.endsWith(':other') && !iss.category_id.endsWith(':feedback_complaint'));
-    if (isClosingPlea && hasRealTechnicalIssues) continue;
-
-    // RULE: NEVER consolidate 'other' category across clauses into a monster issue!
+    // Skip standalone closing pleas / call to action / non-issues when real technical issues are present in the conversation
+    // (e.g. "ช่วยแก้ไขหน่อยค่ะ จะสั่งซื้อแต่ทำอะไรไม่ได้สักอย่าง", "ช่วยตรวจสอบระบบให้หน่อยค่ะ ไม่สามารถเช็กข้อมูลก่อนซื้อได้")
+    const isClosingPlea = /^(ช่วย(ตรวจสอบ|แก้ไข|แก้|ดู|ปรับปรุง)|รบกวน(ช่วย)?(ตรวจสอบ|แก้ไข|แก้|ดู)|ฝาก(ดู|ตรวจสอบ|แก้ไข)).*(ระบบ|ให้หน่อย|หน่อย|ด้วย|ด่วน)?.*(ไม่สามารถ.*(ซื้อ|ดู|เช็ก|ใช้งาน|ทำอะไร)|จะสั่งซื้อแต่|ต้องการดูสินค้า|ทำอะไรไม่ได้สักอย่าง|ทำอะไรไม่ได้เลย)?.*(ค่ะ|ครับ|คะ|นะ|ด้วย)?$/i.test(item.summary) ||
+      /^(ช่วย(แก้ไข|ตรวจสอบ|ดู).*(หน่อย|ด่วน|นะคะ|นะครับ|ด้วย))$/i.test(item.summary);
     const isOtherCat = (item.category_id || '').split(':').pop().trim().toLowerCase() === 'other';
+    const hasRealTechnicalIssues = resolvedClauseIssues.some(iss => iss !== item && !iss.category_id.endsWith(':other') && !iss.category_id.endsWith(':feedback_complaint'));
+    if ((isClosingPlea || isOtherCat) && hasRealTechnicalIssues) continue;
+
+    // RULE: For non-defect chats (e.g. pure inquiry/context), preserve standalone 'other' category without monster consolidation
     if (isOtherCat) {
       consolidatedByCategory.push({ ...item });
       continue;
