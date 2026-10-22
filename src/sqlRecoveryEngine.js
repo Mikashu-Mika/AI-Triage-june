@@ -1,7 +1,7 @@
 import { supabase } from './supabase.js';
 import { auditAnswerRelevancy, calculateConfidenceScore } from './auditLayer.js';
 import { resolveDynamicTimeframe } from './financialMarketingService.js';
-import { findThaiMonthInText, getDynamicMonthMeta } from './categoryHelper.js';
+import { findThaiMonthInText, getDynamicMonthMeta, findCategoryKeysByName, getCachedCategories, getCategoryDisplayName } from './categoryHelper.js';
 
 /**
  * Autonomous Dynamic SQL Synthesizer & Recovery Engine
@@ -46,29 +46,9 @@ export async function autonomousSqlRecovery(userQuery, companyId, auditResult) {
     timeLabel = `เดือน${matchedSpecificMonth}`;
   }
 
-  // 2. Dynamic Schema & Category Extraction
-  const targetCats = [];
-  if (lowerQuery.includes('ฝาก-ถอน') || lowerQuery.includes('ฝากถอน') || lowerQuery.includes('ถอนเงิน') || lowerQuery.includes('ฝากเงิน')) {
-    targetCats.push('deposit_withdrawal');
-  }
-  if (lowerQuery.includes('เข้าสู่ระบบ') || lowerQuery.includes('ล็อกอิน') || lowerQuery.includes('เข้าระบบ')) {
-    targetCats.push('login_issue');
-  }
-  if (lowerQuery.includes('ค้าง') || lowerQuery.includes('โหลดช้า')) {
-    targetCats.push('page_load_freeze');
-  }
-  if (lowerQuery.includes('ร้องเรียน') || lowerQuery.includes('แอดมิน')) {
-    targetCats.push('feedback_complaint');
-  }
-  if (lowerQuery.includes('แสดงผล') || lowerQuery.includes('เพี้ยน')) {
-    targetCats.push('ui_rendering_issue');
-  }
-  if (lowerQuery.includes('ชำระเงิน') || lowerQuery.includes('ธนาคาร')) {
-    targetCats.push('payment_gateway');
-  }
-  if (lowerQuery.includes('api') || lowerQuery.includes('เอพีไอ')) {
-    targetCats.push('api_error');
-  }
+  // 2. Dynamic Schema & Category Extraction from Supabase
+  const companyCategories = await getCachedCategories(companyId);
+  const targetCats = findCategoryKeysByName(userQuery, companyCategories) || [];
 
   // 3. Dynamic PostgREST SQL Synthesis & Supabase Execution
   const { startCutoff, endCutoff, resolvedLabel } = resolveDynamicTimeframe(days, timeLabel);
@@ -145,27 +125,29 @@ export async function autonomousSqlRecovery(userQuery, companyId, auditResult) {
 
   if (targetCats.length > 0) {
     const mainCat = targetCats[0];
-    const catNameTH = catTHMap[mainCat] || mainCat;
+    const catNameTH = getCategoryDisplayName(mainCat, companyCategories) || catTHMap[mainCat] || mainCat;
     const matchedCategoryIssues = allIssuesList.filter(iss => targetCats.some(tc => iss.category_id.includes(tc) || tc.includes(iss.category_id)));
 
+    const totalAll = allIssuesList.length;
+    const catPct = totalAll > 0 ? Math.round((matchedCategoryIssues.length / totalAll) * 100) : 0;
+    const asksPct = lowerQuery.includes('%') || lowerQuery.includes('เปอร์เซ็นต์') || lowerQuery.includes('เปอร์เซนต์') || lowerQuery.includes('คิดเป็น') || lowerQuery.includes('สัดส่วน') || lowerQuery.includes('กี่เปอร์');
+
     if (matchedCategoryIssues.length === 0) {
-      // Build Approved Zero-Match Response Template
-      const sortedOverall = Object.entries(overallCatCounts)
-        .filter(([id]) => id !== 'other')
-        .sort((a, b) => b[1] - a[1]);
-
-      let topCategoriesSnippet = '';
-      const totalAll = allIssuesList.length;
-      sortedOverall.slice(0, 5).forEach((item, idx) => {
-        const cName = catTHMap[item[0]] || item[0];
-        const pct = totalAll > 0 ? Math.round((item[1] / totalAll) * 100) : 0;
-        topCategoriesSnippet += `${idx + 1}. ${cName} - ${item[1]} กรณี (${pct}%)\n`;
+      recoveredReply = `ℹ️ **สำหรับปัญหาด้าน${catNameTH} (${resolvedLabel || timeLabel}):**\n🟢 **ไม่พบรายการปัญหาเข้ามาในระบบค่ะ (0 กรณี)**\n\n💡 *สามารถพิมพ์สอบถามช่วงเวลาย้อนหลังเพิ่มเติมได้ค่ะ เช่น "ปัญหา${catNameTH} ในเดือนนี้"* ✨`;
+    } else if (asksPct) {
+      recoveredReply = `📊 **สถิติปัญหา "${catNameTH}" (${resolvedLabel || timeLabel}):**\n\n` +
+        `📌 **พบปัญหาทั้งหมด:** **${matchedCategoryIssues.length} กรณี**\n` +
+        `📈 **สัดส่วน:** คิดเป็น **${catPct}%** ของเคสปัญหาทั้งหมดใน${resolvedLabel || timeLabel} (จากปัญหารวม ${totalAll} กรณี)\n\n` +
+        `📌 **ตัวอย่างรายการแชตที่พบ:**\n`;
+      matchedCategoryIssues.slice(0, 5).forEach(iss => {
+        recoveredReply += `- แชต \`${iss.chat_id}\` - "${iss.summary}"\n`;
       });
-
-      recoveredReply = `ℹ️ **สำหรับปัญหาด้าน${catNameTH} ${resolvedLabel || timeLabel}:**\n🟢 **ไม่พบรายการปัญหาเข้ามาในระบบค่ะ (0 กรณี)**\n\n📌 **หมวดหมู่ปัญหาที่พบมากที่สุดใน${resolvedLabel || timeLabel}แทน:**\n\n${topCategoriesSnippet.trim()}`;
+      if (matchedCategoryIssues.length > 5) {
+        recoveredReply += `\n*(และยังมีอีก ${matchedCategoryIssues.length - 5} รายการ)*\n`;
+      }
     } else {
       recoveredReply = `📌 **รายงานสถิติปัญหา "${catNameTH}" ${resolvedLabel || timeLabel} (พบ ${matchedCategoryIssues.length} กรณี):**\n\n`;
-      matchedCategoryIssues.forEach(iss => {
+      matchedCategoryIssues.slice(0, 10).forEach(iss => {
         recoveredReply += `- แชต \`${iss.chat_id}\` - "${iss.summary}"\n`;
       });
     }

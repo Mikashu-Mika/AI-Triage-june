@@ -1049,8 +1049,34 @@ Provide a clean, executive, line-by-line bulleted Thai response for the Admin:`;
 
   try {
     let replyText = '';
+    const hasDeterministicFormatter = (
+      toolUsed === 'query_chat_analytics' ||
+      toolUsed === 'query_customer_analytics' ||
+      toolUsed === 'query_hourly_peak' ||
+      toolUsed === 'query_daily_peak' ||
+      toolUsed === 'query_comparison' ||
+      toolUsed === 'query_month_comparison' ||
+      toolUsed === 'query_priority_drilldown' ||
+      toolUsed === 'query_customer_praise' ||
+      toolUsed === 'query_custom_topic_scan' ||
+      toolUsed === 'query_urgent_action_required' ||
+      toolUsed === 'query_customer_sentiment' ||
+      toolUsed === 'query_existing_customer_ratio' ||
+      toolUsed === 'query_repeat_customer_issues' ||
+      toolUsed === 'query_vip_customer_analytics' ||
+      toolUsed === 'query_freeze_complaint' ||
+      toolUsed === 'query_birthday_bonus' ||
+      toolUsed === 'query_customer_drop_diagnostics' ||
+      toolUsed === 'unsupported_slip_guardrail' ||
+      toolUsed === 'vip_customer_guardrail'
+    );
+
     if (toolUsed === 'query_knowledge_base' && fetchedData && fetchedData.formatted_sop_thai) {
       replyText = fetchedData.formatted_sop_thai;
+    } else if (hasDeterministicFormatter) {
+      // Deterministic data tools already format their exact, verified responses below!
+      // Skip the 60s Ollama queue so user queries return instantly in <1 second!
+      replyText = '';
     } else {
       const res = await postOllama('/api/generate', {
         model: MODEL_LLM,
@@ -1147,7 +1173,10 @@ Provide a clean, executive, line-by-line bulleted Thai response for the Admin:`;
         
         const catNameTH = catKeys.map(ck => getCategoryDisplayName(ck, categories)).join(' / ') || 'ปัญหาที่ระบุ';
 
-        const isExplicitChatListRequest = lower.includes('c_k:') || 
+        const asksForPercentage = lower.includes('เปอร์เซ็นต์') || lower.includes('เปอร์เซนต์') || lower.includes('%') || lower.includes('คิดเป็น') || lower.includes('สัดส่วน') || lower.includes('กี่เปอร์');
+
+        const isExplicitChatListRequest = !asksForPercentage && (
+          lower.includes('c_k:') || 
           lower.includes('ดูแชตหมวด') || 
           lower.includes('ขอรายการ') || 
           lower.includes('มีแชตไหนบ้าง') || 
@@ -1163,11 +1192,11 @@ Provide a clean, executive, line-by-line bulleted Thai response for the Admin:`;
           lower.includes('เรื่องอะไร') || 
           lower.includes('เจอปัญหาอะไร') || 
           lower.includes('เกิดปัญหาอะไร') || 
-          lower.includes('มีปัญหา') || 
-          lower.includes('เกิดปัญหา') || 
+          (lower.includes('มีปัญหา') && !lower.includes('ไหม') && !lower.includes('กี่')) || 
           isTier3Drilldown || 
           isTier2CategoryList || 
-          (requestedIndex !== null);
+          (requestedIndex !== null)
+        );
 
         if (matchedSpecificList.length === 0) {
           // If 0 cases in current timeframe, check if there are cases in this month (if timeframe was today and user did not explicitly specify วันนี้)
@@ -1195,6 +1224,25 @@ Provide a clean, executive, line-by-line bulleted Thai response for the Admin:`;
             replyText += `\n💡 *หากต้องการดูรายละเอียดช่วงเวลาใดเพิ่มเติม แจ้งมิกะได้เลยนะคะ* ✨`;
           } else {
             replyText = `ℹ️ **สำหรับปัญหาด้าน${catNameTH} (${scanLabel}):**\n🟢 **ไม่พบรายการปัญหาเข้ามาในระบบค่ะ (0 กรณี)**\n\n💡 *คุณผู้บริหารสามารถพิมพ์สอบถามช่วงเวลาย้อนหลังเพิ่มเติมได้ค่ะ เช่น "ปัญหา${catNameTH} ในเดือนนี้" หรือ "ขอย้อนหลัง 7 วัน"* ✨`;
+          }
+        } else if (asksForPercentage) {
+          // Dedicated Percentage & Ratio response for specific category
+          const catPct = fetchedData.sorted_categories_list?.[0]?.pct || 0;
+          const ratioDesc = fetchedData.summary_thai_top_category ? 
+            `- **สัดส่วน:** ${fetchedData.summary_thai_top_category}\n` :
+            `- **สัดส่วน:** คิดเป็น **${catPct}%** ของเคสปัญหาทั้งหมดใน${scanLabel}\n`;
+
+          replyText = `📊 **สถิติปัญหา "${catNameTH}" (${scanLabel}):**\n\n` +
+            `- **จำนวนแชตที่พบ:** ${fetchedData.matched_chats_count || 1} ครั้ง (${matchedSpecificList.length} กรณีปัญหา)\n` +
+            `${ratioDesc}` +
+            `- **ระดับความสำคัญ:** ${fetchedData.summary_thai_priority || 'ไม่มีปัญหาระดับฉุกเฉิน'}\n\n` +
+            `📌 **ตัวอย่างรายการแชตที่พบ:**\n`;
+          
+          matchedSpecificList.slice(0, 5).forEach(iss => {
+            replyText += `- แชต \`${iss.chat_id}\` - "${iss.summary}"\n`;
+          });
+          if (matchedSpecificList.length > 5) {
+            replyText += `\n*(และยังมีอีก ${matchedSpecificList.length - 5} รายการ - สามารถกดดูแชตหมวดนี้ฉบับเต็มได้ที่ปุ่มด้านล่างค่ะ)*\n`;
           }
         } else if (isExplicitChatListRequest) {
           if (matchedSpecificList.length > 20) {
