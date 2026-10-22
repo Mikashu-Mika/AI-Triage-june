@@ -7,7 +7,8 @@ import {
   getTelegramMemberRole,
   updateTelegramMemberRole,
   getTelegramGroups,
-  getTelegramGroupMembers
+  getTelegramGroupMembers,
+  supabase
 } from '../src/supabase.js';
 
 async function runTests() {
@@ -114,7 +115,11 @@ async function runTests() {
 
   const resExecFinancial = await handleTelegramMessage(execFinancialMsg);
   assert.strictEqual(resExecFinancial?.ok, true, 'Executive should be allowed');
-  console.log('✅ Test 8 Passed: Executive allowed to query sensitive financial data.');
+  // Cleanup test artifacts from DB so table remains 100% clean
+  console.log('\n🧹 Cleaning up test artifacts from database...');
+  await supabase.from('telegram_group_members').delete().in('telegram_user_id', ['123456789', '987654321', '99999999']);
+  await supabase.from('telegram_groups').delete().in('chat_id', ['-8888777766', '-7777666655']);
+  console.log('✅ Test database cleaned up successfully.');
 
   console.log('\n🎉 ALL 8 TESTS PASSED SUCCESSFULLY! 🚀');
 }
