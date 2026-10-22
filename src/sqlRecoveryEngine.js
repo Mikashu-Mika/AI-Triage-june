@@ -159,7 +159,7 @@ export async function autonomousSqlRecovery(userQuery, companyId, auditResult) {
     let topCatListText = '';
     const totalIssues = allIssuesList.length;
     sortedCats.slice(0, 5).forEach((item, idx) => {
-      const cName = catTHMap[item[0]] || item[0];
+      const cName = getCategoryDisplayName(item[0], companyCategories) || catTHMap[item[0]] || item[0];
       const pct = totalIssues > 0 ? Math.round((item[1] / totalIssues) * 100) : 0;
       topCatListText += `${idx + 1}. ${cName} - ${item[1]} กรณี (${pct}%)\n`;
     });

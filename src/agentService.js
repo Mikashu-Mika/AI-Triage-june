@@ -357,25 +357,15 @@ export function extractIntentAndSlots(userQuery = '', activeSession = null) {
     customTimeLabel = scanLabel;
   }
 
-  // 2. Target Category Extraction
+  // 2. Target Category Extraction (Dynamic via findCategoryKeysByName)
   const targetCategories = [];
-  const mentionsAccessBlocked = lower.includes('เข้าหน้าเว็บไม่ได้') || lower.includes('เข้าเว็บไม่ได้') || lower.includes('ลิงก์เสีย') || lower.includes('502') || lower.includes('access_blocked');
-  const mentionsUiRendering = lower.includes('แสดงผล') || lower.includes('เพี้ยน') || lower.includes('ตัวหนังสือซ้อน') || lower.includes('ui_rendering_issue');
-  const mentionsPageLoad = (lower.includes('โหลดช้า') || lower.includes('ค้าง') || lower.includes('page_load_freeze')) && !mentionsAccessBlocked && !mentionsUiRendering;
-  const mentionsLogin = (lower.includes('เข้าระบบ') || lower.includes('เข้าสู่ระบบ') || lower.includes('ล๊อกอิน') || lower.includes('เข้าไม่ได้') || lower.includes('รหัสผ่าน') || lower.includes('otp') || lower.includes('loginissue') || lower.includes('login_issue')) && !mentionsAccessBlocked;
-  const mentionsBonus = lower.includes('โปรโมชั่น') || lower.includes('โบนัส') || lower.includes('โปร') || lower.includes('เงื่อนไข') || lower.includes('promobonus') || lower.includes('promo_bonus');
-  const mentionsFinance = (lower.includes('ฝาก') || lower.includes('ถอน') || lower.includes('ปรับยอด') || lower.includes('เครดิต')) && !mentionsPageLoad && !mentionsLogin;
-  const mentionsLag = lower.includes('ตอบช้า') || lower.includes('ตอบช้ามาก') || lower.includes('ช้า') || lower.includes('ไม่ตอบ') || lower.includes('ไม่มีคนตอบ') || lower.includes('รอนาน') || lower.includes('interactionlag') || lower.includes('interaction_lag');
   const mentionsOverallSummary = lower.includes('ภาพรวม') || lower.includes('สถิติรวม') || lower.includes('สรุปสถิติ');
 
   if (!mentionsOverallSummary) {
-    if (mentionsAccessBlocked) targetCategories.push('access_blocked');
-    if (mentionsUiRendering) targetCategories.push('ui_rendering_issue');
-    if (mentionsPageLoad) targetCategories.push('page_load_freeze');
-    if (mentionsLogin) targetCategories.push('login_issue');
-    if (mentionsBonus) targetCategories.push('promo_bonus');
-    if (mentionsFinance) targetCategories.push('deposit_withdrawal');
-    if (mentionsLag) targetCategories.push('interaction_lag', 'feedback_complaint');
+    const dynamicallyMatched = findCategoryKeysByName(userQuery);
+    if (dynamicallyMatched && dynamicallyMatched.length > 0) {
+      targetCategories.push(...dynamicallyMatched);
+    }
   }
 
   // 3. Index & Drilldown Extraction
