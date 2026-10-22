@@ -103,7 +103,7 @@ VALUES
     ('-5495142610', '834472739', 'JUNE 🐰', '', 'june_rabbit', 'executive', true),
     ('-5495142610', '6266062853', 'DarkJavis (พี่เดล)', '', '', 'executive', true),
     ('-5495142610', '8167753903', 'Fr€nzy', '', '', 'executive', true),
-    ('-5495142610', '1848586712', 'Core Admin', '', '', 'executive', true)
+    ('-5495142610', '1848586712', 'Ureka', '', 'Urekaka', 'executive', true)
 ON CONFLICT (group_id, telegram_user_id)
 DO UPDATE SET
     role = EXCLUDED.role,
