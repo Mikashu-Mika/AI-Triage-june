@@ -523,37 +523,25 @@ export async function handleTelegramMessage(message) {
     return { ok: false, error: 'Prompt Injection Blocked' };
   }
 
-  // Sensitive Data Access Control (Financial & Customer PII restricted to Executives)
-  const lowerText = text.toLowerCase();
-  const isProblemStatsQuery = lowerText.includes('ปัญหา') || 
-                              lowerText.includes('เคส') || 
-                              lowerText.includes('แชท') || 
-                              lowerText.includes('แชต') ||
-                              lowerText.includes('กี่ครั้ง') || 
-                              lowerText.includes('กี่เคส') ||
-                              lowerText.includes('กี่คน') ||
-                              lowerText.includes('อันดับ');
+  // Executive-Only Access Control in Groups (Members cannot query bot under any circumstances)
+  if (isGroup && !isExec) {
+    console.warn(`🔒 [Security Guard] Non-executive member ${senderName} (ID: ${senderId}) attempted to query bot in group ${chatId}: "${text}"`);
+    const restrictedReply = `🔒 *ขออภัยค่ะ คุณ ${senderName}*: สิทธิ์การสั่งการและสอบถามข้อมูลบอทในกลุ่ม สงวนสิทธิ์เฉพาะผู้บริหารเท่านั้นค่ะ ✨`;
 
-  const isSensitiveFinancial = !isProblemStatsQuery && (
-    lowerText.includes('ยอดเงิน') || 
-    lowerText.includes('ยอดฝาก') || 
-    lowerText.includes('ยอดถอน') || 
-    lowerText.includes('รายรับ') || 
-    lowerText.includes('รายจ่าย') || 
-    lowerText.includes('การเงิน') ||
-    lowerText.includes('ยอดสุทธิ') ||
-    lowerText.includes('กำไร') ||
-    lowerText.includes('ขาดทุน')
-  );
-  const isSensitiveCustomerPii = (lowerText.includes('รายชื่อ') && (lowerText.includes('ลูกค้า') || lowerText.includes('สมาชิก'))) ||
-                                 lowerText.includes('เบอร์โทร') ||
-                                 lowerText.includes('อีเมลลูกค้า');
+    await logAgentActivity({
+      query: text,
+      reply: restrictedReply,
+      toolUsed: 'non_executive_member_block',
+      durationMs: 0,
+      senderName,
+      senderId,
+      channel: 'telegram_group',
+      companyId,
+      chatId
+    });
 
-  if (isGroup && !isExec && (isSensitiveFinancial || isSensitiveCustomerPii)) {
-    console.warn(`🔒 [Security Guard] Non-executive ${senderName} (ID: ${senderId}) attempted to access sensitive company data: "${text}"`);
-    const restrictedReply = `🔒 *สิทธิ์การเข้าถึง*: ข้อมูลสรุปการเงินและข้อมูลลูกค้าระดับลึก สงวนสิทธิ์การสืบค้นเฉพาะผู้บริหารเท่านั้นค่ะ`;
     await sendMessage(chatId, restrictedReply);
-    return { ok: false, error: 'Restricted Data: Executive Only' };
+    return { ok: false, error: 'Restricted: Executive Only in Groups' };
   }
 
   // Handle /quota command or quota check queries

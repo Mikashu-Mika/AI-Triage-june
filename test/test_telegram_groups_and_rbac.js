@@ -62,8 +62,8 @@ async function runTests() {
   assert.strictEqual(resBotJoin?.ok, true, 'Bot join event should succeed');
   console.log('✅ Test 4 Passed: Bot join event handled and guidance sent.');
 
-  // Test 5: RBAC - Non-executive asking sensitive financial question in group
-  console.log('\n▶️ Test 5: RBAC - Non-executive blocked from financial queries');
+  // Test 5: RBAC - Non-executive member blocked from financial queries
+  console.log('\n▶️ Test 5: RBAC - Non-executive member blocked from financial queries');
   const nonExecFinancialMsg = {
     _dryRun: true,
     chat: { id: -5495142610, type: 'supergroup', title: 'Mika Co. VIP Support' },
@@ -73,25 +73,11 @@ async function runTests() {
 
   const resNonExecFinancial = await handleTelegramMessage(nonExecFinancialMsg);
   assert.strictEqual(resNonExecFinancial?.ok, false, 'Non-executive should be blocked');
-  assert.strictEqual(resNonExecFinancial?.error, 'Restricted Data: Executive Only');
-  console.log('✅ Test 5 Passed: Non-executive blocked from financial data.');
+  assert.strictEqual(resNonExecFinancial?.error, 'Restricted: Executive Only in Groups');
+  console.log('✅ Test 5 Passed: Non-executive blocked from financial queries.');
 
-  // Test 6: RBAC - Non-executive asking customer PII query in group
-  console.log('\n▶️ Test 6: RBAC - Non-executive blocked from customer PII queries');
-  const nonExecPiiMsg = {
-    _dryRun: true,
-    chat: { id: -5495142610, type: 'supergroup', title: 'Mika Co. VIP Support' },
-    from: { id: 99999999, first_name: 'Staff Member', last_name: 'One', username: 'staff1' },
-    text: 'ขอรายชื่อลูกค้าและเบอร์โทรหน่อยครับ'
-  };
-
-  const resNonExecPii = await handleTelegramMessage(nonExecPiiMsg);
-  assert.strictEqual(resNonExecPii?.ok, false, 'Non-executive should be blocked from PII');
-  assert.strictEqual(resNonExecPii?.error, 'Restricted Data: Executive Only');
-  console.log('✅ Test 6 Passed: Non-executive blocked from customer PII.');
-
-  // Test 7: RBAC - Non-executive asking general issue stats (Allowed)
-  console.log('\n▶️ Test 7: RBAC - Non-executive allowed to query general issue stats');
+  // Test 6: RBAC - Non-executive member blocked from general issue queries (Cannot ask anything in any case)
+  console.log('\n▶️ Test 6: RBAC - Non-executive member blocked from general issue queries');
   const nonExecGeneralMsg = {
     _dryRun: true,
     chat: { id: -5495142610, type: 'supergroup', title: 'Mika Co. VIP Support' },
@@ -100,8 +86,22 @@ async function runTests() {
   };
 
   const resNonExecGeneral = await handleTelegramMessage(nonExecGeneralMsg);
-  assert.strictEqual(resNonExecGeneral?.ok, true, 'General issues query should be allowed');
-  console.log('✅ Test 7 Passed: Non-executive can query general issue stats.');
+  assert.strictEqual(resNonExecGeneral?.ok, false, 'Non-executive member should not be allowed to ask anything');
+  assert.strictEqual(resNonExecGeneral?.error, 'Restricted: Executive Only in Groups');
+  console.log('✅ Test 6 Passed: Non-executive member blocked from general queries (Blocked in all cases).');
+
+  // Test 7: RBAC - Executive allowed to query general issue stats
+  console.log('\n▶️ Test 7: RBAC - Executive allowed to query general issue stats');
+  const execGeneralMsg = {
+    _dryRun: true,
+    chat: { id: -5495142610, type: 'supergroup', title: 'Mika Co. VIP Support' },
+    from: { id: 834472739, first_name: 'JUNE', last_name: '🐰', username: 'june_rabbit' },
+    text: 'สรุปปัญหาในเดือนนี้หน่อยค่ะ'
+  };
+
+  const resExecGeneral = await handleTelegramMessage(execGeneralMsg);
+  assert.strictEqual(resExecGeneral?.ok, true, 'Executive should be allowed');
+  console.log('✅ Test 7 Passed: Executive allowed to query general issue stats.');
 
   // Test 8: RBAC - Executive asking sensitive financial question (Allowed)
   console.log('\n▶️ Test 8: RBAC - Executive allowed to query sensitive financial data');
