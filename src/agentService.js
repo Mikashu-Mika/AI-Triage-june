@@ -17,7 +17,8 @@ import {
   getUrgentActionRequiredScan,
   getCustomTopicKeywordScan,
   getCustomerPraiseAnalytics,
-  getPriorityDrilldownScan
+  getPriorityDrilldownScan,
+  getAdminResponseTimeAnalytics
 } from './financialMarketingService.js';
 import { auditAnswerRelevancy, calculateConfidenceScore } from './auditLayer.js';
 import { autonomousSqlRecovery } from './sqlRecoveryEngine.js';
@@ -780,6 +781,31 @@ async function processAgentQueryDirect(userQuery, companyId, taskOptions = {}) {
   // Check for Birthday Bonus query ("โบนัสวันเกิด" / "วันเกิด")
   const isBirthdayBonusQuery = lower.includes('วันเกิด') || lower.includes('โบนัสวันเกิด');
 
+  // Check for Admin Response Time & Speed SLA query ("แอดมินตอบช้าสุดกี่นาที" / "ความเร็วในการตอบของแอดมิน" / "กี่นาที")
+  const isAdminResponseTimeQuery = (
+    lower.includes('ตอบช้าสุด') ||
+    lower.includes('ตอบช้ากี่นาที') ||
+    lower.includes('ช้าสุดกี่นาที') ||
+    lower.includes('ตอบกี่นาที') ||
+    lower.includes('ตอบแชทช้า') ||
+    lower.includes('ตอบแชตช้า') ||
+    lower.includes('แอดมินตอบช้า') ||
+    lower.includes('แอดมินตอบกี่นาที') ||
+    lower.includes('แอดมินตอบเร็ว') ||
+    lower.includes('แอดมินตอบไว') ||
+    lower.includes('ความเร็วในการตอบ') ||
+    lower.includes('ความเร็วแอดมิน') ||
+    lower.includes('สปีดการตอบ') ||
+    lower.includes('เวลาในการตอบ') ||
+    lower.includes('เวลาตอบกลับ') ||
+    lower.includes('เวลาตอบแชท') ||
+    lower.includes('เวลาตอบแชต') ||
+    lower.includes('response time') ||
+    lower.includes('first response time') ||
+    lower.includes('sla') ||
+    (lower.includes('แอดมิน') && lower.includes('ตอบ') && (lower.includes('ช้า') || lower.includes('กี่นาที') || lower.includes('นาที')))
+  );
+
   let scanPeriodType = 'today';
   let scanLabel = 'วันนี้';
 
@@ -941,6 +967,9 @@ async function processAgentQueryDirect(userQuery, companyId, taskOptions = {}) {
   } else if (isExecutiveGuidanceQuery || isKnowledgeQuery) {
     toolUsed = 'query_knowledge_base';
     fetchedData = await queryKnowledgeBase(userQuery, companyId, targetCategories);
+  } else if (isAdminResponseTimeQuery) {
+    toolUsed = 'query_admin_response_time';
+    fetchedData = await getAdminResponseTimeAnalytics(companyId, scanPeriodType || days, userQuery);
   } else if (isTopProblemCategoryQuery || isExplicitChatIssueQuery || isChatIssueQuery || targetCategories.length > 0) {
     toolUsed = 'query_chat_analytics';
     const effectiveTimeLabel = (scanPeriodType === 'last_week' || scanPeriodType === 'this_week') ? null : (scanLabel || customTimeLabel);
@@ -1058,6 +1087,7 @@ Provide a clean, executive, line-by-line bulleted Thai response for the Admin:`;
       toolUsed === 'query_freeze_complaint' ||
       toolUsed === 'query_birthday_bonus' ||
       toolUsed === 'query_customer_drop_diagnostics' ||
+      toolUsed === 'query_admin_response_time' ||
       toolUsed === 'unsupported_slip_guardrail' ||
       toolUsed === 'vip_customer_guardrail'
     );
@@ -1129,7 +1159,7 @@ Provide a clean, executive, line-by-line bulleted Thai response for the Admin:`;
       replyText = fetchedData.hourly_summary_thai;
     } else if (toolUsed === 'query_daily_peak') {
       replyText = fetchedData.formatted_thai;
-    } else if (toolUsed === 'query_existing_customer_ratio' || toolUsed === 'query_repeat_customer_issues' || toolUsed === 'query_vip_customer_analytics') {
+    } else if (toolUsed === 'query_existing_customer_ratio' || toolUsed === 'query_repeat_customer_issues' || toolUsed === 'query_vip_customer_analytics' || toolUsed === 'query_admin_response_time') {
       replyText = fetchedData.formatted_summary_thai;
     } else if (toolUsed === 'query_comparison' || toolUsed === 'query_month_comparison') {
       replyText = fetchedData.comparison_summary_thai;
@@ -1391,6 +1421,7 @@ Provide a clean, executive, line-by-line bulleted Thai response for the Admin:`;
       'query_customer_drop_diagnostics': 'getCustomerDropDiagnostics()',
       'query_freeze_complaint': 'getAccountSecurityFreezeScan()',
       'query_birthday_bonus': 'getBirthdayBonusScan()',
+      'query_admin_response_time': 'getAdminResponseTimeAnalytics()',
       'query_customer_analytics': 'getCustomerAnalytics()',
       'query_knowledge_base': 'queryKnowledgeBase()',
       'query_financial_balance': 'getFinancialBalance()',

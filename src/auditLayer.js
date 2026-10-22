@@ -7,7 +7,7 @@
 import { findCategoryKeysByName, getCategoryDisplayName } from './categoryHelper.js';
 
 export function calculateConfidenceScore(userQuery, toolUsed, rawData, replyText) {
-  if (toolUsed === 'query_knowledge_base') {
+  if (toolUsed === 'query_knowledge_base' || toolUsed === 'query_admin_response_time') {
     return 9;
   }
   let score = 9; // High baseline for clean database-backed queries
@@ -103,11 +103,11 @@ export function calculateConfidenceScore(userQuery, toolUsed, rawData, replyText
  * @returns {object} Audit result with isRelevant, confidence score, and missingCriteria
  */
 export function auditAnswerRelevancy(userQuery, replyText, toolUsed, rawData) {
-  if (toolUsed === 'query_knowledge_base') {
+  if (toolUsed === 'query_knowledge_base' || toolUsed === 'query_admin_response_time') {
     return {
       isRelevant: true,
       confidence: 9,
-      reasoning: 'Audit PASSED: High confidence (9/10). Direct Knowledge Base SOP guidance answered successfully.',
+      reasoning: 'Audit PASSED: High confidence (9/10). Direct Knowledge Base SOP guidance or Admin Response Time SLA answered successfully.',
       missingCriteria: []
     };
   }

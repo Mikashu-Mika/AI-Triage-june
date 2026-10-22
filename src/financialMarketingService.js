@@ -1979,3 +1979,95 @@ export async function getBirthdayBonusScan(companyId, periodType = 'today', peri
   });
   return { scan_summary_thai: text };
 }
+
+/**
+ * Admin Response Time & Speed SLA Analytics ("แอดมินตอบแชทช้าสุดกี่นาที", "ความเร็วในการตอบของแอดมิน")
+ * Provides transparent explanation regarding First Response Time SLA data,
+ * and surfaces customer complaints/issues regarding slow replies and response lag.
+ * @param {string} [companyId]
+ * @param {string|number} [timeframeMode='this_week']
+ * @param {string} [userQuery='']
+ */
+export async function getAdminResponseTimeAnalytics(companyId, timeframeMode = 'this_week', userQuery = '') {
+  try {
+    const { startCutoff, endCutoff, resolvedLabel } = resolveDynamicTimeframe(timeframeMode);
+    const periodTitle = resolvedLabel || 'ประจำสัปดาห์นี้';
+
+    let query = supabase
+      .from('chats')
+      .select('id, category_id, priority, created_at, summary, conversation, chat_issues(summary, category_id, priority)');
+
+    if (companyId) query = query.eq('company_id', companyId);
+
+    const { data: allChats, error } = await query;
+    if (error) throw error;
+
+    const inPeriodChats = (allChats || []).filter(c => {
+      if (!c.created_at) return false;
+      const d = new Date(c.created_at);
+      return d >= startCutoff && d < endCutoff;
+    });
+
+    const lagKeywords = [
+      'ตอบช้า', 'ตอบช้ามาก', 'รอนาน', 'ไม่ตอบ', 'แอดมินช้า', 'แอดมินตอบช้า',
+      'รอแชทนาน', 'รอตอบนาน', 'กว่าจะตอบ', 'ไม่มีคนตอบ', 'ตอบกลับช้า', 'แอดมินหาย',
+      'ช้ามาก', 'หน่วงมาก', 'โหลดช้า', 'ไม่ตอบสนอง'
+    ];
+
+    const complaintChats = inPeriodChats.filter(c => {
+      const catId = (c.category_id || '').toLowerCase();
+      const isLagCategory = catId === 'interaction_lag' || catId === 'feedback_complaint' || catId === 'performance_issue';
+      const text = `${c.conversation || ''} ${c.summary || ''} ${(c.chat_issues || []).map(i => i.summary).join(' ')}`.toLowerCase();
+      const hasLagWord = lagKeywords.some(k => text.includes(k));
+      return isLagCategory || hasLagWord;
+    });
+
+    let reply = `⏱️ **รายงานเวลาและความเร็วในการตอบแชทของแอดมิน (${periodTitle}):**\n\n`;
+    reply += `📌 **สถานะการเก็บข้อมูลความเร็วในการตอบ (Response Time SLA):**\n`;
+    reply += `- ปัจจุบันระบบ AI Triage เป็นระบบวิเคราะห์จัดหมวดหมู่และคัดกรองประเด็นปัญหาของแชตลูกค้า (Issue Classification & Root Cause Analysis)\n`;
+    reply += `- **ระบบ Live Chat ยังไม่ได้ส่งค่าเวลาการกดตอบกลับของแอดมิน (First Response Time / Response Timestamp per message เป็นหน่วยนาที) เข้ามาในฐานข้อมูล** ทำให้ระบบ AI ยังไม่มีตัวเลขสถิติเวลาตอบช้าสุดเป็น "จำนวนนาที" ค่ะ\n\n`;
+
+    if (complaintChats.length > 0) {
+      const pct = inPeriodChats.length > 0 ? ((complaintChats.length / inPeriodChats.length) * 100).toFixed(1) : '0';
+      reply += `⚠️ **สถิติข้อร้องเรียนเกี่ยวกับความล่าช้า/การตอบกลับใน${periodTitle}:**\n`;
+      reply += `- พบลูกค้าร้องเรียนหรือแจ้งปัญหาเรื่องความล่าช้า/การตอบสนอง: **${complaintChats.length} กรณี** (คิดเป็น **${pct}%** จากแชตทั้งหมด ${inPeriodChats.length} แชต)\n\n`;
+      reply += `📌 **ตัวอย่างกรณีที่ลูกค้าแจ้งปัญหาความล่าช้า:**\n`;
+
+      complaintChats.slice(0, 5).forEach((c, idx) => {
+        let thTime = '';
+        if (c.created_at) {
+          try {
+            const d = new Date(c.created_at);
+            thTime = d.toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok', day: 'numeric', month: 'short' }) + ' ' +
+                     d.toLocaleTimeString('th-TH', { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit' }) + ' น.';
+          } catch (e) {}
+        }
+        const timeLabel = thTime ? ` (${thTime})` : '';
+        const issueSummary = c.chat_issues?.[0]?.summary || c.summary || 'ลูกค้าแจ้งปัญหาความล่าช้าในการให้บริการ';
+        reply += `${idx + 1}. แชต \`${c.id}\`${timeLabel} - "${issueSummary}"\n`;
+      });
+    } else {
+      reply += `🟢 **สถิติข้อร้องเรียนใน${periodTitle}:**\n`;
+      reply += `- ใน${periodTitle} ไม่พบลูกค้าส่งข้อร้องเรียนเรื่อง "แอดมินตอบช้า" หรือ "รอแชตนิ่งนาน" เข้ามาในระบบค่ะ (0 กรณี จากแชตทั้งหมด ${inPeriodChats.length} แชต) ระบบให้บริการได้อย่างราบรื่นค่ะ ✨\n`;
+    }
+
+    reply += `\n💡 **แนวทางพัฒนาเพิ่มเติมสำหรับฝ่ายบริหาร:**\n`;
+    reply += `- หากต้องการติดตามตัวเลขเวลาตอบกลับช้าสุด (SLA เป็นนาที) แบบ Real-time สามารถให้ทีมพัฒนาระบบ Live Chat เชื่อมต่อ Webhook ส่ง Event \`agent_first_reply_time\` หรือ \`reply_duration_seconds\` เข้ามาบันทึกในตาราง \`chats\` ได้ค่ะ AI จะสามารถคำนวณสถิติเวลาตอบช้าสุด ค่าเฉลี่ย และ SLA Compliance ให้ได้ทันทีค่ะ`;
+
+    return {
+      total_chats_in_period: inPeriodChats.length,
+      complaint_chats_count: complaintChats.length,
+      complaint_chats: complaintChats.slice(0, 5),
+      formatted_summary_thai: reply
+    };
+  } catch (err) {
+    console.error('Error in getAdminResponseTimeAnalytics:', err.message);
+    return {
+      total_chats_in_period: 0,
+      complaint_chats_count: 0,
+      complaint_chats: [],
+      formatted_summary_thai: `⏱️ **รายงานเวลาการตอบแชทของแอดมิน:**\n\n📌 ระบบ Live Chat ยังไม่ได้ส่งค่าเวลาการกดตอบกลับของแอดมิน (Response Time ในระดับนาที) เข้ามาในฐานข้อมูลค่ะ ทำให้ยังไม่มีตัวเลขสถิติเวลาตอบช้าสุดเป็นจำนวนนาทีค่ะ`
+    };
+  }
+}
+

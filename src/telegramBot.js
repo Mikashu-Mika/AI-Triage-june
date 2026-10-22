@@ -625,7 +625,23 @@ export async function handleTelegramMessage(message) {
 
     const isCustomerQuery = !isChatIssueQuery && (lower.includes('ลูกค้า') || lower.includes('สมัคร') || lower.includes('สมาชิก') || lower.includes('ผู้ใช้') || lower.includes('ยูส') || lower.includes('ใครบ้าง') || lower.includes('มีใคร'));
 
-    if (isCustomerQuery) {
+    const isAdminResponseTimeQuery = (
+      lower.includes('ตอบช้าสุด') ||
+      lower.includes('ตอบช้ากี่นาที') ||
+      lower.includes('ช้าสุดกี่นาที') ||
+      lower.includes('ตอบกี่นาที') ||
+      lower.includes('ตอบแชทช้า') ||
+      lower.includes('ตอบแชตช้า') ||
+      lower.includes('แอดมินตอบช้า') ||
+      lower.includes('แอดมินตอบกี่นาที') ||
+      lower.includes('ความเร็วในการตอบ') ||
+      lower.includes('response time') ||
+      (lower.includes('แอดมิน') && lower.includes('ตอบ') && (lower.includes('ช้า') || lower.includes('กี่นาที') || lower.includes('นาที')))
+    );
+
+    if (isAdminResponseTimeQuery) {
+      textProgressMsg = '⏳ **กำลังตรวจสอบสถิติเวลาและความเร็วในการตอบแชตของแอดมินให้ค่ะ...**\nรบกวนรอสักครู่นะคะ ⏱️✨';
+    } else if (isCustomerQuery) {
       if (lower.includes('ทักซ้ำ') || lower.includes('แจ้งเรื่องเดิม') || lower.includes('ทักเรื่องเดิม') || (lower.includes('เรื่องเดิม') && (lower.includes('ซ้ำ') || lower.includes('อีกไหม')))) {
         textProgressMsg = '⏳ **กำลังตรวจสอบประวัติการทักแชตซ้ำเรื่องเดิมของลูกค้าให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🔄✨';
       } else if (lower.includes('ลูกค้าเก่า') && (lower.includes('เปอร์เซ็นต์') || lower.includes('เปอร์เซนต์') || lower.includes('%') || lower.includes('สัดส่วน') || lower.includes('กี่เปอร์'))) {
