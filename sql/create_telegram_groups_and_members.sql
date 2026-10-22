@@ -86,7 +86,7 @@ GRANT ALL ON TABLE telegram_group_members TO anon, authenticated, service_role;
 INSERT INTO telegram_groups (chat_id, group_name, company_id, is_active)
 VALUES (
     '-5495142610',
-    'Mika Co. VIP Support',
+    'Test_SIFT_AI',
     '2c3f46cc-fae8-4ef8-99e1-874dec8b2af2',
     true
 )
