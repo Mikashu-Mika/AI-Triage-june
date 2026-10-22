@@ -483,13 +483,14 @@ async function processAgentQueryDirect(userQuery, companyId, taskOptions = {}) {
 
   const lower = userQuery.toLowerCase();
 
-  // 🛡️ STEP 1: SECURITY GUARDRAIL CHECK (FORBIDDEN ITEMS: PASSWORDS & PHONE NUMBERS)
+  // 🛡️ STEP 1: SECURITY GUARDRAIL CHECK (FORBIDDEN ITEMS: PASSWORDS, PHONES & EMAILS)
   const isAskingPassword = lower.includes('รหัส') || lower.includes('พาส') || lower.includes('password') || lower.includes('pin') || lower.includes('passcode');
   const isAskingPhone = lower.includes('เบอร์') || lower.includes('เบอร์โทร') || lower.includes('phone') || lower.includes('mobile') || lower.includes('tel');
+  const isAskingEmail = lower.includes('อีเมล') || lower.includes('อีเมล์') || lower.includes('email') || lower.includes('e-mail') || (lower.includes('mail') && !lower.includes('gmail'));
 
-  if (isAskingPassword || isAskingPhone) {
-    const securityReply = `🔒 **แจ้งเตือนนโยบายความปลอดภัยสูงสุด**\n- เพื่อความปลอดภัยของระบบและผู้ใช้งาน ไม่อนุญาตให้แสดงหรือเปิดเผยรหัสผ่านและเบอร์โทรศัพท์ส่วนบุคคลเด็ดขาดค่ะ`;
-    console.warn(`🔒 [Security Guardrail Blocked] Query asked for password/phone: "${userQuery}"`);
+  if (isAskingPassword || isAskingPhone || isAskingEmail) {
+    const securityReply = `🔒 **แจ้งเตือนนโยบายความปลอดภัยสูงสุด**\n- เพื่อความเป็นส่วนตัวและความปลอดภัย ไม่อนุญาตให้เปิดเผยข้อมูลติดต่อส่วนบุคคล เช่น เบอร์โทรศัพท์, อีเมล และรหัสผ่านเด็ดขาดค่ะ (แสดงได้เฉพาะ Customer ID และชื่อลูกค้าเท่านั้นค่ะ) ✨`;
+    console.warn(`🔒 [Security Guardrail Blocked] Query asked for password/phone/email: "${userQuery}"`);
     return {
       reply: securityReply,
       toolUsed: 'security_guardrail_block',

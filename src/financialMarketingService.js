@@ -619,8 +619,6 @@ export async function getCustomerAnalytics(companyId, days = 7, timeframeMode = 
       return {
         id: c.id,
         name: c.name || 'Guest Customer',
-        phone: c.phone || 'ไม่ระบุ',
-        email: c.email || 'ไม่ระบุ',
         registered_at_thailand: formattedTH,
         time_only_th: timeOnlyTH
       };
