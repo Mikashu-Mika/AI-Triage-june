@@ -56,6 +56,10 @@ export function calculateConfidenceScore(userQuery, toolUsed, rawData, replyText
   if (mentionsComplaint && !lowerReply.includes('ร้องเรียน') && !lowerReply.includes('แอดมิน')) {
     score -= 3;
   }
+  const mentionsReg = lowerQuery.includes('สมัครสมาชิก') || lowerQuery.includes('การสมัคร');
+  if (mentionsReg && !lowerReply.includes('สมัคร')) {
+    score -= 3;
+  }
 
   // 3. Payload Integrity Check
   if (!rawData || (typeof rawData === 'object' && Object.keys(rawData).length === 0)) {
@@ -122,6 +126,9 @@ export function auditAnswerRelevancy(userQuery, replyText, toolUsed, rawData) {
   }
   if ((lowerQuery.includes('เข้าสู่ระบบ') || lowerQuery.includes('ล็อกอิน')) && !lowerReply.includes('เข้าสู่ระบบ') && !lowerReply.includes('ล็อกอิน')) {
     missingCriteria.push('category_mismatch_login');
+  }
+  if ((lowerQuery.includes('สมัครสมาชิก') || lowerQuery.includes('การสมัคร')) && !lowerReply.includes('สมัคร')) {
+    missingCriteria.push('category_mismatch_registration');
   }
 
   // Topic keyword mismatch detection

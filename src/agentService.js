@@ -679,36 +679,24 @@ async function processAgentQueryDirect(userQuery, companyId, taskOptions = {}) {
   const isDataQuery = hasDomainTopic && (lower.includes('สรุป') || lower.includes('รายงาน') || lower.includes('สถิติ') || lower.includes('กี่') || lower.includes('เท่าไหร่') || lower.includes('ปัญหา') || lower.includes('เคส') || lower.includes('ข้อมูล') || lower.includes('คัดกรอง') || lower.includes('ย้อนหลัง') || lower.includes('วันไหน') || lower.includes('เมื่อไหร่') || lower.includes('รายละเอียด') || lower.includes('เกิดขึ้น') || lower.includes('รายการ') || lower.includes('อะไรบ้าง') || lower.includes('อันไหนบ้าง') || lower.includes('ตัวไหนบ้าง') || lower.includes('ขอรายการ') || lower.includes('ดูให้หน่อย') || lower.includes('เช็คให้หน่อย'));
 
   const isChatIssueQuery = lower.includes('ปัญหา') || lower.includes('เคส') || lower.includes('เรื่อง') || lower.includes('รายการ') || lower.includes('อะไรบ้าง');
-  // Comprehensive Category Keyword Detector for Executive Queries
-  const targetCategories = [];
   
-  const mentionsAccessBlocked = lower.includes('เข้าหน้าเว็บไม่ได้') || lower.includes('เข้าเว็บไม่ได้') || lower.includes('ลิงก์เสีย') || lower.includes('502') || lower.includes('access_blocked');
-  const mentionsUiRendering = lower.includes('แสดงผล') || lower.includes('เพี้ยน') || lower.includes('ตัวหนังสือซ้อน') || lower.includes('ui_rendering_issue');
-  const mentionsPageLoad = (lower.includes('โหลดช้า') || lower.includes('ค้าง') || lower.includes('page_load_freeze')) && !mentionsAccessBlocked && !mentionsUiRendering;
-  const mentionsLogin = (lower.includes('เข้าระบบ') || lower.includes('เข้าสู่ระบบ') || lower.includes('ล๊อกอิน') || lower.includes('เข้าไม่ได้') || lower.includes('รหัสผ่าน') || lower.includes('otp') || lower.includes('loginissue') || lower.includes('login_issue')) && !mentionsAccessBlocked;
-  const mentionsBonus = lower.includes('โปรโมชั่น') || lower.includes('โบนัส') || lower.includes('โปร') || lower.includes('เงื่อนไข') || lower.includes('promobonus') || lower.includes('promo_bonus');
-  const mentionsFinance = (lower.includes('ฝาก') || lower.includes('ถอน') || lower.includes('ปรับยอด') || lower.includes('เครดิต')) && !mentionsPageLoad && !mentionsLogin;
-  const mentionsComplaint = lower.includes('ร้องเรียน') || lower.includes('แอดมิน') || lower.includes('ร้องเรียนแอดมิน') || lower.includes('feedback_complaint');
-  const mentionsLag = (lower.includes('ตอบช้า') || lower.includes('กดปุ่มแล้วไม่ตอบสนอง') || lower.includes('กดปุ่ม') || lower.includes('ปุ่มกด') || lower.includes('ไม่ตอบสนอง') || lower.includes('ไม่มีคนตอบ') || lower.includes('interactionlag') || lower.includes('interaction_lag')) && !mentionsComplaint && !mentionsPageLoad;
+  const companyCategories = await getCachedCategories(companyId);
+
+  // Comprehensive Dynamic Category Keyword Detector for Executive Queries
+  const targetCategories = [];
   const mentionsOverallSummary = lower.includes('ภาพรวม') || lower.includes('สถิติรวม') || lower.includes('สรุปสถิติ');
 
   // Only apply category filter if executive asks for a SPECIFIC area and NOT an overall summary
   if (!mentionsOverallSummary) {
-    if (mentionsAccessBlocked) targetCategories.push('access_blocked');
-    if (mentionsUiRendering) targetCategories.push('ui_rendering_issue');
-    if (mentionsPageLoad) targetCategories.push('page_load_freeze');
-    if (mentionsLogin) targetCategories.push('login_issue');
-    if (mentionsBonus) targetCategories.push('promo_bonus');
-    if (mentionsFinance) targetCategories.push('deposit_withdrawal');
-    if (mentionsComplaint) targetCategories.push('feedback_complaint');
-    if (mentionsLag) targetCategories.push('interaction_lag');
+    const dynamicallyMatched = findCategoryKeysByName(userQuery, companyCategories);
+    if (dynamicallyMatched && dynamicallyMatched.length > 0) {
+      targetCategories.push(...dynamicallyMatched);
+    }
   }
 
   // Detect index numbers (e.g. "ขอรายละเอียดหมวดที่ 1", "ข้อ 2", "1. ปัญหา...")
   const indexMatch = lower.match(/(?:หมวดที่|หมวด|ข้อ|รายการที่|รายการ)\s*(\d+)/i) || userQuery.match(/^(\d+)\./);
   let requestedIndex = indexMatch ? parseInt(indexMatch[1], 10) : null;
-
-  const companyCategories = await getCachedCategories(companyId);
 
   if (requestedIndex && activeSession && activeSession.lastGroupedCategories && activeSession.lastGroupedCategories.length >= requestedIndex) {
     const targetCatName = activeSession.lastGroupedCategories[requestedIndex - 1];
@@ -728,7 +716,21 @@ async function processAgentQueryDirect(userQuery, companyId, taskOptions = {}) {
 
   // 3-Tier Executive Router Logic
   const isTier1StatsOverview = lower.includes('สรุปสถิติ') || lower.includes('สรุปภาพรวม') || lower.includes('ภาพรวม') || lower.includes('สรุปปัญหาแชทย้อนหลัง') || lower.includes('สรุปปัญหาย้อนหลัง') || lower.includes('30 วัน') || lower.includes('7 วัน');
-  const isTier3Drilldown = (targetCategories.length > 0 || isFollowUpDrilldown) && (lower.includes('มีอะไรบ้าง') || lower.includes('มีอะไร') || lower.includes('ขอรายละเอียด') || lower.includes('รายละเอียด') || lower.includes('อะไรบ้าง') || lower.includes('มีเรื่องอะไรบ้าง') || isFollowUpDrilldown);
+  const isTier3Drilldown = (targetCategories.length > 0 || isFollowUpDrilldown) && (
+    lower.includes('มีอะไรบ้าง') || 
+    lower.includes('มีอะไร') || 
+    lower.includes('มีปัญหาอะไร') ||
+    lower.includes('ปัญหาอะไร') ||
+    lower.includes('เรื่องอะไร') ||
+    lower.includes('เกิดอะไรขึ้น') ||
+    lower.includes('เจอปัญหาอะไร') ||
+    lower.includes('มีเคสอะไร') ||
+    lower.includes('ขอรายละเอียด') || 
+    lower.includes('รายละเอียด') || 
+    lower.includes('อะไรบ้าง') || 
+    lower.includes('มีเรื่องอะไรบ้าง') || 
+    isFollowUpDrilldown
+  );
   const isTier2CategoryList = !isTier1StatsOverview && !isTier3Drilldown && (lower.includes('ปัญหาวันนี้มีอะไรบ้าง') || lower.includes('มีปัญหาอะไรบ้าง') || lower.includes('ขอรายการปัญหา') || lower.includes('ปัญหามีอะไรบ้าง') || lower.includes('ขอปัญหาทั้งหมด') || lower.includes('รายการปัญหาทั้งหมด') || lower.includes('สรุปปัญหาในวันนี้') || lower.includes('วันนี้มีปัญหาอะไรบ้าง') || lower.includes('อะไรบ้าง'));
 
   // Check for unsupported slip / bank image queries (Guardrail)
@@ -1145,12 +1147,54 @@ Provide a clean, executive, line-by-line bulleted Thai response for the Admin:`;
         
         const catNameTH = catKeys.map(ck => getCategoryDisplayName(ck, categories)).join(' / ') || 'ปัญหาที่ระบุ';
 
-        const isExplicitChatListRequest = lower.includes('c_k:') || lower.includes('ดูแชตหมวด') || lower.includes('ขอรายการ') || lower.includes('มีแชตไหนบ้าง') || lower.includes('มีแชทไหนบ้าง') || lower.includes('ขอรายละเอียด') || lower.includes('ดูแชต') || lower.includes('ดูแชท') || lower.includes('รายการแชต') || lower.includes('ขอไฟล์') || lower.includes('excel') || isTier3Drilldown || isTier2CategoryList || (requestedIndex !== null);
+        const isExplicitChatListRequest = lower.includes('c_k:') || 
+          lower.includes('ดูแชตหมวด') || 
+          lower.includes('ขอรายการ') || 
+          lower.includes('มีแชตไหนบ้าง') || 
+          lower.includes('มีแชทไหนบ้าง') || 
+          lower.includes('ขอรายละเอียด') || 
+          lower.includes('ดูแชต') || 
+          lower.includes('ดูแชท') || 
+          lower.includes('รายการแชต') || 
+          lower.includes('ขอไฟล์') || 
+          lower.includes('excel') || 
+          lower.includes('มีปัญหาอะไร') || 
+          lower.includes('ปัญหาอะไร') || 
+          lower.includes('เรื่องอะไร') || 
+          lower.includes('เจอปัญหาอะไร') || 
+          lower.includes('เกิดปัญหาอะไร') || 
+          lower.includes('มีปัญหา') || 
+          lower.includes('เกิดปัญหา') || 
+          isTier3Drilldown || 
+          isTier2CategoryList || 
+          (requestedIndex !== null);
 
         if (matchedSpecificList.length === 0) {
-          replyText = `ℹ️ **สำหรับปัญหาด้าน${catNameTH} ${scanLabel}:**\n🟢 **ไม่พบรายการปัญหาเข้ามาในระบบค่ะ (0 กรณี)**\n\n`;
-          if (fetchedData && fetchedData.overall_top_categories_text) {
-            replyText += `📌 **หมวดหมู่ปัญหาที่พบมากที่สุดใน${scanLabel}แทน:**\n\n${fetchedData.overall_top_categories_text}`;
+          // If 0 cases in current timeframe, check if there are cases in this month (if timeframe was today and user did not explicitly specify วันนี้)
+          let broaderFound = null;
+          if (!hasExplicitTimeWord && scanPeriodType === 'today') {
+            try {
+              const monthData = await getChatAnalytics(companyId, 'this_month', targetCategories);
+              const mList = (monthData?.matched_issues_list || []).filter(iss => catKeys.some(ck => (iss.category_id || '').includes(ck) || ck.includes(iss.category_id || '')));
+              if (mList && mList.length > 0) {
+                broaderFound = { list: mList, label: `เดือนนี้ (${curMonthName})` };
+              }
+            } catch (err) {
+              console.warn('Failed to query broader month data for category:', err.message);
+            }
+          }
+
+          if (broaderFound && broaderFound.list.length > 0) {
+            replyText = `ℹ️ **สำหรับปัญหาด้าน${catNameTH} (${scanLabel}):**\n🟢 ไม่พบรายการปัญหาเข้ามาใน${scanLabel}ค่ะ (0 กรณี)\n\n📌 **พบรายการปัญหาด้าน${catNameTH}ล่าสุดใน${broaderFound.label} รวม ${broaderFound.list.length} กรณี:**\n\n`;
+            broaderFound.list.slice(0, 10).forEach(iss => {
+              replyText += `- แชต \`${iss.chat_id}\` - "${iss.summary}"\n`;
+            });
+            if (broaderFound.list.length > 10) {
+              replyText += `\n*(และยังมีอีก ${broaderFound.list.length - 10} รายการ)*\n`;
+            }
+            replyText += `\n💡 *หากต้องการดูรายละเอียดช่วงเวลาใดเพิ่มเติม แจ้งมิกะได้เลยนะคะ* ✨`;
+          } else {
+            replyText = `ℹ️ **สำหรับปัญหาด้าน${catNameTH} (${scanLabel}):**\n🟢 **ไม่พบรายการปัญหาเข้ามาในระบบค่ะ (0 กรณี)**\n\n💡 *คุณผู้บริหารสามารถพิมพ์สอบถามช่วงเวลาย้อนหลังเพิ่มเติมได้ค่ะ เช่น "ปัญหา${catNameTH} ในเดือนนี้" หรือ "ขอย้อนหลัง 7 วัน"* ✨`;
           }
         } else if (isExplicitChatListRequest) {
           if (matchedSpecificList.length > 20) {
@@ -1430,3 +1474,5 @@ export async function processAgentQuery(userQuery, companyId, options = {}) {
     isExecutive: !!options.isExecutive
   });
 }
+
+export { processAgentQueryDirect };

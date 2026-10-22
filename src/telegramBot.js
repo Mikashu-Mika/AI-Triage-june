@@ -521,7 +521,16 @@ export async function handleTelegramMessage(message) {
                                mentionedMonths.length > 1;
     let textProgressMsg = '';
 
-    const isCustomerQuery = lower.includes('ลูกค้า') || lower.includes('สมัคร') || lower.includes('สมาชิก') || lower.includes('ผู้ใช้') || lower.includes('ยูส') || lower.includes('ใครบ้าง') || lower.includes('มีใคร');
+    const isChatIssueQuery = lower.includes('ปัญหา') || 
+                             lower.includes('เคส') || 
+                             lower.includes('ขัดข้อง') || 
+                             lower.includes('เออเร่อ') || 
+                             lower.includes('error') || 
+                             lower.includes('เรื่องอะไร') || 
+                             lower.includes('แชท') || 
+                             lower.includes('แชต');
+
+    const isCustomerQuery = !isChatIssueQuery && (lower.includes('ลูกค้า') || lower.includes('สมัคร') || lower.includes('สมาชิก') || lower.includes('ผู้ใช้') || lower.includes('ยูส') || lower.includes('ใครบ้าง') || lower.includes('มีใคร'));
 
     if (isCustomerQuery) {
       if (lower.includes('ทักซ้ำ') || lower.includes('แจ้งเรื่องเดิม') || lower.includes('ทักเรื่องเดิม') || (lower.includes('เรื่องเดิม') && (lower.includes('ซ้ำ') || lower.includes('อีกไหม')))) {
@@ -548,7 +557,9 @@ export async function handleTelegramMessage(message) {
         textProgressMsg = '⏳ **กำลังสืบค้นและรวบรวมข้อมูลลูกค้าให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨';
       }
     } else {
-      if (lower.includes('หมวดที่ 1') || lower.includes('หมวด 1')) {
+      if (lower.includes('สมัคร')) {
+        textProgressMsg = '⏳ **กำลังสืบค้นและรวบรวมข้อมูลปัญหาการสมัครสมาชิกให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🔍✨';
+      } else if (lower.includes('หมวดที่ 1') || lower.includes('หมวด 1')) {
         textProgressMsg = '⏳ **กำลังสกัดและรวบรวมรายละเอียดแชตหมวดที่ 1 ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🔍✨';
       } else if (lower.includes('หมวดที่ 2') || lower.includes('หมวด 2')) {
         textProgressMsg = '⏳ **กำลังสกัดและรวบรวมรายละเอียดแชตหมวดที่ 2 ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🔍✨';
@@ -570,6 +581,8 @@ export async function handleTelegramMessage(message) {
         textProgressMsg = '⏳ **กำลังวิเคราะห์สถิติช่วงเวลาหนาแน่นของปัญหาให้ค่ะ...**\nรบกวนรอสักครู่นะคะ ⏰✨';
       } else if (lower.includes('สรุปปัญหา') || lower.includes('สรุปแชท') || lower.includes('สรุปเคส')) {
         textProgressMsg = '⏳ **กำลังประมวลผลข้อมูลสรุปปัญหาแชทให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🤖✨';
+      } else if (isChatIssueQuery) {
+        textProgressMsg = '⏳ **กำลังสืบค้นและตรวจสอบรายละเอียดปัญหาแชตให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🔍✨';
       }
     }
 
