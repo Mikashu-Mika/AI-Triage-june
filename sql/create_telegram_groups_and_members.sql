@@ -101,7 +101,7 @@ DO UPDATE SET
 INSERT INTO telegram_group_members (group_id, telegram_user_id, first_name, last_name, username, role, is_active)
 VALUES
     ('-5495142610', '834472739', 'JUNE 🐰', '', 'june_rabbit', 'executive', true),
-    ('-5495142610', '6266062853', 'P Del', '', '', 'executive', true),
+    ('-5495142610', '6266062853', 'DarkJavis (พี่เดล)', '', '', 'executive', true),
     ('-5495142610', '8167753903', 'Fr€nzy', '', '', 'executive', true),
     ('-5495142610', '1848586712', 'Core Admin', '', '', 'executive', true)
 ON CONFLICT (group_id, telegram_user_id)
