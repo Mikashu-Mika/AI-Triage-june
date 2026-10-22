@@ -865,7 +865,7 @@ async function processAgentQueryDirect(userQuery, companyId, taskOptions = {}) {
   const isVipCustomerQuery = (lower.includes('vip') || lower.includes('วีไอพี')) && (lower.includes('ลูกค้า') || lower.includes('ยูส') || lower.includes('สมาชิก') || lower.includes('กี่คน') || lower.includes('ทัก') || lower.includes('คน'));
   const isCustomerSentimentQuery = lower.includes('ความพึงพอใจ') || lower.includes('อารมณ์') || lower.includes('ความรู้สึก') || lower.includes('พึงพอใจ') || lower.includes('sentiment') || lower.includes('satisfaction');
   const isNewCustomerRegQuery = (lower.includes('สมัคร') || lower.includes('สมาชิกใหม่') || lower.includes('ลูกค้าใหม่') || lower.includes('ผู้ใช้ใหม่') || lower.includes('ยูสใหม่')) && !lower.includes('ชม');
-  const isCustomerPraiseQuery = lower.includes('ชม') || lower.includes('คำชม') || lower.includes('ชื่นชม') || lower.includes('ประทับใจ') || lower.includes('ชมเรา');
+  const isCustomerPraiseQuery = lower.includes('คำชม') || lower.includes('ชื่นชม') || lower.includes('ประทับใจ') || lower.includes('ชมเชย') || lower.includes('ลูกค้าชม') || lower.includes('ชมเรา') || lower.includes('ชมแอดมิน') || (lower.includes('ชม') && !lower.includes('ชม.') && !lower.includes('ชั่วโมง') && !lower.includes('24 ชม') && !lower.includes('24ชม') && !lower.includes('กี่ ชม') && !lower.includes('กี่ชม'));
 
   const isCustomerAnalyticsQuery = (
     lower.includes('สมาชิก') || 

@@ -96,6 +96,9 @@ export function resolveDynamicTimeframe(periodMode, customLabel = null) {
     sunDate.setDate(sunDate.getDate() - 1);
     const lastSunStr = sunDate.toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok', day: 'numeric', month: 'short' });
     if (!resolvedLabel) resolvedLabel = `ประจำสัปดาห์ที่แล้ว (จันทร์ ${lastMonStr} - อาทิตย์ ${lastSunStr})`;
+  } else if (periodMode === 'all_time' || periodMode === 'all' || periodMode === 999) {
+    startCutoff = new Date(0);
+    if (!resolvedLabel) resolvedLabel = 'ทั้งหมด';
   } else {
     const numDays = typeof periodMode === 'number' ? periodMode : 30;
     const thTodayMidnight = new Date(`${thTodayStr}T00:00:00+07:00`);
@@ -1784,26 +1787,57 @@ export async function getCustomerPraiseAnalytics(companyId, timeframeMode = 'thi
 
     let query = supabase
       .from('chats')
-      .select('id, category_id, priority, created_at, summary, chat_issues(summary)');
+      .select('id, company_id, category_id, priority, sentiment, created_at, summary, conversation, chat_issues(summary, category_id)');
 
     if (companyId) query = query.eq('company_id', companyId);
 
     const { data: chats, error } = await query;
     if (error) throw error;
 
-    const praiseKeywords = ['ชม', 'ชื่นชม', 'ประทับใจ', 'ขอบคุณ', 'น่ารัก', 'ดีมาก', 'บริการดี', 'รวดเร็ว', 'สุภาพ', 'ทันใจ'];
+    const labelText = resolvedLabel || 'ช่วงนี้';
 
-    const praiseChats = (chats || []).filter(c => {
-      const issueSummaries = (c.chat_issues || []).map(i => i.summary || '').join(' ');
-      const fullText = `${c.summary || ''} ${issueSummaries}`;
-      return praiseKeywords.some(k => fullText.includes(k));
+    // 1. Timeframe Filter: Strictly within Thailand Timezone window [startCutoff, endCutoff)
+    const inPeriodChats = (chats || []).filter(c => {
+      if (!c.created_at) return false;
+      const cDate = new Date(c.created_at);
+      return cDate >= startCutoff && cDate < endCutoff;
     });
 
-    const labelText = resolvedLabel || 'ช่วงนี้';
+    // 2. Dynamic AI Intelligence Filter:
+    const praiseChats = inPeriodChats.filter(c => {
+      const s = (c.sentiment || '').trim();
+      const cat = (c.category_id || '').toLowerCase();
+      const conv = (c.conversation || '').toLowerCase();
+
+      // Exclude negative sentiments (complaints, angry, frustrated)
+      const hasNegativeSentiment = s === 'ไม่พอใจ' || s === 'โกรธ' || s === 'ไม่พอใจอย่างมาก' || s === 'หงุดหงิด';
+      if (hasNegativeSentiment) return false;
+
+      const mentionsAdminOrService = conv.includes('แอดมิน') || conv.includes('บริการ') || conv.includes('ทีมงาน') || conv.includes('พนักงาน') || conv.includes('การดูแล');
+      const hasPraiseWords = (conv.includes('ชื่นชม') || conv.includes('ชมเชย') || conv.includes('ประทับใจ') || conv.includes('บริการดี') || conv.includes('ตอบไว') || conv.includes('ดูแลดี') || conv.includes('สุภาพ') || conv.includes('รวดเร็ว')) && !conv.includes('24 ชม') && !conv.includes('24ชม');
+
+      // If category is feature_request and there's no mention of admin praise, it's a technical feature request
+      if (cat === 'feature_request' && !mentionsAdminOrService) {
+        return false;
+      }
+
+      // Tagged by AI as praise (and not a pure negative complaint or false positive)
+      if (s === 'ชมเชย' || s === 'ชื่นชม') {
+        if (conv.includes('24 ชม') && !hasPraiseWords) return false;
+        return true;
+      }
+
+      // Has contextual admin appreciation
+      if (mentionsAdminOrService && hasPraiseWords) {
+        return true;
+      }
+
+      return false;
+    });
 
     if (praiseChats.length === 0) {
       return {
-        praise_summary_thai: `🟢 **รายงานคำชมเชยและการบริการของแอดมิน (${labelText}):**\n\n- ไม่พบรายการแชตที่ลูกค้าส่งคำชมเชยเข้ามาใน${labelText}ค่ะ`
+        praise_summary_thai: `🟢 **รายงานคำชมเชยการบริการของแอดมิน (${labelText}):**\n\n- ไม่พบรายการแชตที่ลูกค้าส่งคำชมเชยการบริการของแอดมินเข้ามาใน${labelText}ค่ะ\n\n💡 *สามารถพิมพ์สอบถามข้อมูลช่วงเวลาย้อนหลังเพิ่มเติมได้ค่ะ เช่น "สรุปคำชมทั้งหมด"* ✨`
       };
     }
 
@@ -1819,9 +1853,19 @@ export async function getCustomerPraiseAnalytics(companyId, timeframeMode = 'thi
         } catch (e) {}
       }
       const timeStr = thTime ? ` (เวลา **${thTime}**)` : '';
-      
-      const praiseIssue = (c.chat_issues || []).find(iss => praiseKeywords.some(k => (iss.summary || '').includes(k)));
-      const snippet = praiseIssue ? praiseIssue.summary : (c.summary || 'ลูกค้าส่งคำชื่นชมและขอบคุณการดูแลของแอดมิน');
+
+      // Find specific appreciation sentence from conversation
+      let snippet = c.summary || 'ลูกค้าส่งคำชื่นชมการบริการของทีมงาน';
+      if (c.conversation) {
+        const lines = c.conversation.split('\n');
+        const praiseLine = lines.find(l => {
+          const lowerL = l.toLowerCase();
+          return (lowerL.includes('ชื่นชม') || lowerL.includes('ชมเชย') || lowerL.includes('ประทับใจ') || lowerL.includes('บริการดี') || lowerL.includes('ตอบไว') || lowerL.includes('ดูแลดี') || lowerL.includes('สุภาพ')) && !lowerL.includes('24 ชม');
+        });
+        if (praiseLine) {
+          snippet = praiseLine.replace(/^ลูกค้า:\s*/, '').replace(/^แอดมิน:\s*/, '').trim();
+        }
+      }
 
       text += `${idx + 1}. แชต \`${c.id}\`${timeStr} - "${snippet}"\n`;
     });
