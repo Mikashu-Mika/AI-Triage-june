@@ -36,6 +36,8 @@ const PLAN_SCHEMA = {
   type: 'object',
   properties: {
     reply_mode: { type: 'string', enum: ['data', 'chitchat', 'clarify'] },
+    // true when the question builds on the previous turn ("ทั้ง 45 ปัญหามีอะไรบ้าง", "แล้วเมื่อวานล่ะ")
+    continues_previous: { type: 'boolean' },
     calls: {
       type: 'array',
       items: {
@@ -68,7 +70,7 @@ const PLAN_SCHEMA = {
     focus: { type: 'string' },
     clarify_question: { type: 'string' }
   },
-  required: ['reply_mode', 'calls', 'unsupported_topics']
+  required: ['reply_mode', 'continues_previous', 'calls', 'unsupported_topics']
 };
 
 function buildSystemPrompt(categories) {
@@ -104,6 +106,7 @@ PERIOD: {"type": one of ${PERIOD_TYPES.join('|')}, "n" for last_n_days, "month"(
 If the question gives no time, reuse the period of the previous turn when it is a follow-up; otherwise use {"type":"last_n_days","n":7}. "ช่วงนี้" = last_n_days 7. "1 สัปดาห์" = last_n_days 7.
 
 FOLLOW-UP QUESTIONS
+Set "continues_previous": true when the question builds on the previous turn (refers to its results, numbers or items, or only changes one detail); the system then carries over every argument you do not set. Set it to false for a new, self-contained question.
 A short question that refers to the previous turn ("แล้ว...ล่ะ", "เทียบกับ...", "อันนั้น", "ข้อ 2", "ขอรายละเอียด") continues the previous plan:
 - Keep every argument the user did not change (period, categories, priorities, metric) and change only what the new question mentions.
 - Comparing with another period means compare_periods: the newly mentioned period and the previous turn's period are the two periods, with the previous turn's metric/categories.
@@ -139,6 +142,14 @@ const TOOLS_WITH_SINGLE_CATEGORY = ['get_category_info', 'get_resolution_advice'
  */
 export function sanitizePlan(raw, previousCalls = []) {
   const previousPeriod = previousCalls.find(c => c.args?.period)?.args.period || null;
+  const continues = raw?.continues_previous === true && previousCalls.length > 0;
+  // Filters of the previous turn that a follow-up keeps unless it sets its own
+  const previousFilters = {};
+  for (const key of ['categories', 'priorities', 'query']) {
+    const found = previousCalls.find(c => c.args?.[key]?.length);
+    if (found) previousFilters[key] = found.args[key];
+  }
+  const previousCategory = previousCalls.find(c => c.args?.category)?.args.category || previousFilters.categories?.[0] || null;
   const mode = ['data', 'chitchat', 'clarify'].includes(raw?.reply_mode) ? raw.reply_mode : 'data';
   const calls = (Array.isArray(raw?.calls) ? raw.calls : [])
     .filter(c => c && TOOL_NAMES.includes(c.tool))
@@ -163,6 +174,16 @@ export function sanitizePlan(raw, previousCalls = []) {
       if (TOOLS_WITH_SINGLE_CATEGORY.includes(c.tool) && !args.category && args.categories?.length) args.category = args.categories[0];
       if (TOOLS_WITH_CATEGORY_LIST.includes(c.tool)) delete args.category;
 
+      if (continues) {
+        if (TOOLS_WITH_CATEGORY_LIST.includes(c.tool)) {
+          for (const key of ['categories', 'priorities']) {
+            if (!args[key]?.length && previousFilters[key]) args[key] = previousFilters[key];
+          }
+          if (c.tool === 'list_chats' && !args.query && previousFilters.query) args.query = previousFilters.query;
+        }
+        if (TOOLS_WITH_SINGLE_CATEGORY.includes(c.tool) && !args.category && previousCategory) args.category = previousCategory;
+        args.continues_previous = true;
+      }
       if (!args.period && c.tool !== 'get_category_info') {
         args.period = previousPeriod || { type: 'last_n_days', n: 7 };
         args.period_inherited = !!previousPeriod;

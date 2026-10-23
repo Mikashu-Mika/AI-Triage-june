@@ -21,103 +21,136 @@ export function unsupportedText(topics) {
 }
 
 // ---------------------------------------------------------------------------
-// Deterministic formatters (fallback + guaranteed-correct numbers)
+// Deterministic formatters (fallback + guaranteed-correct numbers).
+// They follow the same clean layout the LLM is asked for: emoji + title + period, total first,
+// top 5, the rest in one line, chat items with time/priority. No markdown bold.
 // ---------------------------------------------------------------------------
+const GROUP_UNIT = { category: 'หมวด', priority: 'ระดับ', day: 'วัน', hour: 'ช่วงเวลา' };
+const GROUP_TITLE = { category: '📌 ปัญหาที่พบมากที่สุด', priority: '🚦 แยกตามความด่วน', day: '📅 วันที่พบมากที่สุด', hour: '⏰ ช่วงเวลาที่พบมากที่สุด' };
+const METRIC_UNIT = { issues: 'ปัญหา', chats: 'แชต', new_customers: 'คน' };
+const signed = n => (n > 0 ? `+${n}` : `${n}`);
+const clip = (text, max) => (text && text.length > max ? `${text.slice(0, max)}…` : text || '-');
+
 function formatIssueStats(f) {
-  const lines = [`📊 *${f.filters.categories.length ? `ปัญหาหมวด ${f.filters.categories.join(' / ')}` : 'สรุปปัญหา'}* — ${f.period.label}`];
-  lines.push(`- แชตทั้งหมด: ${f.total_chats_in_period} แชต`);
-  if (f.filters.categories.length || f.filters.priorities.length) {
-    lines.push(`- ปัญหาที่ตรงเงื่อนไข: ${f.matched_problem_issues} กรณี จาก ${f.matched_chats} แชต (${f.pct_of_all_problems}% ของปัญหาทั้งหมด ${f.total_problem_issues_in_period} กรณี)`);
-  } else {
-    lines.push(`- ปัญหาที่พบ: ${f.matched_problem_issues} กรณี จาก ${f.matched_chats} แชต`);
+  const cats = f.filters.categories;
+  // Category names that already start with "ปัญหา" read naturally without "ปัญหาหมวด"
+  const subject = cats.length === 1 && cats[0].startsWith('ปัญหา') ? cats[0] : `ปัญหาหมวด${cats.join(' / ')}`;
+  const title = cats.length ? `สรุป${subject} ${f.period.label}` : `สรุปปัญหา${f.period.label}`;
+  const lines = [`📊 ${title}`];
+  if (f.matched_problem_issues === 0) {
+    lines.push('- ไม่พบปัญหาตามเงื่อนไขในช่วงเวลานี้ค่ะ');
+    return lines.join('\n');
   }
-  if (f.groups.length) {
-    lines.push('', f.group_by === 'hour' ? '⏰ *ช่วงเวลาที่พบมากที่สุด*' : f.group_by === 'day' ? '📅 *วันที่พบมากที่สุด*' : f.group_by === 'priority' ? '🚦 *แยกตามความด่วน*' : '📌 *หมวดที่พบมากที่สุด*');
-    f.groups.slice(0, 5).forEach((g, i) => lines.push(`${i + 1}. ${g.group} — ${g.issues} กรณี (${g.pct_of_matched_issues}%)`));
-    const rest = f.groups.slice(5);
-    if (rest.length) {
-      const counts = rest.map(g => g.issues);
-      const min = Math.min(...counts);
-      const max = Math.max(...counts);
-      lines.push(`- อีก ${rest.length} หมวดที่เหลือ พบหมวดละ ${min === max ? min : `${min}–${max}`} กรณี`);
-    }
-  } else {
-    lines.push('', 'ไม่พบปัญหาตามเงื่อนไขในช่วงเวลานี้ค่ะ');
+  lines.push(`- รวม ${f.matched_problem_issues} ปัญหา จาก ${f.matched_chats} แชต`);
+  if (cats.length || f.filters.priorities.length) {
+    lines.push(`- คิดเป็น ${f.pct_of_all_problems}% ของปัญหาทั้งหมด ${f.total_problem_issues_in_period} ปัญหา`);
   }
-  return lines.join('\n');
+  const showList = f.groups.length > 1 || f.group_by !== 'category';
+  if (showList) {
+    lines.push('', GROUP_TITLE[f.group_by] || GROUP_TITLE.category);
+    f.groups.slice(0, 5).forEach((g, i) => lines.push(`${i + 1}. ${g.group} — ${g.issues} ปัญหา (${g.pct_of_matched_issues}%)`));
+    const rest = f.remaining_groups_after_top5;
+    if (rest) lines.push(`- อีก ${rest.groups} ${GROUP_UNIT[f.group_by] || 'หมวด'}ที่เหลือ รวม ${rest.issues} ปัญหา`);
+  }
+  lines.push('');
+  if (f.period.is_partial) lines.push('📌 ช่วงเวลานี้ยังไม่จบ ตัวเลขนับถึงปัจจุบันค่ะ');
+  else if (f.group_by === 'category' && f.groups.length > 1) lines.push('💡 พิมพ์ชื่อหมวดเพื่อดูรายการแชตได้ค่ะ');
+  return lines.join('\n').trim();
 }
 
 function formatChatList(f) {
-  const title = f.tool === 'search_chats' ? `🔎 *ผลค้นหา "${f.query}"*` : '📋 *รายการแชต*';
-  const total = f.tool === 'search_chats' ? f.total_matches : f.total_matched_chats;
-  const lines = [`${title} — ${f.period.label}`, `- พบ ${total} แชต${total > f.shown ? ` (แสดง ${f.shown} รายการ)` : ''}`];
-  if (!f.items?.length) return [...lines, '', 'ไม่พบแชตตามเงื่อนไขค่ะ'].join('\n');
+  const isSearch = f.tool === 'search_chats';
+  const total = isSearch ? f.total_matches : f.total_matched_chats;
+  const cats = f.filters?.categories || [];
+  const subject = isSearch ? `ผลค้นหา "${f.query}"` : cats.length ? `แชตหมวด${cats.join(' / ')}` : 'รายการแชต';
+  const lines = [`📋 ${subject} ${f.period.label} — ${total} แชต`];
+  if (!f.items?.length) {
+    lines.push('- ไม่พบแชตตามเงื่อนไขค่ะ');
+    return lines.join('\n');
+  }
   lines.push('');
   f.items.forEach((it, i) => {
-    const summary = it.issues?.[0]?.summary || it.chat_summary || '-';
-    lines.push(`${i + 1}. \`${it.chat_id}\` (${it.time}, ความด่วน${it.priority}) ${it.categories.join(', ')}`);
-    lines.push(`   "${summary.slice(0, 140)}"`);
+    const summary = it.issues?.[0]?.summary || it.chat_summary;
+    lines.push(`${i + 1}. \`${it.chat_id}\` (${it.time}, ความด่วน${it.priority})`);
+    lines.push(`   ${clip(summary, 160)}`);
+    if (!cats.length && it.categories?.length) lines.push(`   หมวด: ${it.categories.join(', ')}`);
   });
-  if (f.excel_export) lines.push('', '📎 ส่งไฟล์ Excel รายการทั้งหมดให้ด้านล่างค่ะ');
-  return lines.join('\n');
+  lines.push('');
+  if (total > f.shown) {
+    lines.push(f.excel_export
+      ? `📎 แสดง ${f.shown} จาก ${total} แชต รายการทั้งหมดอยู่ในไฟล์ Excel ด้านล่างค่ะ`
+      : `📌 แสดง ${f.shown} จาก ${total} แชตค่ะ`);
+  }
+  return lines.join('\n').trim();
 }
 
 function formatCompare(f) {
-  const lines = [`📅 *เปรียบเทียบ${f.metric_th}*`];
-  lines.push(`- ${f.period_a.label}: ${f.period_a.value} (เฉลี่ย ${f.period_a.per_day}/วัน)`);
-  lines.push(`- ${f.period_b.label}: ${f.period_b.value} (เฉลี่ย ${f.period_b.per_day}/วัน)`);
-  lines.push(`- ส่วนต่าง: ${f.diff > 0 ? '+' : ''}${f.diff}${f.pct_change !== null ? ` (${f.pct_change > 0 ? '+' : ''}${f.pct_change}%)` : ''}`);
-  if (f.period_a.is_partial) lines.push(`- หมายเหตุ: ${f.period_a.label} ยังไม่ครบช่วง (${f.period_a.days} วัน) ควรดูค่าเฉลี่ยต่อวันประกอบ`);
+  const unit = METRIC_UNIT[f.metric] || '';
+  const cats = f.filters?.categories?.length ? ` หมวด${f.filters.categories.join(' / ')}` : '';
+  const lines = [`📅 เปรียบเทียบ${f.metric_th}${cats}`];
+  lines.push(`- ${f.period_a.label}: ${f.period_a.value} ${unit} (เฉลี่ย ${f.period_a.per_day}/วัน)`);
+  lines.push(`- ${f.period_b.label}: ${f.period_b.value} ${unit} (เฉลี่ย ${f.period_b.per_day}/วัน)`);
+  lines.push(`- เปลี่ยนแปลง: ${signed(f.diff)} ${unit}${f.pct_change !== null ? ` (${signed(f.pct_change)}%)` : ''}`);
   if (f.biggest_category_changes?.length) {
-    lines.push('', '📌 *หมวดที่เปลี่ยนแปลงมากที่สุด*');
+    lines.push('', '📌 หมวดที่เปลี่ยนแปลงมากที่สุด');
     f.biggest_category_changes.forEach(c => lines.push(`- ${c.category}: ${c.previous} → ${c.current}`));
+  }
+  if (f.period_a.is_partial) {
+    lines.push('', `📌 ${f.period_a.label} ยังไม่จบ (${f.period_a.days} วัน) ควรเทียบที่ค่าเฉลี่ยต่อวันค่ะ`);
   }
   return lines.join('\n');
 }
 
 function formatCustomers(f) {
-  const lines = [`👥 *ข้อมูลลูกค้า* — ${f.period.label}`, `- ลูกค้าทั้งหมดในระบบ: ${f.total_customers} คน`, `- ลูกค้าใหม่ในช่วงนี้: ${f.new_customers_in_period} คน`];
-  if (f.new_customers) f.new_customers.forEach((c, i) => lines.push(`${i + 1}. ${c.name} (\`${c.customer_id}\`) สมัคร ${c.registered_at}`));
-  if (f.by_month) f.by_month.forEach(m => lines.push(`- ${m.month}: ${m.count} คน`));
-  if (f.repeat_customers) {
-    lines.push(`- ลูกค้าที่ทักมากกว่า 1 ครั้ง: ${f.customers_with_multiple_chats} คน (แจ้งปัญหาหมวดเดิมซ้ำ ${f.customers_repeating_same_problem} คน)`);
-    f.repeat_customers.slice(0, 10).forEach(r => lines.push(`- ${r.name} (\`${r.customer_id}\`) ${r.chats} แชต${r.repeated_problems.length ? ` ซ้ำเรื่อง: ${r.repeated_problems.join(', ')}` : ''}`));
+  const lines = [`👥 ข้อมูลลูกค้า ${f.period.label}`, `- ลูกค้าใหม่: ${f.new_customers_in_period} คน`, `- ลูกค้าทั้งหมดในระบบ: ${f.total_customers} คน`];
+  if (f.new_customers?.length) {
+    lines.push('', '🆕 ลูกค้าที่สมัครใหม่');
+    f.new_customers.forEach((c, i) => lines.push(`${i + 1}. ${c.name} (\`${c.customer_id}\`) สมัคร ${c.registered_at}`));
+  }
+  if (f.by_month?.length) {
+    lines.push('', '📅 ลูกค้าใหม่รายเดือน');
+    f.by_month.forEach(m => lines.push(`- ${m.month}: ${m.count} คน`));
   }
   if (f.pct_existing !== undefined) {
-    lines.push(`- แชตจากลูกค้าเก่า: ${f.chats_from_existing_customers} จาก ${f.chats_in_period} แชต (${f.pct_existing}%)`, `- ${f.definition}`);
+    lines.push('', `- แชตจากลูกค้าเก่า: ${f.chats_from_existing_customers} จาก ${f.chats_in_period} แชต (${f.pct_existing}%)`, `- ${f.definition}`);
+  }
+  if (f.repeat_customers) {
+    lines.push('', `🔁 ลูกค้าที่ทักมากกว่า 1 ครั้ง: ${f.customers_with_multiple_chats} คน (แจ้งปัญหาหมวดเดิมซ้ำ ${f.customers_repeating_same_problem} คน)`);
+    f.repeat_customers.slice(0, 10).forEach((r, i) => lines.push(`${i + 1}. ${r.name} (\`${r.customer_id}\`) ${r.chats} แชต${r.repeated_problems.length ? ` · ซ้ำเรื่อง ${r.repeated_problems.join(', ')}` : ''}`));
   }
   return lines.join('\n');
 }
 
 function formatSentiment(f) {
-  const lines = [`😊 *อารมณ์ลูกค้า* — ${f.period.label}`, `- แชตทั้งหมด: ${f.total_chats} แชต`];
+  const lines = [`😊 อารมณ์ลูกค้า ${f.period.label}`, `- จาก ${f.total_chats} แชต`];
   f.polarity.forEach(p => lines.push(`- เชิง${p.group}: ${p.count} แชต (${p.pct}%)`));
-  if (f.positive_examples?.length) {
-    lines.push('', '💖 *ตัวอย่างแชตเชิงบวก/คำชม*');
-    f.positive_examples.forEach(e => lines.push(`- \`${e.chat_id}\` (${e.sentiment}) ${String(e.summary || '').slice(0, 120)}`));
-  }
-  if (f.negative_examples.length) {
-    lines.push('', '📌 *ตัวอย่างแชตเชิงลบ*');
-    f.negative_examples.forEach(e => lines.push(`- \`${e.chat_id}\` (${e.sentiment}) ${String(e.summary || '').slice(0, 120)}`));
-  }
+  const examples = (title, list) => {
+    if (!list?.length) return;
+    lines.push('', title);
+    list.forEach((e, i) => lines.push(`${i + 1}. \`${e.chat_id}\` (${e.time}, ${e.sentiment})`, `   ${clip(e.summary, 140)}`));
+  };
+  examples('💖 แชตที่ลูกค้าชม/พอใจ', f.positive_examples);
+  examples('📌 ตัวอย่างแชตเชิงลบ', f.negative_examples);
   return lines.join('\n');
 }
 
 function formatCategoryInfo(f) {
-  if (!f.category) return `ไม่พบหมวดที่ถามค่ะ หมวดที่มีในระบบ: ${(f.available_categories || []).map(c => c.name).join(', ')}`;
-  const lines = [`📖 *${f.category.name}*`, f.category.description ? `- ครอบคลุม: ${f.category.description}` : ''];
-  if (f.sop) lines.push('', `🛠️ *คู่มือ (${f.sop.status})*`, f.sop.content);
-  return lines.filter(Boolean).join('\n');
+  if (!f.category) return `ไม่พบหมวดที่ถามค่ะ\n- หมวดที่มีในระบบ: ${(f.available_categories || []).map(c => c.name).join(', ')}`;
+  const lines = [`📖 หมวด${f.category.name}`];
+  if (f.category.description) lines.push(`- ครอบคลุม: ${f.category.description}`);
+  if (f.sop) lines.push('', `📘 คู่มือ (${f.sop.status})`, f.sop.content);
+  else lines.push('', 'ℹ️ ยังไม่มีคู่มือแก้ปัญหาสำหรับหมวดนี้ค่ะ');
+  return lines.join('\n');
 }
 
 function formatAdvice(f) {
-  if (f.no_problems_found) return `ไม่พบปัญหาใน${f.period.label} จึงยังไม่มีแนวทางแก้ที่ต้องแนะนำค่ะ`;
-  const lines = [`🛠️ *แนวทางแก้ปัญหา "${f.category.name}"* — ${f.period.label}`];
-  lines.push(`- พบ ${f.issues_in_period} กรณี จาก ${f.chats_in_period} แชต (${f.previous_period.label}: ${f.previous_period.issues} กรณี)`);
-  if (f.peak_hours.length) lines.push(`- ช่วงเวลาที่พบมาก: ${f.peak_hours.map(h => `${h.hour} (${h.issues})`).join(', ')}`);
+  if (f.no_problems_found) return `🛠️ แนวทางแก้ปัญหา ${f.period.label}\n- ไม่พบปัญหาในช่วงนี้ จึงยังไม่มีเรื่องที่ต้องแก้ค่ะ`;
+  const lines = [`🛠️ แนวทางแก้ "${f.category.name}" ${f.period.label}`, '', '📌 สิ่งที่เกิดขึ้น'];
+  lines.push(`- ${f.issues_in_period} ปัญหา จาก ${f.chats_in_period} แชต (${f.previous_period.label}: ${f.previous_period.issues} ปัญหา)`);
+  if (f.peak_hours.length) lines.push(`- พบมากช่วง ${f.peak_hours.map(h => h.hour).join(', ')}`);
   if (f.example_chats.length) lines.push(`- แชตตัวอย่าง: ${f.example_chats.map(id => `\`${id}\``).join(', ')}`);
-  if (f.sop) lines.push('', `📘 *จากคู่มือ (${f.sop.status})*`, f.sop.content);
-  else lines.push('', 'ℹ️ ยังไม่มีคู่มือแก้ปัญหาสำหรับหมวดนี้ในระบบค่ะ');
+  if (f.sop) lines.push('', `📘 จากคู่มือ (${f.sop.status})`, f.sop.content.replace(/\*\*/g, ''));
+  else lines.push('', 'ℹ️ ยังไม่มีคู่มือแก้ปัญหาสำหรับหมวดนี้ค่ะ');
   return lines.join('\n');
 }
 
@@ -153,7 +186,9 @@ export function numbersAreGrounded(reply, facts, query) {
   for (const n of [...allowed]) {
     if (n.includes('.')) allowed.add(String(parseFloat(n)));
   }
-  return numbersIn(reply).every(n => allowed.has(n) || allowed.has(String(parseFloat(n))) || (/^\d+$/.test(n) && parseInt(n, 10) <= 20));
+  // List numbering ("1. ", "2) ") is not data; every other number, small ones included, must come from the facts
+  const withoutListMarkers = String(reply).replace(/^\s*\d{1,2}[.)]\s/gm, '');
+  return numbersIn(withoutListMarkers).every(n => allowed.has(n) || allowed.has(String(parseFloat(n))));
 }
 
 /** Drop fields the writer never uses (excel rows, internal notes, empty filters) */
@@ -210,7 +245,8 @@ RULES
 FORMAT
 - Line 1: one emoji + short title + the period label (e.g. "📊 สรุปปัญหาเมื่อวาน (22 ต.ค. 2569)").
 - Line 2: the overall total first (e.g. "- รวม 48 ปัญหา จาก 10 แชต").
-- Ranked groups: show at most the top 5 as a numbered list "ชื่อ — N ปัญหา (x%)"; summarize the rest in ONE line without inventing a total (e.g. "- หมวดอื่นที่เหลือพบหมวดละ 1–3 ปัญหา", using only numbers present in the facts).
+- Ranked groups: show at most the top 5 as a numbered list "ชื่อ — N ปัญหา (x%)" using the group's own pct value. Add a line about the rest ONLY when "remaining_groups_after_top5" is not null, using exactly its numbers (e.g. "- อีก 9 หมวดที่เหลือ รวม 14 ปัญหา"). With a single group, show only that group.
+- Comparisons (compare_periods): show both periods with their value and per_day, then diff and pct_change. "biggest_category_changes" are CHANGES, written "ชื่อหมวด: previous → current"; never present them as a ranking and never add percentages to them.
 - Chat lists: numbered, one chat per item: "\`chat_id\` (เวลา, ความด่วน<priority>)" then the customer's problem summarized on the next line indented by 3 spaces; list higher-priority chats first.
 - Do not repeat the same phrase on every line (e.g. "จากการสนทนา X ครั้ง"). Never output an empty bullet, a lone "-" or a line containing only "ค่ะ".
 - You may end with ONE short line: an observation grounded in the facts (📌) or a follow-up suggestion (💡). The last sentence ends with ค่ะ/นะคะ.
