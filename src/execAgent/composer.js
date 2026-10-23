@@ -34,6 +34,13 @@ function formatIssueStats(f) {
   if (f.groups.length) {
     lines.push('', f.group_by === 'hour' ? '⏰ *ช่วงเวลาที่พบมากที่สุด*' : f.group_by === 'day' ? '📅 *วันที่พบมากที่สุด*' : f.group_by === 'priority' ? '🚦 *แยกตามความด่วน*' : '📌 *หมวดที่พบมากที่สุด*');
     f.groups.slice(0, 5).forEach((g, i) => lines.push(`${i + 1}. ${g.group} — ${g.issues} กรณี (${g.pct_of_matched_issues}%)`));
+    const rest = f.groups.slice(5);
+    if (rest.length) {
+      const counts = rest.map(g => g.issues);
+      const min = Math.min(...counts);
+      const max = Math.max(...counts);
+      lines.push(`- อีก ${rest.length} หมวดที่เหลือ พบหมวดละ ${min === max ? min : `${min}–${max}`} กรณี`);
+    }
   } else {
     lines.push('', 'ไม่พบปัญหาตามเงื่อนไขในช่วงเวลานี้ค่ะ');
   }
@@ -149,18 +156,64 @@ export function numbersAreGrounded(reply, facts, query) {
   return numbersIn(reply).every(n => allowed.has(n) || allowed.has(String(parseFloat(n))) || (/^\d+$/.test(n) && parseInt(n, 10) <= 20));
 }
 
-function compactFacts(results) {
-  // Drop bulky fields the writer does not need
+/** Drop fields the writer never uses (excel rows, internal notes, empty filters) */
+export function compactFacts(results) {
   return results.map(r => {
-    const { excel_export, ...rest } = r;
-    return excel_export ? { ...rest, excel_file_attached: true, excel_rows: excel_export.items.length } : rest;
+    const { excel_export, note, ...rest } = r;
+    const facts = { ...rest };
+    if (excel_export) {
+      facts.excel_file_attached = true;
+      facts.excel_rows = excel_export.items.length;
+    }
+    if (facts.filters && !facts.filters.unknown_categories?.length) {
+      const { unknown_categories, ...filters } = facts.filters;
+      facts.filters = filters;
+    }
+    if (Array.isArray(facts.items)) {
+      // The chat-level summary only adds something when the chat has no issue summaries
+      facts.items = facts.items.map(({ chat_summary, issues, ...item }) => ({
+        ...item,
+        issues: issues || [],
+        ...(issues?.length ? {} : { chat_summary })
+      }));
+    }
+    return facts;
   });
+}
+
+/** Remove empty bullets and dangling polite particles the LLM sometimes leaves on their own line */
+export function tidyReply(text) {
+  const lines = (text || '').split('\n').map(l => l.replace(/\s+$/, ''));
+  const out = [];
+  for (const line of lines) {
+    const bare = line.trim();
+    if (/^[-•*]$/.test(bare)) continue;
+    if (/^(ค่ะ|คะ|นะคะ|ครับ)[.!]?$/.test(bare) && out.length) {
+      let i = out.length - 1;
+      while (i >= 0 && !out[i].trim()) i--;
+      if (i >= 0) {
+        out[i] = `${out[i]} ${bare}`;
+        out.length = i + 1;
+        continue;
+      }
+    }
+    if (!bare && out.length && !out[out.length - 1].trim()) continue; // collapse blank lines
+    out.push(line);
+  }
+  return out.join('\n').trim();
 }
 
 const WRITER_RULES = `You write the final answer for a Thai business executive in a Telegram chat, on behalf of "Sift AI".
 RULES
-- Thai only, polite (end with ค่ะ/นะคะ), concise and scannable: short header line, then "- " bullets. Use *bold* sparingly. No tables, no JSON, no tool names.
+- Thai only, polite, concise and scannable. No tables, no JSON, no tool names, no markdown bold (**).
 - Use ONLY the facts provided. Copy numbers exactly; never calculate, estimate or invent any number, date, time or chat id.
+FORMAT
+- Line 1: one emoji + short title + the period label (e.g. "📊 สรุปปัญหาเมื่อวาน (22 ต.ค. 2569)").
+- Line 2: the overall total first (e.g. "- รวม 48 ปัญหา จาก 10 แชต").
+- Ranked groups: show at most the top 5 as a numbered list "ชื่อ — N ปัญหา (x%)"; summarize the rest in ONE line without inventing a total (e.g. "- หมวดอื่นที่เหลือพบหมวดละ 1–3 ปัญหา", using only numbers present in the facts).
+- Chat lists: numbered, one chat per item: "\`chat_id\` (เวลา, ความด่วน<priority>)" then the customer's problem summarized on the next line indented by 3 spaces; list higher-priority chats first.
+- Do not repeat the same phrase on every line (e.g. "จากการสนทนา X ครั้ง"). Never output an empty bullet, a lone "-" or a line containing only "ค่ะ".
+- You may end with ONE short line: an observation grounded in the facts (📌) or a follow-up suggestion (💡). The last sentence ends with ค่ะ/นะคะ.
 - Always mention the period label of the data.
 - If a fact set has zero results, say clearly that nothing was found for that period.
 - If a period "is_partial" is true and periods are compared, point out that it is not complete yet and refer to the per-day average if given.
@@ -189,16 +242,20 @@ export async function composeAnswer({ query, focus, results, unsupportedTopics }
   const needsAdvice = results.some(r => r.tool === 'get_resolution_advice' && !r.error);
 
   try {
-    const { content } = await ollamaChat([
+    const { content, truncated } = await ollamaChat([
       { role: 'system', content: WRITER_RULES + (needsAdvice ? ADVICE_RULES : '') },
       {
         role: 'user',
         content: `QUESTION: ${query}\nFOCUS: ${focus || '-'}\nFACTS (JSON):\n${JSON.stringify(facts)}\n${unsupportedTopics.length ? `UNSUPPORTED NOTES (include verbatim):\n${unsupportedText(unsupportedTopics)}\n` : ''}\nWrite the answer.`
       }
-    ], { temperature: 0.2, maxTokens: needsAdvice ? 1200 : 700 });
+    ], { temperature: 0.2, maxTokens: 2048 }); // safety cap only; answers are not shortened
 
-    const reply = stripForeignScripts(content);
+    const reply = tidyReply(stripForeignScripts(content));
     if (!reply) return { reply: deterministic, mode: 'deterministic' };
+    if (truncated) {
+      console.warn('⚠️ [Composer] LLM reply hit the length limit (cut mid-answer); using deterministic format.');
+      return { reply: deterministic, mode: 'deterministic' };
+    }
     if (!numbersAreGrounded(reply, facts, query + ' ' + unsupportedText(unsupportedTopics))) {
       console.warn('⚠️ [Composer] LLM reply contains numbers not present in the facts; using deterministic format.');
       return { reply: deterministic, mode: 'deterministic' };
@@ -230,8 +287,8 @@ export async function composeChitchat(query, history = []) {
 - Never invent statistics, numbers or business facts in this reply. Do not start every reply with "สวัสดี".`
       },
       { role: 'user', content: `${context}\n\nMessage: ${query}` }
-    ], { temperature: 0.6, maxTokens: 200 });
-    const reply = stripForeignScripts(content);
+    ], { temperature: 0.6, maxTokens: 512 });
+    const reply = tidyReply(stripForeignScripts(content));
     return reply && numbersIn(reply).every(n => parseInt(n, 10) <= 24) ? reply : fallback;
   } catch {
     return fallback;
