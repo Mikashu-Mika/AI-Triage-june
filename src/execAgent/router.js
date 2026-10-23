@@ -4,6 +4,7 @@
  */
 import { ollamaChat, parseJsonObject } from './llm.js';
 import { PERIOD_TYPES, todayContext } from './timeframe.js';
+import { findSimilarExamples, formatExamples } from './examples.js';
 
 export const TOOL_NAMES = [
   'get_issue_stats', 'list_chats', 'compare_periods', 'get_customer_stats',
@@ -100,30 +101,19 @@ ${categoryLines}
 PERIOD: {"type": one of ${PERIOD_TYPES.join('|')}, "n" for last_n_days, "month"(1-12) and optional "year" for month, "start_date"/"end_date" (YYYY-MM-DD) for date_range, optional "start_hour"/"end_hour" (0-24) for a time-of-day window like "12.00-18.00"}.
 If the question gives no time, reuse the period of the previous turn when it is a follow-up; otherwise use {"type":"last_n_days","n":7}. "ช่วงนี้" = last_n_days 7. "1 สัปดาห์" = last_n_days 7.
 
+FOLLOW-UP QUESTIONS
+A short question that refers to the previous turn ("แล้ว...ล่ะ", "เทียบกับ...", "อันนั้น", "ข้อ 2", "ขอรายละเอียด") continues the previous plan:
+- Keep every argument the user did not change (period, categories, priorities, metric) and change only what the new question mentions.
+- Comparing with another period means compare_periods: the newly mentioned period and the previous turn's period are the two periods, with the previous turn's metric/categories.
+- Referring to items shown before means list_chats with their chat_ids from the history.
+
 RULES
 - reply_mode "data" when at least one tool call or a missing-data topic applies; "chitchat" for greetings, thanks, compliments or complaints about the bot itself, jokes, small talk and anything unrelated to the business (out_of_scope); "clarify" only if the question is impossible to interpret (ask in Thai in clarify_question).
 - At most ${MAX_CALLS} calls. A question mixing supported and unsupported data gets both calls and unsupported_topics.
 - "focus": short note of what the user wants emphasized (e.g. "ตอบเรื่องเดียว", "เรียงตามวันที่", "เฉพาะเปอร์เซ็นต์"), else "".
 
-EXAMPLES
-Q: วันนี้มีปัญหาอะไรบ้าง -> {"reply_mode":"data","calls":[{"tool":"get_issue_stats","args":{"period":{"type":"today"}}}],"unsupported_topics":[],"focus":""}
-Q: เมื่อวานตอน 12.00-18.00 มีกี่ปัญหา -> {"reply_mode":"data","calls":[{"tool":"get_issue_stats","args":{"period":{"type":"yesterday","start_hour":12,"end_hour":18}}}],"unsupported_topics":[],"focus":""}
-Q: วันนี้มีลูกค้าสมัครใหม่กี่คน -> {"reply_mode":"data","calls":[{"tool":"get_customer_stats","args":{"metric":"new","period":{"type":"today"}}}],"unsupported_topics":[],"focus":""}
-Q: เดือนที่แล้ว มีปัญหาเกี่ยวกับการสมัครไม่ได้ไหม -> {"reply_mode":"data","calls":[{"tool":"get_issue_stats","args":{"period":{"type":"last_month"},"categories":["registration"]}}],"unsupported_topics":[],"focus":""}
-Q: เปรียบเทียบสมาชิกใหม่เดือนนี้กับเดือนที่แล้ว -> {"reply_mode":"data","calls":[{"tool":"compare_periods","args":{"metric":"new_customers","period":{"type":"this_month"},"period_b":{"type":"last_month"}}}],"unsupported_topics":[],"focus":""}
-Q: ปัญหาฝากถอนส่วนมากแจ้งมาช่วงเวลาไหน ในเดือนที่แล้ว -> {"reply_mode":"data","calls":[{"tool":"get_issue_stats","args":{"period":{"type":"last_month"},"categories":["deposit_withdrawal"],"group_by":"hour"}}],"unsupported_topics":[],"focus":""}
-Q: เคสด่วนเดือนนี้มีเคสไหนบ้าง -> {"reply_mode":"data","calls":[{"tool":"list_chats","args":{"period":{"type":"this_month"},"priorities":["urgent","high"],"sort":"priority"}}],"unsupported_topics":[],"focus":""}
-Q: มีแชทที่ลูกค้าชมแอดมินไหมเดือนนี้ -> {"reply_mode":"data","calls":[{"tool":"get_sentiment","args":{"period":{"type":"this_month"}}}],"unsupported_topics":[],"focus":"เฉพาะแชตที่ลูกค้าชม"}
-Q: มีลูกค้าที่แจ้งเรื่องเดิมเมื่อวานแล้ววันนี้ทักซ้ำไหม -> {"reply_mode":"data","calls":[{"tool":"get_customer_stats","args":{"metric":"repeat_customers","period":{"type":"last_n_days","n":2}}}],"unsupported_topics":[],"focus":""}
-Q: หน้าเว็บค้างควรแก้ยังไง -> {"reply_mode":"data","calls":[{"tool":"get_resolution_advice","args":{"category":"page_load_freeze","period":{"type":"last_n_days","n":30}}}],"unsupported_topics":[],"focus":""}
-Q: สรุปยอดเงินและปัญหาของเดือนนี้ -> {"reply_mode":"data","calls":[{"tool":"get_issue_stats","args":{"period":{"type":"this_month"}}}],"unsupported_topics":["money_amounts"],"focus":""}
-Q: สัปดาห์นี้แอดมินตอบแชทช้าสุดกี่นาที -> {"reply_mode":"data","calls":[],"unsupported_topics":["admin_response_time"],"focus":""}
-Q: ขอเบอร์โทรลูกค้าใหม่หน่อย -> {"reply_mode":"data","calls":[],"unsupported_topics":["personal_data"],"focus":""}
-Q: วันนี้ลูกค้า complain เรื่องอะไรมากสุด ขอเรื่องเดียว -> {"reply_mode":"data","calls":[{"tool":"get_issue_stats","args":{"period":{"type":"today"},"categories":["feedback_complaint"]}},{"tool":"list_chats","args":{"period":{"type":"today"},"categories":["feedback_complaint"],"limit":5}}],"unsupported_topics":[],"focus":"ตอบเรื่องเดียวที่ลูกค้าร้องเรียนมากที่สุด"}
-Q: สวัสดี -> {"reply_mode":"chitchat","calls":[],"unsupported_topics":[],"focus":""}
-Q: ทำไมเก่งจัง -> {"reply_mode":"chitchat","calls":[],"unsupported_topics":[],"focus":""}
-Q: วันนี้กินอะไรดี -> {"reply_mode":"chitchat","calls":[],"unsupported_topics":["out_of_scope"],"focus":""}
-Q: จะตอบมั่วทำไมเนี้ย -> {"reply_mode":"chitchat","calls":[],"unsupported_topics":[],"focus":""}`;
+
+SIMILAR SOLVED EXAMPLES are given with each question: verified plans for similar questions. Follow their pattern when they fit, but always obey the rules above.`;
 }
 
 function buildHistoryText(history) {
@@ -172,16 +162,42 @@ function sanitizePlan(raw) {
 
 /**
  * Plan how to answer the question.
- * @param {{ query: string, categories: Map, history: any[] }} input
+ * @param {{ query: string, companyId?: string, categories: Map, history: any[] }} input
  * @returns {Promise<{ reply_mode: string, calls: any[], unsupported_topics: string[], focus: string, clarify_question: string }>}
  */
-export async function routeQuery({ query, categories, history }) {
+export async function routeQuery({ query, companyId, categories, history }) {
   const today = todayContext();
-  const { content, promptTokens, durationMs, loadMs } = await ollamaChat([
+  // Verified examples from the database, chosen by similarity to this question
+  const examples = companyId ? await findSimilarExamples(query, companyId, 5) : [];
+  const messages = [
     // The system prompt stays identical between questions, so Ollama can reuse its cached evaluation
     { role: 'system', content: buildSystemPrompt(categories) },
-    { role: 'user', content: `TODAY: ${today.thai} (ISO ${today.iso})\n\nRECENT CONVERSATION:\n${buildHistoryText(history)}\n\nQUESTION: ${query}` }
-  ], { format: PLAN_SCHEMA, temperature: 0, maxTokens: 500 });
-  console.log(`🧭 [Router] ${promptTokens ?? '?'} prompt tokens, ${durationMs ?? '?'} ms (model load ${loadMs ?? 0} ms)`);
-  return { ...sanitizePlan(parseJsonObject(content)), timing: { prompt_tokens: promptTokens, duration_ms: durationMs, load_ms: loadMs } };
+    { role: 'user', content: `TODAY: ${today.thai} (ISO ${today.iso})\n\nSIMILAR SOLVED EXAMPLES:\n${formatExamples(examples)}\n\nRECENT CONVERSATION:\n${buildHistoryText(history)}\n\nQUESTION: ${query}` }
+  ];
+
+  // Schema-constrained decoding occasionally makes the model emit only whitespace until the token cap.
+  // Retry once with plain JSON mode before giving up.
+  const attempts = [
+    { format: PLAN_SCHEMA, temperature: 0, maxTokens: 1024 },
+    { format: 'json', temperature: 0.1, maxTokens: 1024 }
+  ];
+  const failures = [];
+  for (const [i, options] of attempts.entries()) {
+    const { content, promptTokens, outputTokens, durationMs, loadMs, truncated } = await ollamaChat(messages, options);
+    console.log(`🧭 [Router] attempt ${i + 1}: ${promptTokens ?? '?'} prompt + ${outputTokens ?? '?'} output tokens, ${durationMs ?? '?'} ms (model load ${loadMs ?? 0} ms)`);
+    try {
+      const plan = sanitizePlan(parseJsonObject(content));
+      return {
+        ...plan,
+        examples_used: examples.map(e => ({ question: e.question, similarity: Math.round(e.similarity * 1000) / 1000 })),
+        timing: { prompt_tokens: promptTokens, output_tokens: outputTokens, duration_ms: durationMs, load_ms: loadMs, attempts: i + 1 }
+      };
+    } catch (err) {
+      failures.push(`attempt ${i + 1}: ${err.message} (output ${outputTokens ?? '?'} tokens${truncated ? ', hit token cap' : ''}, starts with ${JSON.stringify((content || '').slice(0, 80))})`);
+      console.warn(`⚠️ [Router] ${failures[failures.length - 1]}`);
+    }
+  }
+  const error = new Error(`Router returned no usable plan: ${failures.join(' | ')}`);
+  error.code = 'ROUTER_BAD_OUTPUT';
+  throw error;
 }

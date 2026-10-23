@@ -12,6 +12,7 @@ import { runTriagePipeline, processSingleChat } from './triageService.js';
 import { extractTextFromImage } from './ocr.js';
 import { processAgentQuery } from './agentService.js';
 import { warmUpModel } from './execAgent/llm.js';
+import { backfillEmbeddings } from './execAgent/examples.js';
 import { handleTelegramMessage, handleTelegramCallbackQuery, startTelegramPolling, initTelegramBot, setTelegramWebhook } from './telegramBot.js';
 import { enforceCompanyQuota, checkCompanyQuota, PACKAGE_CONFIG } from './quotaService.js';
 import { waitForInteractiveIdle, isInteractiveActive, getInteractiveCount, setTriageQueueStateGetter, getQueueMetrics } from './aiScheduler.js';
@@ -1497,6 +1498,6 @@ app.listen(PORT, () => {
   console.log(`  Health Check:     http://localhost:${PORT}/health`);
   console.log(`==================================================`);
   initTelegramBot();
-  // Load the LLM before the first executive question arrives
-  warmUpModel();
+  // Load the LLM before the first executive question arrives, then embed router examples added by SQL
+  warmUpModel().then(() => backfillEmbeddings());
 });

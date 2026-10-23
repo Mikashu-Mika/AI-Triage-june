@@ -62,14 +62,17 @@ export async function runExecAgent({ query, companyId, chatId }) {
 
   let plan;
   try {
-    plan = await routeQuery({ query, categories, history });
+    plan = await routeQuery({ query, companyId, categories, history });
   } catch (err) {
     console.error('❌ [Exec Agent] Router failed:', err.message);
     const isTimeout = /timeout/i.test(err.message);
+    const reply = isTimeout
+      ? '⚠️ ขออภัยค่ะ AI ใช้เวลาวิเคราะห์คำถามนานเกินกำหนด (เครื่องที่รัน AI อาจทำงานหนักหรือเพิ่งเริ่มโหลดโมเดล) กรุณาลองใหม่อีกครั้งนะคะ'
+      : err.code === 'ROUTER_BAD_OUTPUT'
+        ? '⚠️ ขออภัยค่ะ AI วิเคราะห์คำถามนี้ไม่สำเร็จ ลองพิมพ์ใหม่ให้ระบุช่วงเวลาหรือหัวข้อชัดขึ้น เช่น "เทียบปัญหาเดือนนี้กับเดือนที่แล้ว" นะคะ'
+        : '⚠️ ขออภัยค่ะ ระบบวิเคราะห์คำถามไม่สำเร็จในขณะนี้ (เชื่อมต่อ AI ไม่ได้) กรุณาลองใหม่อีกครั้งนะคะ';
     return {
-      reply: isTimeout
-        ? '⚠️ ขออภัยค่ะ AI ใช้เวลาวิเคราะห์คำถามนานเกินกำหนด (เครื่องที่รัน AI อาจทำงานหนักหรือเพิ่งเริ่มโหลดโมเดล) กรุณาลองใหม่อีกครั้งนะคะ'
-        : '⚠️ ขออภัยค่ะ ระบบวิเคราะห์คำถามไม่สำเร็จในขณะนี้ (เชื่อมต่อ AI ไม่ได้) กรุณาลองใหม่อีกครั้งนะคะ',
+      reply,
       toolUsed: 'router_error',
       rawData: null,
       excelExport: null,

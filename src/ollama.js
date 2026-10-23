@@ -379,7 +379,8 @@ export async function getEmbedding(text) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: MODEL_EMBEDDING,
-        prompt: text
+        prompt: text,
+        keep_alive: process.env.OLLAMA_KEEP_ALIVE || '60m'
       })
     });
 
