@@ -158,6 +158,13 @@ export async function getIssueStats(ctx, args) {
     matched_problem_issues: matchedIssues,
     pct_of_all_problems: allProblems.length ? Math.round((matchedIssues / allProblems.length) * 1000) / 10 : 0,
     groups: groupList.slice(0, 15),
+    // Exact numbers for "the rest" so the writer never has to invent them
+    remaining_groups_after_top5: groupList.length > 5 ? {
+      groups: groupList.length - 5,
+      issues: groupList.slice(5).reduce((sum, g) => sum + g.issues, 0),
+      min_issues_per_group: Math.min(...groupList.slice(5).map(g => g.issues)),
+      max_issues_per_group: Math.max(...groupList.slice(5).map(g => g.issues))
+    } : null,
     note: 'ข้อความทั่วไป/สอบถามที่ไม่ใช่ปัญหา (หมวดเรื่องอื่นๆ) ไม่นับเป็นปัญหา'
   };
 }
