@@ -16,7 +16,7 @@ async function loadHistory(chatId) {
   if (!chatId) return [];
   const { data, error } = await supabase
     .from('agent_audit_logs')
-    .select('user_query, slots, reply, created_at')
+    .select('user_query, slots, reply, audit_status, created_at')
     .eq('chat_id', String(chatId))
     .order('created_at', { ascending: false })
     .limit(HISTORY_TURNS);
