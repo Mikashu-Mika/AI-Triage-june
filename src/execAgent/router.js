@@ -100,6 +100,12 @@ ${categoryLines}
 PERIOD: {"type": one of ${PERIOD_TYPES.join('|')}, "n" for last_n_days, "month"(1-12) and optional "year" for month, "start_date"/"end_date" (YYYY-MM-DD) for date_range, optional "start_hour"/"end_hour" (0-24) for a time-of-day window like "12.00-18.00"}.
 If the question gives no time, reuse the period of the previous turn when it is a follow-up; otherwise use {"type":"last_n_days","n":7}. "ช่วงนี้" = last_n_days 7. "1 สัปดาห์" = last_n_days 7.
 
+FOLLOW-UP QUESTIONS
+A short question that refers to the previous turn ("แล้ว...ล่ะ", "เทียบกับ...", "อันนั้น", "ข้อ 2", "ขอรายละเอียด") continues the previous plan:
+- Keep every argument the user did not change (period, categories, priorities, metric) and change only what the new question mentions.
+- Comparing with another period means compare_periods: the newly mentioned period and the previous turn's period are the two periods, with the previous turn's metric/categories.
+- Referring to items shown before means list_chats with their chat_ids from the history.
+
 RULES
 - reply_mode "data" when at least one tool call or a missing-data topic applies; "chitchat" for greetings, thanks, compliments or complaints about the bot itself, jokes, small talk and anything unrelated to the business (out_of_scope); "clarify" only if the question is impossible to interpret (ask in Thai in clarify_question).
 - At most ${MAX_CALLS} calls. A question mixing supported and unsupported data gets both calls and unsupported_topics.
@@ -177,11 +183,31 @@ function sanitizePlan(raw) {
  */
 export async function routeQuery({ query, categories, history }) {
   const today = todayContext();
-  const { content, promptTokens, durationMs, loadMs } = await ollamaChat([
+  const messages = [
     // The system prompt stays identical between questions, so Ollama can reuse its cached evaluation
     { role: 'system', content: buildSystemPrompt(categories) },
     { role: 'user', content: `TODAY: ${today.thai} (ISO ${today.iso})\n\nRECENT CONVERSATION:\n${buildHistoryText(history)}\n\nQUESTION: ${query}` }
-  ], { format: PLAN_SCHEMA, temperature: 0, maxTokens: 500 });
-  console.log(`🧭 [Router] ${promptTokens ?? '?'} prompt tokens, ${durationMs ?? '?'} ms (model load ${loadMs ?? 0} ms)`);
-  return { ...sanitizePlan(parseJsonObject(content)), timing: { prompt_tokens: promptTokens, duration_ms: durationMs, load_ms: loadMs } };
+  ];
+
+  // Schema-constrained decoding occasionally makes the model emit only whitespace until the token cap.
+  // Retry once with plain JSON mode before giving up.
+  const attempts = [
+    { format: PLAN_SCHEMA, temperature: 0, maxTokens: 1024 },
+    { format: 'json', temperature: 0.1, maxTokens: 1024 }
+  ];
+  const failures = [];
+  for (const [i, options] of attempts.entries()) {
+    const { content, promptTokens, outputTokens, durationMs, loadMs, truncated } = await ollamaChat(messages, options);
+    console.log(`🧭 [Router] attempt ${i + 1}: ${promptTokens ?? '?'} prompt + ${outputTokens ?? '?'} output tokens, ${durationMs ?? '?'} ms (model load ${loadMs ?? 0} ms)`);
+    try {
+      const plan = sanitizePlan(parseJsonObject(content));
+      return { ...plan, timing: { prompt_tokens: promptTokens, output_tokens: outputTokens, duration_ms: durationMs, load_ms: loadMs, attempts: i + 1 } };
+    } catch (err) {
+      failures.push(`attempt ${i + 1}: ${err.message} (output ${outputTokens ?? '?'} tokens${truncated ? ', hit token cap' : ''}, starts with ${JSON.stringify((content || '').slice(0, 80))})`);
+      console.warn(`⚠️ [Router] ${failures[failures.length - 1]}`);
+    }
+  }
+  const error = new Error(`Router returned no usable plan: ${failures.join(' | ')}`);
+  error.code = 'ROUTER_BAD_OUTPUT';
+  throw error;
 }

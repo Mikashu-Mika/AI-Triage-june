@@ -63,6 +63,11 @@
     "expect": { "tool": "list_chats", "period": "last_week" }
   },
   {
+    "q": "เทียบกับเดือนนี้ให้หน่อย",
+    "history": [{ "user_query": "เดือนที่แล้วมีปัญหาเยอะรึป่าว", "slots": { "calls": [{ "tool": "get_issue_stats", "args": { "period": { "type": "last_month" } } }], "result_chat_ids": [] }, "reply": "📊 สรุปปัญหาเดือนที่แล้ว (กันยายน 2569) - รวม 191 ปัญหา จาก 83 แชต" }],
+    "expect": { "tool": "compare_periods", "period": "this_month", "metric": "issues" }
+  },
+  {
     "q": "แล้วปัญหาการถอนเงินละ",
     "history": [{ "user_query": "เดือนนี้ลูกค้ามีปัญหาเรื่องการฝากเงินเยอะไหม", "slots": { "calls": [{ "tool": "get_issue_stats", "args": { "period": { "type": "this_month" }, "categories": ["deposit_withdrawal"] } }], "result_chat_ids": [] }, "reply": "เดือนนี้มีปัญหาการเงินและการชำระเงิน 21 กรณี" }],
     "expect": { "tool": ["get_issue_stats", "search_chats", "list_chats"], "period": "this_month" }
