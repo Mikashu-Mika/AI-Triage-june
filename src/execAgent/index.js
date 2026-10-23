@@ -62,7 +62,7 @@ export async function runExecAgent({ query, companyId, chatId }) {
 
   let plan;
   try {
-    plan = await routeQuery({ query, categories, history });
+    plan = await routeQuery({ query, companyId, categories, history });
   } catch (err) {
     console.error('❌ [Exec Agent] Router failed:', err.message);
     const isTimeout = /timeout/i.test(err.message);

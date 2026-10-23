@@ -98,6 +98,18 @@ async function baselinePlan(q) {
 
 async function main() {
   const categories = await loadCategoryContext(companyId);
+
+  // The eval questions must not also be stored as router examples, or the test only measures recall
+  if (!baseline) {
+    const { data: examples } = await supabase
+      .from('training_examples')
+      .select('input_text')
+      .eq('company_id', companyId)
+      .eq('task_type', 'agent_router');
+    const stored = new Set((examples || []).map(e => e.input_text.trim()));
+    const leaked = cases.filter(c => stored.has(c.q.trim()));
+    if (leaked.length) console.warn(`⚠️ ${leaked.length} eval question(s) are also stored as router examples; their result is not a fair test:\n${leaked.map(c => `   - ${c.q}`).join('\n')}`);
+  }
   let passed = 0;
   let evaluated = 0;
   const failures = [];
@@ -106,7 +118,7 @@ async function main() {
     let plan;
     const started = Date.now();
     try {
-      plan = baseline ? await baselinePlan(c.q) : await routeQuery({ query: c.q, categories, history: c.history || [] });
+      plan = baseline ? await baselinePlan(c.q) : await routeQuery({ query: c.q, companyId, categories, history: c.history || [] });
     } catch (err) {
       failures.push({ q: c.q, misses: [`error: ${err.message}`] });
       evaluated++;
