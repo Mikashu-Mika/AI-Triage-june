@@ -49,6 +49,7 @@ export function ollamaChat(messages, { format, temperature = 0, maxTokens = 800,
           const data = JSON.parse(raw);
           resolve({
             content: (data.message?.content || '').trim(),
+            truncated: data.done_reason === 'length',
             durationMs: data.total_duration ? Math.round(data.total_duration / 1e6) : null,
             loadMs: data.load_duration ? Math.round(data.load_duration / 1e6) : null,
             promptTokens: data.prompt_eval_count ?? null,
