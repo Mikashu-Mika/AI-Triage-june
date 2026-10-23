@@ -4,8 +4,10 @@
  * Assigns a Confidence Score from 1 to 10.
  */
 
+import { findCategoryKeysByName, getCategoryDisplayName } from './categoryHelper.js';
+
 export function calculateConfidenceScore(userQuery, toolUsed, rawData, replyText) {
-  if (toolUsed === 'query_knowledge_base') {
+  if (toolUsed === 'query_knowledge_base' || toolUsed === 'query_admin_response_time') {
     return 9;
   }
   let score = 9; // High baseline for clean database-backed queries
@@ -34,27 +36,34 @@ export function calculateConfidenceScore(userQuery, toolUsed, rawData, replyText
     score -= 2;
   }
 
-  // 2. Specific Category Query Check
-  const mentionsDeposit = lowerQuery.includes('ฝาก-ถอน') || lowerQuery.includes('ฝากถอน');
-  const mentionsLogin = lowerQuery.includes('เข้าสู่ระบบ') || lowerQuery.includes('ล็อกอิน');
-  const mentionsPageLoad = lowerQuery.includes('ค้าง') || lowerQuery.includes('โหลดช้า');
-  const mentionsComplaint = lowerQuery.includes('ร้องเรียน') || lowerQuery.includes('แอดมิน');
-  const asksForPercentage = lowerQuery.includes('เปอร์เซ็นต์') || lowerQuery.includes('เปอร์เซนต์') || lowerQuery.includes('%') || lowerQuery.includes('คิดเป็น');
+  // 2. Specific Category Query Check (100% Dynamic via Category Resolution)
+  const asksForPercentage = lowerQuery.includes('เปอร์เซ็นต์') || lowerQuery.includes('เปอร์เซนต์') || lowerQuery.includes('%') || lowerQuery.includes('คิดเป็น') || lowerQuery.includes('สัดส่วน') || lowerQuery.includes('กี่เปอร์');
 
   if (asksForPercentage && !lowerReply.includes('%') && !lowerReply.includes('เปอร์เซ็นต์')) {
     score -= 4; // Severe penalty if percentage query doesn't receive percentage stats
   }
-  if (mentionsDeposit && !lowerReply.includes('ฝาก-ถอน') && !lowerReply.includes('ฝากถอน') && !lowerReply.includes('ฝาก') && !lowerReply.includes('ถอน')) {
-    score -= 3;
-  }
-  if (mentionsLogin && !lowerReply.includes('เข้าสู่ระบบ') && !lowerReply.includes('ล็อกอิน')) {
-    score -= 3;
-  }
-  if (mentionsPageLoad && !lowerReply.includes('ค้าง') && !lowerReply.includes('โหลดช้า')) {
-    score -= 3;
-  }
-  if (mentionsComplaint && !lowerReply.includes('ร้องเรียน') && !lowerReply.includes('แอดมิน')) {
-    score -= 3;
+
+  const queryCategories = findCategoryKeysByName(lowerQuery) || [];
+  if (queryCategories.length > 0) {
+    const isZeroMatchReply = lowerReply.includes('0 กรณี') || lowerReply.includes('ไม่พบรายการปัญหา') || lowerReply.includes('ไม่พบรายงานปัญหา');
+    if (!isZeroMatchReply) {
+      const mentionsAnyTargetCat = queryCategories.some(catKey => {
+        const catNameTH = (getCategoryDisplayName(catKey) || '').toLowerCase();
+        const cleanKey = catKey.toLowerCase();
+        return lowerReply.includes(cleanKey) ||
+               (catNameTH && lowerReply.includes(catNameTH)) ||
+               (cleanKey === 'registration' && lowerReply.includes('สมัคร')) ||
+               (cleanKey === 'deposit_withdrawal' && (lowerReply.includes('ฝาก') || lowerReply.includes('ถอน'))) ||
+               (cleanKey === 'payment_gateway' && (lowerReply.includes('ชำระเงิน') || lowerReply.includes('ธนาคาร'))) ||
+               (cleanKey === 'login_issue' && (lowerReply.includes('เข้าสู่ระบบ') || lowerReply.includes('ล็อกอิน'))) ||
+               (cleanKey === 'page_load_freeze' && (lowerReply.includes('ค้าง') || lowerReply.includes('โหลดช้า'))) ||
+               (cleanKey === 'feedback_complaint' && (lowerReply.includes('ร้องเรียน') || lowerReply.includes('แอดมิน')));
+      });
+
+      if (!mentionsAnyTargetCat) {
+        score -= 3;
+      }
+    }
   }
 
   // 3. Payload Integrity Check
@@ -94,11 +103,11 @@ export function calculateConfidenceScore(userQuery, toolUsed, rawData, replyText
  * @returns {object} Audit result with isRelevant, confidence score, and missingCriteria
  */
 export function auditAnswerRelevancy(userQuery, replyText, toolUsed, rawData) {
-  if (toolUsed === 'query_knowledge_base') {
+  if (toolUsed === 'query_knowledge_base' || toolUsed === 'query_admin_response_time') {
     return {
       isRelevant: true,
       confidence: 9,
-      reasoning: 'Audit PASSED: High confidence (9/10). Direct Knowledge Base SOP guidance answered successfully.',
+      reasoning: 'Audit PASSED: High confidence (9/10). Direct Knowledge Base SOP guidance or Admin Response Time SLA answered successfully.',
       missingCriteria: []
     };
   }
@@ -116,12 +125,27 @@ export function auditAnswerRelevancy(userQuery, replyText, toolUsed, rawData) {
     missingCriteria.push('timeframe_mismatch_2days');
   }
 
-  // Category mismatch detection
-  if ((lowerQuery.includes('ฝาก-ถอน') || lowerQuery.includes('ฝากถอน')) && !lowerReply.includes('ฝาก-ถอน') && !lowerReply.includes('ฝาก') && !lowerReply.includes('ถอน')) {
-    missingCriteria.push('category_mismatch_deposit_withdrawal');
-  }
-  if ((lowerQuery.includes('เข้าสู่ระบบ') || lowerQuery.includes('ล็อกอิน')) && !lowerReply.includes('เข้าสู่ระบบ') && !lowerReply.includes('ล็อกอิน')) {
-    missingCriteria.push('category_mismatch_login');
+  // Category mismatch detection (Dynamic)
+  const auditTargetCats = findCategoryKeysByName(lowerQuery) || [];
+  if (auditTargetCats.length > 0) {
+    const isZeroMatchReply = lowerReply.includes('0 กรณี') || lowerReply.includes('ไม่พบรายการปัญหา') || lowerReply.includes('ไม่พบรายงานปัญหา');
+    if (!isZeroMatchReply) {
+      const mentionsAny = auditTargetCats.some(catKey => {
+        const catNameTH = (getCategoryDisplayName(catKey) || '').toLowerCase();
+        const cleanKey = catKey.toLowerCase();
+        return lowerReply.includes(cleanKey) ||
+               (catNameTH && lowerReply.includes(catNameTH)) ||
+               (cleanKey === 'registration' && lowerReply.includes('สมัคร')) ||
+               (cleanKey === 'deposit_withdrawal' && (lowerReply.includes('ฝาก') || lowerReply.includes('ถอน'))) ||
+               (cleanKey === 'payment_gateway' && (lowerReply.includes('ชำระเงิน') || lowerReply.includes('ธนาคาร'))) ||
+               (cleanKey === 'login_issue' && (lowerReply.includes('เข้าสู่ระบบ') || lowerReply.includes('ล็อกอิน'))) ||
+               (cleanKey === 'page_load_freeze' && (lowerReply.includes('ค้าง') || lowerReply.includes('โหลดช้า'))) ||
+               (cleanKey === 'feedback_complaint' && (lowerReply.includes('ร้องเรียน') || lowerReply.includes('แอดมิน')));
+      });
+      if (!mentionsAny) {
+        missingCriteria.push(`category_mismatch_${auditTargetCats.join('_')}`);
+      }
+    }
   }
 
   // Topic keyword mismatch detection

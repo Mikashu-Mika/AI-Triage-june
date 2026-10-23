@@ -701,4 +701,292 @@ export async function deleteCustomer(id) {
   return data;
 }
 
+// ==============================================================================
+// Multi-Tenant Telegram Group Mapping & Member Role Management (RBAC)
+// ==============================================================================
+
+/**
+ * Fetch group mapping and associated company details by Telegram Chat ID.
+ * @param {string|number} chatId 
+ * @returns {Promise<{ groupId: string, chatId: string, groupName: string, companyId: string, companyName: string, isActive: boolean } | null>}
+ */
+export async function getCompanyByTelegramChatId(chatId) {
+  if (!chatId) return null;
+  const sChatId = String(chatId);
+
+  try {
+    const { data, error } = await supabase
+      .from('telegram_groups')
+      .select('id, chat_id, group_name, company_id, is_active, companies(id, name)')
+      .eq('chat_id', sChatId)
+      .maybeSingle();
+
+    if (error) {
+      if (error.code !== 'PGRST205') {
+        console.warn(`[getCompanyByTelegramChatId] Error fetching group for ${sChatId}:`, error.message);
+      }
+      return null;
+    }
+
+    if (!data || !data.is_active || !data.company_id) {
+      return null;
+    }
+
+    return {
+      groupId: data.id,
+      chatId: data.chat_id,
+      groupName: data.group_name,
+      companyId: data.company_id,
+      companyName: data.companies ? data.companies.name : '',
+      isActive: data.is_active
+    };
+  } catch (err) {
+    console.warn(`[getCompanyByTelegramChatId] Exception:`, err.message);
+    return null;
+  }
+}
+
+/**
+ * Upsert Telegram Group record.
+ * @param {object} param0
+ * @param {string|number} param0.chatId
+ * @param {string} [param0.groupName]
+ * @param {string} [param0.companyId]
+ * @param {boolean} [param0.isActive]
+ * @returns {Promise<object|null>}
+ */
+export async function upsertTelegramGroup({ chatId, groupName = 'Telegram Group', companyId = null, isActive = true }) {
+  if (!chatId) return null;
+  const sChatId = String(chatId);
+
+  try {
+    const payload = {
+      chat_id: sChatId,
+      group_name: groupName || 'Telegram Group',
+      is_active: isActive !== false,
+      updated_at: new Date().toISOString()
+    };
+    if (companyId) {
+      payload.company_id = companyId;
+    }
+
+    const { data, error } = await supabase
+      .from('telegram_groups')
+      .upsert(payload, { onConflict: 'chat_id' })
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      if (error.code !== 'PGRST205') {
+        console.warn(`[upsertTelegramGroup] Warning: ${error.message}`);
+      }
+      return null;
+    }
+    return data;
+  } catch (err) {
+    console.warn(`[upsertTelegramGroup] Exception:`, err.message);
+    return null;
+  }
+}
+
+/**
+ * Upsert a Telegram member into telegram_group_members.
+ * Automatically captures contact_id, first_name, last_name, username, and updates last_seen_at.
+ * Preserves existing role ('executive', 'admin') unless explicitly overwritten.
+ * Default role for newly inserted members is 'member'.
+ * 
+ * @param {object} memberData
+ * @param {string|number} memberData.groupId - Telegram Chat ID
+ * @param {string|number} memberData.telegramUserId - Contact ID / Telegram User ID
+ * @param {string} [memberData.firstName]
+ * @param {string} [memberData.lastName]
+ * @param {string} [memberData.username]
+ * @param {string} [memberData.role] - 'member', 'executive', 'admin', 'blocked'
+ * @returns {Promise<object|null>}
+ */
+export async function upsertTelegramMember({
+  groupId,
+  telegramUserId,
+  firstName = '',
+  lastName = '',
+  username = '',
+  role = null
+}) {
+  if (!groupId || !telegramUserId) return null;
+  const sGroupId = String(groupId);
+  const sUserId = String(telegramUserId);
+
+  try {
+    // Check if member already exists to preserve established executive/admin role
+    const { data: existing, error: selectErr } = await supabase
+      .from('telegram_group_members')
+      .select('id, role')
+      .eq('group_id', sGroupId)
+      .eq('telegram_user_id', sUserId)
+      .maybeSingle();
+
+    if (selectErr && selectErr.code === 'PGRST205') {
+      return null;
+    }
+
+    const finalRole = role || (existing ? existing.role : 'member');
+
+    const payload = {
+      group_id: sGroupId,
+      telegram_user_id: sUserId,
+      first_name: firstName || '',
+      last_name: lastName || '',
+      username: username || '',
+      role: finalRole,
+      is_active: true,
+      last_seen_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    const { data, error } = await supabase
+      .from('telegram_group_members')
+      .upsert(payload, { onConflict: 'group_id,telegram_user_id' })
+      .select()
+      .maybeSingle();
+
+    if (error) {
+      if (error.code !== 'PGRST205') {
+        console.warn(`[upsertTelegramMember] Warning: ${error.message}`);
+      }
+      return null;
+    }
+    return data;
+  } catch (err) {
+    console.warn(`[upsertTelegramMember] Exception:`, err.message);
+    return null;
+  }
+}
+
+/**
+ * Fetch role of a Telegram user in a specific group.
+ * @param {string|number} groupId - Telegram Chat ID
+ * @param {string|number} telegramUserId - Telegram User ID / Contact ID
+ * @returns {Promise<'executive'|'member'|'admin'|'blocked'|null>}
+ */
+export async function getTelegramMemberRole(groupId, telegramUserId) {
+  if (!groupId || !telegramUserId) return null;
+  const sGroupId = String(groupId);
+  const sUserId = String(telegramUserId);
+
+  try {
+    const { data, error } = await supabase
+      .from('telegram_group_members')
+      .select('role, is_active')
+      .eq('group_id', sGroupId)
+      .eq('telegram_user_id', sUserId)
+      .maybeSingle();
+
+    if (error) {
+      if (error.code !== 'PGRST205') {
+        console.warn(`[getTelegramMemberRole] Warning: ${error.message}`);
+      }
+      return null;
+    }
+
+    if (!data || !data.is_active) return null;
+    return data.role || 'member';
+  } catch (err) {
+    console.warn(`[getTelegramMemberRole] Exception:`, err.message);
+    return null;
+  }
+}
+
+/**
+ * Fetch list of Telegram Groups (optionally filtered by companyId).
+ * @param {string} [companyId]
+ * @returns {Promise<any[]>}
+ */
+export async function getTelegramGroups(companyId = null) {
+  try {
+    let query = supabase
+      .from('telegram_groups')
+      .select('id, chat_id, group_name, company_id, is_active, created_at, updated_at, companies(id, name)');
+
+    if (companyId) {
+      query = query.eq('company_id', companyId);
+    }
+
+    const { data, error } = await query.order('created_at', { ascending: false });
+    if (error) {
+      if (error.code !== 'PGRST205') {
+        console.warn(`[getTelegramGroups] Warning: ${error.message}`);
+      }
+      return [];
+    }
+    return data || [];
+  } catch (err) {
+    console.warn(`[getTelegramGroups] Exception:`, err.message);
+    return [];
+  }
+}
+
+/**
+ * Fetch all members of a Telegram group.
+ * @param {string|number} groupId - Telegram Chat ID
+ * @returns {Promise<any[]>}
+ */
+export async function getTelegramGroupMembers(groupId) {
+  if (!groupId) return [];
+  const sGroupId = String(groupId);
+
+  try {
+    const { data, error } = await supabase
+      .from('telegram_group_members')
+      .select('*')
+      .eq('group_id', sGroupId)
+      .order('role', { ascending: true })
+      .order('last_seen_at', { ascending: false });
+
+    if (error) {
+      if (error.code !== 'PGRST205') {
+        console.warn(`[getTelegramGroupMembers] Warning: ${error.message}`);
+      }
+      return [];
+    }
+    return data || [];
+  } catch (err) {
+    console.warn(`[getTelegramGroupMembers] Exception:`, err.message);
+    return [];
+  }
+}
+
+/**
+ * Update member role in a group (for Backoffice use).
+ * @param {string|number} groupId - Telegram Chat ID
+ * @param {string|number} telegramUserId - Telegram User ID
+ * @param {'executive'|'member'|'admin'|'blocked'} role
+ * @returns {Promise<object>}
+ */
+export async function updateTelegramMemberRole(groupId, telegramUserId, role) {
+  if (!groupId || !telegramUserId || !role) {
+    throw new Error('กรุณาระบุ groupId, telegramUserId และ role ให้ครบถ้วน');
+  }
+
+  const validRoles = ['executive', 'member', 'admin', 'blocked'];
+  if (!validRoles.includes(role)) {
+    throw new Error(`Role ไม่ถูกต้อง (ต้องเป็นหนึ่งใน: ${validRoles.join(', ')})`);
+  }
+
+  const { data, error } = await supabase
+    .from('telegram_group_members')
+    .update({
+      role,
+      updated_at: new Date().toISOString()
+    })
+    .eq('group_id', String(groupId))
+    .eq('telegram_user_id', String(telegramUserId))
+    .select()
+    .single();
+
+  if (error) {
+    throw new Error(`Failed to update member role: ${error.message}`);
+  }
+  return data;
+}
+
 export { ROLE_HIERARCHY };

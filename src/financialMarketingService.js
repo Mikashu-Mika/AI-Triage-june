@@ -96,6 +96,9 @@ export function resolveDynamicTimeframe(periodMode, customLabel = null) {
     sunDate.setDate(sunDate.getDate() - 1);
     const lastSunStr = sunDate.toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok', day: 'numeric', month: 'short' });
     if (!resolvedLabel) resolvedLabel = `ประจำสัปดาห์ที่แล้ว (จันทร์ ${lastMonStr} - อาทิตย์ ${lastSunStr})`;
+  } else if (periodMode === 'all_time' || periodMode === 'all' || periodMode === 999) {
+    startCutoff = new Date(0);
+    if (!resolvedLabel) resolvedLabel = 'ทั้งหมด';
   } else {
     const numDays = typeof periodMode === 'number' ? periodMode : 30;
     const thTodayMidnight = new Date(`${thTodayStr}T00:00:00+07:00`);
@@ -616,8 +619,6 @@ export async function getCustomerAnalytics(companyId, days = 7, timeframeMode = 
       return {
         id: c.id,
         name: c.name || 'Guest Customer',
-        phone: c.phone || 'ไม่ระบุ',
-        email: c.email || 'ไม่ระบุ',
         registered_at_thailand: formattedTH,
         time_only_th: timeOnlyTH
       };
@@ -1784,26 +1785,57 @@ export async function getCustomerPraiseAnalytics(companyId, timeframeMode = 'thi
 
     let query = supabase
       .from('chats')
-      .select('id, category_id, priority, created_at, summary, chat_issues(summary)');
+      .select('id, company_id, category_id, priority, sentiment, created_at, summary, conversation, chat_issues(summary, category_id)');
 
     if (companyId) query = query.eq('company_id', companyId);
 
     const { data: chats, error } = await query;
     if (error) throw error;
 
-    const praiseKeywords = ['ชม', 'ชื่นชม', 'ประทับใจ', 'ขอบคุณ', 'น่ารัก', 'ดีมาก', 'บริการดี', 'รวดเร็ว', 'สุภาพ', 'ทันใจ'];
+    const labelText = resolvedLabel || 'ช่วงนี้';
 
-    const praiseChats = (chats || []).filter(c => {
-      const issueSummaries = (c.chat_issues || []).map(i => i.summary || '').join(' ');
-      const fullText = `${c.summary || ''} ${issueSummaries}`;
-      return praiseKeywords.some(k => fullText.includes(k));
+    // 1. Timeframe Filter: Strictly within Thailand Timezone window [startCutoff, endCutoff)
+    const inPeriodChats = (chats || []).filter(c => {
+      if (!c.created_at) return false;
+      const cDate = new Date(c.created_at);
+      return cDate >= startCutoff && cDate < endCutoff;
     });
 
-    const labelText = resolvedLabel || 'ช่วงนี้';
+    // 2. Dynamic AI Intelligence Filter:
+    const praiseChats = inPeriodChats.filter(c => {
+      const s = (c.sentiment || '').trim();
+      const cat = (c.category_id || '').toLowerCase();
+      const conv = (c.conversation || '').toLowerCase();
+
+      // Exclude negative sentiments (complaints, angry, frustrated)
+      const hasNegativeSentiment = s === 'ไม่พอใจ' || s === 'โกรธ' || s === 'ไม่พอใจอย่างมาก' || s === 'หงุดหงิด';
+      if (hasNegativeSentiment) return false;
+
+      const mentionsAdminOrService = conv.includes('แอดมิน') || conv.includes('บริการ') || conv.includes('ทีมงาน') || conv.includes('พนักงาน') || conv.includes('การดูแล');
+      const hasPraiseWords = (conv.includes('ชื่นชม') || conv.includes('ชมเชย') || conv.includes('ประทับใจ') || conv.includes('บริการดี') || conv.includes('ตอบไว') || conv.includes('ดูแลดี') || conv.includes('สุภาพ') || conv.includes('รวดเร็ว')) && !conv.includes('24 ชม') && !conv.includes('24ชม');
+
+      // If category is feature_request and there's no mention of admin praise, it's a technical feature request
+      if (cat === 'feature_request' && !mentionsAdminOrService) {
+        return false;
+      }
+
+      // Tagged by AI as praise (and not a pure negative complaint or false positive)
+      if (s === 'ชมเชย' || s === 'ชื่นชม') {
+        if (conv.includes('24 ชม') && !hasPraiseWords) return false;
+        return true;
+      }
+
+      // Has contextual admin appreciation
+      if (mentionsAdminOrService && hasPraiseWords) {
+        return true;
+      }
+
+      return false;
+    });
 
     if (praiseChats.length === 0) {
       return {
-        praise_summary_thai: `🟢 **รายงานคำชมเชยและการบริการของแอดมิน (${labelText}):**\n\n- ไม่พบรายการแชตที่ลูกค้าส่งคำชมเชยเข้ามาใน${labelText}ค่ะ`
+        praise_summary_thai: `🟢 **รายงานคำชมเชยการบริการของแอดมิน (${labelText}):**\n\n- ไม่พบรายการแชตที่ลูกค้าส่งคำชมเชยการบริการของแอดมินเข้ามาใน${labelText}ค่ะ\n\n💡 *สามารถพิมพ์สอบถามข้อมูลช่วงเวลาย้อนหลังเพิ่มเติมได้ค่ะ เช่น "สรุปคำชมทั้งหมด"* ✨`
       };
     }
 
@@ -1819,9 +1851,19 @@ export async function getCustomerPraiseAnalytics(companyId, timeframeMode = 'thi
         } catch (e) {}
       }
       const timeStr = thTime ? ` (เวลา **${thTime}**)` : '';
-      
-      const praiseIssue = (c.chat_issues || []).find(iss => praiseKeywords.some(k => (iss.summary || '').includes(k)));
-      const snippet = praiseIssue ? praiseIssue.summary : (c.summary || 'ลูกค้าส่งคำชื่นชมและขอบคุณการดูแลของแอดมิน');
+
+      // Find specific appreciation sentence from conversation
+      let snippet = c.summary || 'ลูกค้าส่งคำชื่นชมการบริการของทีมงาน';
+      if (c.conversation) {
+        const lines = c.conversation.split('\n');
+        const praiseLine = lines.find(l => {
+          const lowerL = l.toLowerCase();
+          return (lowerL.includes('ชื่นชม') || lowerL.includes('ชมเชย') || lowerL.includes('ประทับใจ') || lowerL.includes('บริการดี') || lowerL.includes('ตอบไว') || lowerL.includes('ดูแลดี') || lowerL.includes('สุภาพ')) && !lowerL.includes('24 ชม');
+        });
+        if (praiseLine) {
+          snippet = praiseLine.replace(/^ลูกค้า:\s*/, '').replace(/^แอดมิน:\s*/, '').trim();
+        }
+      }
 
       text += `${idx + 1}. แชต \`${c.id}\`${timeStr} - "${snippet}"\n`;
     });
@@ -1937,3 +1979,95 @@ export async function getBirthdayBonusScan(companyId, periodType = 'today', peri
   });
   return { scan_summary_thai: text };
 }
+
+/**
+ * Admin Response Time & Speed SLA Analytics ("แอดมินตอบแชทช้าสุดกี่นาที", "ความเร็วในการตอบของแอดมิน")
+ * Provides transparent explanation regarding First Response Time SLA data,
+ * and surfaces customer complaints/issues regarding slow replies and response lag.
+ * @param {string} [companyId]
+ * @param {string|number} [timeframeMode='this_week']
+ * @param {string} [userQuery='']
+ */
+export async function getAdminResponseTimeAnalytics(companyId, timeframeMode = 'this_week', userQuery = '') {
+  try {
+    const { startCutoff, endCutoff, resolvedLabel } = resolveDynamicTimeframe(timeframeMode);
+    const periodTitle = resolvedLabel || 'ประจำสัปดาห์นี้';
+
+    let query = supabase
+      .from('chats')
+      .select('id, category_id, priority, created_at, summary, conversation, chat_issues(summary, category_id, priority)');
+
+    if (companyId) query = query.eq('company_id', companyId);
+
+    const { data: allChats, error } = await query;
+    if (error) throw error;
+
+    const inPeriodChats = (allChats || []).filter(c => {
+      if (!c.created_at) return false;
+      const d = new Date(c.created_at);
+      return d >= startCutoff && d < endCutoff;
+    });
+
+    const lagKeywords = [
+      'ตอบช้า', 'ตอบช้ามาก', 'รอนาน', 'ไม่ตอบ', 'แอดมินช้า', 'แอดมินตอบช้า',
+      'รอแชทนาน', 'รอตอบนาน', 'กว่าจะตอบ', 'ไม่มีคนตอบ', 'ตอบกลับช้า', 'แอดมินหาย',
+      'ช้ามาก', 'หน่วงมาก', 'โหลดช้า', 'ไม่ตอบสนอง'
+    ];
+
+    const complaintChats = inPeriodChats.filter(c => {
+      const catId = (c.category_id || '').toLowerCase();
+      const isLagCategory = catId === 'interaction_lag' || catId === 'feedback_complaint' || catId === 'performance_issue';
+      const text = `${c.conversation || ''} ${c.summary || ''} ${(c.chat_issues || []).map(i => i.summary).join(' ')}`.toLowerCase();
+      const hasLagWord = lagKeywords.some(k => text.includes(k));
+      return isLagCategory || hasLagWord;
+    });
+
+    let reply = `⏱️ **รายงานเวลาและความเร็วในการตอบแชทของแอดมิน (${periodTitle}):**\n\n`;
+    reply += `📌 **สถานะการเก็บข้อมูลความเร็วในการตอบ (Response Time SLA):**\n`;
+    reply += `- ปัจจุบันระบบ AI Triage เป็นระบบวิเคราะห์จัดหมวดหมู่และคัดกรองประเด็นปัญหาของแชตลูกค้า (Issue Classification & Root Cause Analysis)\n`;
+    reply += `- **ระบบ Live Chat ยังไม่ได้ส่งค่าเวลาการกดตอบกลับของแอดมิน (First Response Time / Response Timestamp per message เป็นหน่วยนาที) เข้ามาในฐานข้อมูล** ทำให้ระบบ AI ยังไม่มีตัวเลขสถิติเวลาตอบช้าสุดเป็น "จำนวนนาที" ค่ะ\n\n`;
+
+    if (complaintChats.length > 0) {
+      const pct = inPeriodChats.length > 0 ? ((complaintChats.length / inPeriodChats.length) * 100).toFixed(1) : '0';
+      reply += `⚠️ **สถิติข้อร้องเรียนเกี่ยวกับความล่าช้า/การตอบกลับใน${periodTitle}:**\n`;
+      reply += `- พบลูกค้าร้องเรียนหรือแจ้งปัญหาเรื่องความล่าช้า/การตอบสนอง: **${complaintChats.length} กรณี** (คิดเป็น **${pct}%** จากแชตทั้งหมด ${inPeriodChats.length} แชต)\n\n`;
+      reply += `📌 **ตัวอย่างกรณีที่ลูกค้าแจ้งปัญหาความล่าช้า:**\n`;
+
+      complaintChats.slice(0, 5).forEach((c, idx) => {
+        let thTime = '';
+        if (c.created_at) {
+          try {
+            const d = new Date(c.created_at);
+            thTime = d.toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok', day: 'numeric', month: 'short' }) + ' ' +
+                     d.toLocaleTimeString('th-TH', { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit' }) + ' น.';
+          } catch (e) {}
+        }
+        const timeLabel = thTime ? ` (${thTime})` : '';
+        const issueSummary = c.chat_issues?.[0]?.summary || c.summary || 'ลูกค้าแจ้งปัญหาความล่าช้าในการให้บริการ';
+        reply += `${idx + 1}. แชต \`${c.id}\`${timeLabel} - "${issueSummary}"\n`;
+      });
+    } else {
+      reply += `🟢 **สถิติข้อร้องเรียนใน${periodTitle}:**\n`;
+      reply += `- ใน${periodTitle} ไม่พบลูกค้าส่งข้อร้องเรียนเรื่อง "แอดมินตอบช้า" หรือ "รอแชตนิ่งนาน" เข้ามาในระบบค่ะ (0 กรณี จากแชตทั้งหมด ${inPeriodChats.length} แชต) ระบบให้บริการได้อย่างราบรื่นค่ะ ✨\n`;
+    }
+
+    reply += `\n💡 **แนวทางพัฒนาเพิ่มเติมสำหรับฝ่ายบริหาร:**\n`;
+    reply += `- หากต้องการติดตามตัวเลขเวลาตอบกลับช้าสุด (SLA เป็นนาที) แบบ Real-time สามารถให้ทีมพัฒนาระบบ Live Chat เชื่อมต่อ Webhook ส่ง Event \`agent_first_reply_time\` หรือ \`reply_duration_seconds\` เข้ามาบันทึกในตาราง \`chats\` ได้ค่ะ AI จะสามารถคำนวณสถิติเวลาตอบช้าสุด ค่าเฉลี่ย และ SLA Compliance ให้ได้ทันทีค่ะ`;
+
+    return {
+      total_chats_in_period: inPeriodChats.length,
+      complaint_chats_count: complaintChats.length,
+      complaint_chats: complaintChats.slice(0, 5),
+      formatted_summary_thai: reply
+    };
+  } catch (err) {
+    console.error('Error in getAdminResponseTimeAnalytics:', err.message);
+    return {
+      total_chats_in_period: 0,
+      complaint_chats_count: 0,
+      complaint_chats: [],
+      formatted_summary_thai: `⏱️ **รายงานเวลาการตอบแชทของแอดมิน:**\n\n📌 ระบบ Live Chat ยังไม่ได้ส่งค่าเวลาการกดตอบกลับของแอดมิน (Response Time ในระดับนาที) เข้ามาในฐานข้อมูลค่ะ ทำให้ยังไม่มีตัวเลขสถิติเวลาตอบช้าสุดเป็นจำนวนนาทีค่ะ`
+    };
+  }
+}
+

@@ -17,7 +17,8 @@ import {
   getUrgentActionRequiredScan,
   getCustomTopicKeywordScan,
   getCustomerPraiseAnalytics,
-  getPriorityDrilldownScan
+  getPriorityDrilldownScan,
+  getAdminResponseTimeAnalytics
 } from './financialMarketingService.js';
 import { auditAnswerRelevancy, calculateConfidenceScore } from './auditLayer.js';
 import { autonomousSqlRecovery } from './sqlRecoveryEngine.js';
@@ -357,25 +358,15 @@ export function extractIntentAndSlots(userQuery = '', activeSession = null) {
     customTimeLabel = scanLabel;
   }
 
-  // 2. Target Category Extraction
+  // 2. Target Category Extraction (Dynamic via findCategoryKeysByName)
   const targetCategories = [];
-  const mentionsAccessBlocked = lower.includes('เข้าหน้าเว็บไม่ได้') || lower.includes('เข้าเว็บไม่ได้') || lower.includes('ลิงก์เสีย') || lower.includes('502') || lower.includes('access_blocked');
-  const mentionsUiRendering = lower.includes('แสดงผล') || lower.includes('เพี้ยน') || lower.includes('ตัวหนังสือซ้อน') || lower.includes('ui_rendering_issue');
-  const mentionsPageLoad = (lower.includes('โหลดช้า') || lower.includes('ค้าง') || lower.includes('page_load_freeze')) && !mentionsAccessBlocked && !mentionsUiRendering;
-  const mentionsLogin = (lower.includes('เข้าระบบ') || lower.includes('เข้าสู่ระบบ') || lower.includes('ล๊อกอิน') || lower.includes('เข้าไม่ได้') || lower.includes('รหัสผ่าน') || lower.includes('otp') || lower.includes('loginissue') || lower.includes('login_issue')) && !mentionsAccessBlocked;
-  const mentionsBonus = lower.includes('โปรโมชั่น') || lower.includes('โบนัส') || lower.includes('โปร') || lower.includes('เงื่อนไข') || lower.includes('promobonus') || lower.includes('promo_bonus');
-  const mentionsFinance = (lower.includes('ฝาก') || lower.includes('ถอน') || lower.includes('ปรับยอด') || lower.includes('เครดิต')) && !mentionsPageLoad && !mentionsLogin;
-  const mentionsLag = lower.includes('ตอบช้า') || lower.includes('ตอบช้ามาก') || lower.includes('ช้า') || lower.includes('ไม่ตอบ') || lower.includes('ไม่มีคนตอบ') || lower.includes('รอนาน') || lower.includes('interactionlag') || lower.includes('interaction_lag');
   const mentionsOverallSummary = lower.includes('ภาพรวม') || lower.includes('สถิติรวม') || lower.includes('สรุปสถิติ');
 
   if (!mentionsOverallSummary) {
-    if (mentionsAccessBlocked) targetCategories.push('access_blocked');
-    if (mentionsUiRendering) targetCategories.push('ui_rendering_issue');
-    if (mentionsPageLoad) targetCategories.push('page_load_freeze');
-    if (mentionsLogin) targetCategories.push('login_issue');
-    if (mentionsBonus) targetCategories.push('promo_bonus');
-    if (mentionsFinance) targetCategories.push('deposit_withdrawal');
-    if (mentionsLag) targetCategories.push('interaction_lag', 'feedback_complaint');
+    const dynamicallyMatched = findCategoryKeysByName(userQuery);
+    if (dynamicallyMatched && dynamicallyMatched.length > 0) {
+      targetCategories.push(...dynamicallyMatched);
+    }
   }
 
   // 3. Index & Drilldown Extraction
@@ -493,13 +484,14 @@ async function processAgentQueryDirect(userQuery, companyId, taskOptions = {}) {
 
   const lower = userQuery.toLowerCase();
 
-  // 🛡️ STEP 1: SECURITY GUARDRAIL CHECK (FORBIDDEN ITEMS: PASSWORDS & PHONE NUMBERS)
+  // 🛡️ STEP 1: SECURITY GUARDRAIL CHECK (FORBIDDEN ITEMS: PASSWORDS, PHONES & EMAILS)
   const isAskingPassword = lower.includes('รหัส') || lower.includes('พาส') || lower.includes('password') || lower.includes('pin') || lower.includes('passcode');
   const isAskingPhone = lower.includes('เบอร์') || lower.includes('เบอร์โทร') || lower.includes('phone') || lower.includes('mobile') || lower.includes('tel');
+  const isAskingEmail = lower.includes('อีเมล') || lower.includes('อีเมล์') || lower.includes('email') || lower.includes('e-mail') || (lower.includes('mail') && !lower.includes('gmail'));
 
-  if (isAskingPassword || isAskingPhone) {
-    const securityReply = `🔒 **แจ้งเตือนนโยบายความปลอดภัยสูงสุด**\n- เพื่อความปลอดภัยของระบบและผู้ใช้งาน ไม่อนุญาตให้แสดงหรือเปิดเผยรหัสผ่านและเบอร์โทรศัพท์ส่วนบุคคลเด็ดขาดค่ะ`;
-    console.warn(`🔒 [Security Guardrail Blocked] Query asked for password/phone: "${userQuery}"`);
+  if (isAskingPassword || isAskingPhone || isAskingEmail) {
+    const securityReply = `🔒 **แจ้งเตือนนโยบายความปลอดภัยสูงสุด**\n- เพื่อความเป็นส่วนตัวและความปลอดภัย ไม่อนุญาตให้เปิดเผยข้อมูลติดต่อส่วนบุคคล เช่น เบอร์โทรศัพท์, อีเมล และรหัสผ่านเด็ดขาดค่ะ (แสดงได้เฉพาะ Customer ID และชื่อลูกค้าเท่านั้นค่ะ) ✨`;
+    console.warn(`🔒 [Security Guardrail Blocked] Query asked for password/phone/email: "${userQuery}"`);
     return {
       reply: securityReply,
       toolUsed: 'security_guardrail_block',
@@ -679,36 +671,24 @@ async function processAgentQueryDirect(userQuery, companyId, taskOptions = {}) {
   const isDataQuery = hasDomainTopic && (lower.includes('สรุป') || lower.includes('รายงาน') || lower.includes('สถิติ') || lower.includes('กี่') || lower.includes('เท่าไหร่') || lower.includes('ปัญหา') || lower.includes('เคส') || lower.includes('ข้อมูล') || lower.includes('คัดกรอง') || lower.includes('ย้อนหลัง') || lower.includes('วันไหน') || lower.includes('เมื่อไหร่') || lower.includes('รายละเอียด') || lower.includes('เกิดขึ้น') || lower.includes('รายการ') || lower.includes('อะไรบ้าง') || lower.includes('อันไหนบ้าง') || lower.includes('ตัวไหนบ้าง') || lower.includes('ขอรายการ') || lower.includes('ดูให้หน่อย') || lower.includes('เช็คให้หน่อย'));
 
   const isChatIssueQuery = lower.includes('ปัญหา') || lower.includes('เคส') || lower.includes('เรื่อง') || lower.includes('รายการ') || lower.includes('อะไรบ้าง');
-  // Comprehensive Category Keyword Detector for Executive Queries
-  const targetCategories = [];
   
-  const mentionsAccessBlocked = lower.includes('เข้าหน้าเว็บไม่ได้') || lower.includes('เข้าเว็บไม่ได้') || lower.includes('ลิงก์เสีย') || lower.includes('502') || lower.includes('access_blocked');
-  const mentionsUiRendering = lower.includes('แสดงผล') || lower.includes('เพี้ยน') || lower.includes('ตัวหนังสือซ้อน') || lower.includes('ui_rendering_issue');
-  const mentionsPageLoad = (lower.includes('โหลดช้า') || lower.includes('ค้าง') || lower.includes('page_load_freeze')) && !mentionsAccessBlocked && !mentionsUiRendering;
-  const mentionsLogin = (lower.includes('เข้าระบบ') || lower.includes('เข้าสู่ระบบ') || lower.includes('ล๊อกอิน') || lower.includes('เข้าไม่ได้') || lower.includes('รหัสผ่าน') || lower.includes('otp') || lower.includes('loginissue') || lower.includes('login_issue')) && !mentionsAccessBlocked;
-  const mentionsBonus = lower.includes('โปรโมชั่น') || lower.includes('โบนัส') || lower.includes('โปร') || lower.includes('เงื่อนไข') || lower.includes('promobonus') || lower.includes('promo_bonus');
-  const mentionsFinance = (lower.includes('ฝาก') || lower.includes('ถอน') || lower.includes('ปรับยอด') || lower.includes('เครดิต')) && !mentionsPageLoad && !mentionsLogin;
-  const mentionsComplaint = lower.includes('ร้องเรียน') || lower.includes('แอดมิน') || lower.includes('ร้องเรียนแอดมิน') || lower.includes('feedback_complaint');
-  const mentionsLag = (lower.includes('ตอบช้า') || lower.includes('กดปุ่มแล้วไม่ตอบสนอง') || lower.includes('กดปุ่ม') || lower.includes('ปุ่มกด') || lower.includes('ไม่ตอบสนอง') || lower.includes('ไม่มีคนตอบ') || lower.includes('interactionlag') || lower.includes('interaction_lag')) && !mentionsComplaint && !mentionsPageLoad;
+  const companyCategories = await getCachedCategories(companyId);
+
+  // Comprehensive Dynamic Category Keyword Detector for Executive Queries
+  const targetCategories = [];
   const mentionsOverallSummary = lower.includes('ภาพรวม') || lower.includes('สถิติรวม') || lower.includes('สรุปสถิติ');
 
   // Only apply category filter if executive asks for a SPECIFIC area and NOT an overall summary
   if (!mentionsOverallSummary) {
-    if (mentionsAccessBlocked) targetCategories.push('access_blocked');
-    if (mentionsUiRendering) targetCategories.push('ui_rendering_issue');
-    if (mentionsPageLoad) targetCategories.push('page_load_freeze');
-    if (mentionsLogin) targetCategories.push('login_issue');
-    if (mentionsBonus) targetCategories.push('promo_bonus');
-    if (mentionsFinance) targetCategories.push('deposit_withdrawal');
-    if (mentionsComplaint) targetCategories.push('feedback_complaint');
-    if (mentionsLag) targetCategories.push('interaction_lag');
+    const dynamicallyMatched = findCategoryKeysByName(userQuery, companyCategories);
+    if (dynamicallyMatched && dynamicallyMatched.length > 0) {
+      targetCategories.push(...dynamicallyMatched);
+    }
   }
 
   // Detect index numbers (e.g. "ขอรายละเอียดหมวดที่ 1", "ข้อ 2", "1. ปัญหา...")
   const indexMatch = lower.match(/(?:หมวดที่|หมวด|ข้อ|รายการที่|รายการ)\s*(\d+)/i) || userQuery.match(/^(\d+)\./);
   let requestedIndex = indexMatch ? parseInt(indexMatch[1], 10) : null;
-
-  const companyCategories = await getCachedCategories(companyId);
 
   if (requestedIndex && activeSession && activeSession.lastGroupedCategories && activeSession.lastGroupedCategories.length >= requestedIndex) {
     const targetCatName = activeSession.lastGroupedCategories[requestedIndex - 1];
@@ -728,7 +708,21 @@ async function processAgentQueryDirect(userQuery, companyId, taskOptions = {}) {
 
   // 3-Tier Executive Router Logic
   const isTier1StatsOverview = lower.includes('สรุปสถิติ') || lower.includes('สรุปภาพรวม') || lower.includes('ภาพรวม') || lower.includes('สรุปปัญหาแชทย้อนหลัง') || lower.includes('สรุปปัญหาย้อนหลัง') || lower.includes('30 วัน') || lower.includes('7 วัน');
-  const isTier3Drilldown = (targetCategories.length > 0 || isFollowUpDrilldown) && (lower.includes('มีอะไรบ้าง') || lower.includes('มีอะไร') || lower.includes('ขอรายละเอียด') || lower.includes('รายละเอียด') || lower.includes('อะไรบ้าง') || lower.includes('มีเรื่องอะไรบ้าง') || isFollowUpDrilldown);
+  const isTier3Drilldown = (targetCategories.length > 0 || isFollowUpDrilldown) && (
+    lower.includes('มีอะไรบ้าง') || 
+    lower.includes('มีอะไร') || 
+    lower.includes('มีปัญหาอะไร') ||
+    lower.includes('ปัญหาอะไร') ||
+    lower.includes('เรื่องอะไร') ||
+    lower.includes('เกิดอะไรขึ้น') ||
+    lower.includes('เจอปัญหาอะไร') ||
+    lower.includes('มีเคสอะไร') ||
+    lower.includes('ขอรายละเอียด') || 
+    lower.includes('รายละเอียด') || 
+    lower.includes('อะไรบ้าง') || 
+    lower.includes('มีเรื่องอะไรบ้าง') || 
+    isFollowUpDrilldown
+  );
   const isTier2CategoryList = !isTier1StatsOverview && !isTier3Drilldown && (lower.includes('ปัญหาวันนี้มีอะไรบ้าง') || lower.includes('มีปัญหาอะไรบ้าง') || lower.includes('ขอรายการปัญหา') || lower.includes('ปัญหามีอะไรบ้าง') || lower.includes('ขอปัญหาทั้งหมด') || lower.includes('รายการปัญหาทั้งหมด') || lower.includes('สรุปปัญหาในวันนี้') || lower.includes('วันนี้มีปัญหาอะไรบ้าง') || lower.includes('อะไรบ้าง'));
 
   // Check for unsupported slip / bank image queries (Guardrail)
@@ -786,6 +780,31 @@ async function processAgentQueryDirect(userQuery, companyId, taskOptions = {}) {
 
   // Check for Birthday Bonus query ("โบนัสวันเกิด" / "วันเกิด")
   const isBirthdayBonusQuery = lower.includes('วันเกิด') || lower.includes('โบนัสวันเกิด');
+
+  // Check for Admin Response Time & Speed SLA query ("แอดมินตอบช้าสุดกี่นาที" / "ความเร็วในการตอบของแอดมิน" / "กี่นาที")
+  const isAdminResponseTimeQuery = (
+    lower.includes('ตอบช้าสุด') ||
+    lower.includes('ตอบช้ากี่นาที') ||
+    lower.includes('ช้าสุดกี่นาที') ||
+    lower.includes('ตอบกี่นาที') ||
+    lower.includes('ตอบแชทช้า') ||
+    lower.includes('ตอบแชตช้า') ||
+    lower.includes('แอดมินตอบช้า') ||
+    lower.includes('แอดมินตอบกี่นาที') ||
+    lower.includes('แอดมินตอบเร็ว') ||
+    lower.includes('แอดมินตอบไว') ||
+    lower.includes('ความเร็วในการตอบ') ||
+    lower.includes('ความเร็วแอดมิน') ||
+    lower.includes('สปีดการตอบ') ||
+    lower.includes('เวลาในการตอบ') ||
+    lower.includes('เวลาตอบกลับ') ||
+    lower.includes('เวลาตอบแชท') ||
+    lower.includes('เวลาตอบแชต') ||
+    lower.includes('response time') ||
+    lower.includes('first response time') ||
+    lower.includes('sla') ||
+    (lower.includes('แอดมิน') && lower.includes('ตอบ') && (lower.includes('ช้า') || lower.includes('กี่นาที') || lower.includes('นาที')))
+  );
 
   let scanPeriodType = 'today';
   let scanLabel = 'วันนี้';
@@ -873,7 +892,7 @@ async function processAgentQueryDirect(userQuery, companyId, taskOptions = {}) {
   const isVipCustomerQuery = (lower.includes('vip') || lower.includes('วีไอพี')) && (lower.includes('ลูกค้า') || lower.includes('ยูส') || lower.includes('สมาชิก') || lower.includes('กี่คน') || lower.includes('ทัก') || lower.includes('คน'));
   const isCustomerSentimentQuery = lower.includes('ความพึงพอใจ') || lower.includes('อารมณ์') || lower.includes('ความรู้สึก') || lower.includes('พึงพอใจ') || lower.includes('sentiment') || lower.includes('satisfaction');
   const isNewCustomerRegQuery = (lower.includes('สมัคร') || lower.includes('สมาชิกใหม่') || lower.includes('ลูกค้าใหม่') || lower.includes('ผู้ใช้ใหม่') || lower.includes('ยูสใหม่')) && !lower.includes('ชม');
-  const isCustomerPraiseQuery = lower.includes('ชม') || lower.includes('คำชม') || lower.includes('ชื่นชม') || lower.includes('ประทับใจ') || lower.includes('ชมเรา');
+  const isCustomerPraiseQuery = lower.includes('คำชม') || lower.includes('ชื่นชม') || lower.includes('ประทับใจ') || lower.includes('ชมเชย') || lower.includes('ลูกค้าชม') || lower.includes('ชมเรา') || lower.includes('ชมแอดมิน') || (lower.includes('ชม') && !lower.includes('ชม.') && !lower.includes('ชั่วโมง') && !lower.includes('24 ชม') && !lower.includes('24ชม') && !lower.includes('กี่ ชม') && !lower.includes('กี่ชม'));
 
   const isCustomerAnalyticsQuery = (
     lower.includes('สมาชิก') || 
@@ -948,6 +967,9 @@ async function processAgentQueryDirect(userQuery, companyId, taskOptions = {}) {
   } else if (isExecutiveGuidanceQuery || isKnowledgeQuery) {
     toolUsed = 'query_knowledge_base';
     fetchedData = await queryKnowledgeBase(userQuery, companyId, targetCategories);
+  } else if (isAdminResponseTimeQuery) {
+    toolUsed = 'query_admin_response_time';
+    fetchedData = await getAdminResponseTimeAnalytics(companyId, scanPeriodType || days, userQuery);
   } else if (isTopProblemCategoryQuery || isExplicitChatIssueQuery || isChatIssueQuery || targetCategories.length > 0) {
     toolUsed = 'query_chat_analytics';
     const effectiveTimeLabel = (scanPeriodType === 'last_week' || scanPeriodType === 'this_week') ? null : (scanLabel || customTimeLabel);
@@ -1047,8 +1069,35 @@ Provide a clean, executive, line-by-line bulleted Thai response for the Admin:`;
 
   try {
     let replyText = '';
+    const hasDeterministicFormatter = (
+      toolUsed === 'query_chat_analytics' ||
+      toolUsed === 'query_customer_analytics' ||
+      toolUsed === 'query_hourly_peak' ||
+      toolUsed === 'query_daily_peak' ||
+      toolUsed === 'query_comparison' ||
+      toolUsed === 'query_month_comparison' ||
+      toolUsed === 'query_priority_drilldown' ||
+      toolUsed === 'query_customer_praise' ||
+      toolUsed === 'query_custom_topic_scan' ||
+      toolUsed === 'query_urgent_action_required' ||
+      toolUsed === 'query_customer_sentiment' ||
+      toolUsed === 'query_existing_customer_ratio' ||
+      toolUsed === 'query_repeat_customer_issues' ||
+      toolUsed === 'query_vip_customer_analytics' ||
+      toolUsed === 'query_freeze_complaint' ||
+      toolUsed === 'query_birthday_bonus' ||
+      toolUsed === 'query_customer_drop_diagnostics' ||
+      toolUsed === 'query_admin_response_time' ||
+      toolUsed === 'unsupported_slip_guardrail' ||
+      toolUsed === 'vip_customer_guardrail'
+    );
+
     if (toolUsed === 'query_knowledge_base' && fetchedData && fetchedData.formatted_sop_thai) {
       replyText = fetchedData.formatted_sop_thai;
+    } else if (hasDeterministicFormatter) {
+      // Deterministic data tools already format their exact, verified responses below!
+      // Skip the 60s Ollama queue so user queries return instantly in <1 second!
+      replyText = '';
     } else {
       const res = await postOllama('/api/generate', {
         model: MODEL_LLM,
@@ -1110,7 +1159,7 @@ Provide a clean, executive, line-by-line bulleted Thai response for the Admin:`;
       replyText = fetchedData.hourly_summary_thai;
     } else if (toolUsed === 'query_daily_peak') {
       replyText = fetchedData.formatted_thai;
-    } else if (toolUsed === 'query_existing_customer_ratio' || toolUsed === 'query_repeat_customer_issues' || toolUsed === 'query_vip_customer_analytics') {
+    } else if (toolUsed === 'query_existing_customer_ratio' || toolUsed === 'query_repeat_customer_issues' || toolUsed === 'query_vip_customer_analytics' || toolUsed === 'query_admin_response_time') {
       replyText = fetchedData.formatted_summary_thai;
     } else if (toolUsed === 'query_comparison' || toolUsed === 'query_month_comparison') {
       replyText = fetchedData.comparison_summary_thai;
@@ -1145,12 +1194,76 @@ Provide a clean, executive, line-by-line bulleted Thai response for the Admin:`;
         
         const catNameTH = catKeys.map(ck => getCategoryDisplayName(ck, categories)).join(' / ') || 'ปัญหาที่ระบุ';
 
-        const isExplicitChatListRequest = lower.includes('c_k:') || lower.includes('ดูแชตหมวด') || lower.includes('ขอรายการ') || lower.includes('มีแชตไหนบ้าง') || lower.includes('มีแชทไหนบ้าง') || lower.includes('ขอรายละเอียด') || lower.includes('ดูแชต') || lower.includes('ดูแชท') || lower.includes('รายการแชต') || lower.includes('ขอไฟล์') || lower.includes('excel') || isTier3Drilldown || isTier2CategoryList || (requestedIndex !== null);
+        const asksForPercentage = lower.includes('เปอร์เซ็นต์') || lower.includes('เปอร์เซนต์') || lower.includes('%') || lower.includes('คิดเป็น') || lower.includes('สัดส่วน') || lower.includes('กี่เปอร์');
+
+        const isExplicitChatListRequest = !asksForPercentage && (
+          lower.includes('c_k:') || 
+          lower.includes('ดูแชตหมวด') || 
+          lower.includes('ขอรายการ') || 
+          lower.includes('มีแชตไหนบ้าง') || 
+          lower.includes('มีแชทไหนบ้าง') || 
+          lower.includes('ขอรายละเอียด') || 
+          lower.includes('ดูแชต') || 
+          lower.includes('ดูแชท') || 
+          lower.includes('รายการแชต') || 
+          lower.includes('ขอไฟล์') || 
+          lower.includes('excel') || 
+          lower.includes('มีปัญหาอะไร') || 
+          lower.includes('ปัญหาอะไร') || 
+          lower.includes('เรื่องอะไร') || 
+          lower.includes('เจอปัญหาอะไร') || 
+          lower.includes('เกิดปัญหาอะไร') || 
+          (lower.includes('มีปัญหา') && !lower.includes('ไหม') && !lower.includes('กี่')) || 
+          isTier3Drilldown || 
+          isTier2CategoryList || 
+          (requestedIndex !== null)
+        );
 
         if (matchedSpecificList.length === 0) {
-          replyText = `ℹ️ **สำหรับปัญหาด้าน${catNameTH} ${scanLabel}:**\n🟢 **ไม่พบรายการปัญหาเข้ามาในระบบค่ะ (0 กรณี)**\n\n`;
-          if (fetchedData && fetchedData.overall_top_categories_text) {
-            replyText += `📌 **หมวดหมู่ปัญหาที่พบมากที่สุดใน${scanLabel}แทน:**\n\n${fetchedData.overall_top_categories_text}`;
+          // If 0 cases in current timeframe, check if there are cases in this month (if timeframe was today and user did not explicitly specify วันนี้)
+          let broaderFound = null;
+          if (!hasExplicitTimeWord && scanPeriodType === 'today') {
+            try {
+              const monthData = await getChatAnalytics(companyId, 'this_month', targetCategories);
+              const mList = (monthData?.matched_issues_list || []).filter(iss => catKeys.some(ck => (iss.category_id || '').includes(ck) || ck.includes(iss.category_id || '')));
+              if (mList && mList.length > 0) {
+                broaderFound = { list: mList, label: `เดือนนี้ (${curMonthName})` };
+              }
+            } catch (err) {
+              console.warn('Failed to query broader month data for category:', err.message);
+            }
+          }
+
+          if (broaderFound && broaderFound.list.length > 0) {
+            replyText = `ℹ️ **สำหรับปัญหาด้าน${catNameTH} (${scanLabel}):**\n🟢 ไม่พบรายการปัญหาเข้ามาใน${scanLabel}ค่ะ (0 กรณี)\n\n📌 **พบรายการปัญหาด้าน${catNameTH}ล่าสุดใน${broaderFound.label} รวม ${broaderFound.list.length} กรณี:**\n\n`;
+            broaderFound.list.slice(0, 10).forEach(iss => {
+              replyText += `- แชต \`${iss.chat_id}\` - "${iss.summary}"\n`;
+            });
+            if (broaderFound.list.length > 10) {
+              replyText += `\n*(และยังมีอีก ${broaderFound.list.length - 10} รายการ)*\n`;
+            }
+            replyText += `\n💡 *หากต้องการดูรายละเอียดช่วงเวลาใดเพิ่มเติม แจ้งมิกะได้เลยนะคะ* ✨`;
+          } else {
+            replyText = `ℹ️ **สำหรับปัญหาด้าน${catNameTH} (${scanLabel}):**\n🟢 **ไม่พบรายการปัญหาเข้ามาในระบบค่ะ (0 กรณี)**\n\n💡 *คุณผู้บริหารสามารถพิมพ์สอบถามช่วงเวลาย้อนหลังเพิ่มเติมได้ค่ะ เช่น "ปัญหา${catNameTH} ในเดือนนี้" หรือ "ขอย้อนหลัง 7 วัน"* ✨`;
+          }
+        } else if (asksForPercentage) {
+          // Dedicated Percentage & Ratio response for specific category
+          const catPct = fetchedData.sorted_categories_list?.[0]?.pct || 0;
+          const ratioDesc = fetchedData.summary_thai_top_category ? 
+            `- **สัดส่วน:** ${fetchedData.summary_thai_top_category}\n` :
+            `- **สัดส่วน:** คิดเป็น **${catPct}%** ของเคสปัญหาทั้งหมดใน${scanLabel}\n`;
+
+          replyText = `📊 **สถิติปัญหา "${catNameTH}" (${scanLabel}):**\n\n` +
+            `- **จำนวนแชตที่พบ:** ${fetchedData.matched_chats_count || 1} ครั้ง (${matchedSpecificList.length} กรณีปัญหา)\n` +
+            `${ratioDesc}` +
+            `- **ระดับความสำคัญ:** ${fetchedData.summary_thai_priority || 'ไม่มีปัญหาระดับฉุกเฉิน'}\n\n` +
+            `📌 **ตัวอย่างรายการแชตที่พบ:**\n`;
+          
+          matchedSpecificList.slice(0, 5).forEach(iss => {
+            replyText += `- แชต \`${iss.chat_id}\` - "${iss.summary}"\n`;
+          });
+          if (matchedSpecificList.length > 5) {
+            replyText += `\n*(และยังมีอีก ${matchedSpecificList.length - 5} รายการ - สามารถกดดูแชตหมวดนี้ฉบับเต็มได้ที่ปุ่มด้านล่างค่ะ)*\n`;
           }
         } else if (isExplicitChatListRequest) {
           if (matchedSpecificList.length > 20) {
@@ -1308,6 +1421,7 @@ Provide a clean, executive, line-by-line bulleted Thai response for the Admin:`;
       'query_customer_drop_diagnostics': 'getCustomerDropDiagnostics()',
       'query_freeze_complaint': 'getAccountSecurityFreezeScan()',
       'query_birthday_bonus': 'getBirthdayBonusScan()',
+      'query_admin_response_time': 'getAdminResponseTimeAnalytics()',
       'query_customer_analytics': 'getCustomerAnalytics()',
       'query_knowledge_base': 'queryKnowledgeBase()',
       'query_financial_balance': 'getFinancialBalance()',
@@ -1430,3 +1544,5 @@ export async function processAgentQuery(userQuery, companyId, options = {}) {
     isExecutive: !!options.isExecutive
   });
 }
+
+export { processAgentQueryDirect };

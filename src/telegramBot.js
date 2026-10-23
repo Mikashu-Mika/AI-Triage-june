@@ -15,6 +15,12 @@ import {
   getPeriodThaiText 
 } from './categoryHelper.js';
 import { checkCompanyQuota } from './quotaService.js';
+import { 
+  getCompanyByTelegramChatId, 
+  upsertTelegramGroup, 
+  upsertTelegramMember, 
+  getTelegramMemberRole 
+} from './supabase.js';
 
 dotenv.config();
 
@@ -354,22 +360,12 @@ export async function handleTelegramCallbackQuery(callbackQuery) {
  * Process incoming Telegram Update / Message
  */
 export async function handleTelegramMessage(message) {
-  if (!message || !message.text || !message.chat) return null;
+  if (!message || !message.chat) return null;
 
   const chatId = String(message.chat.id);
   const senderId = message.from ? String(message.from.id) : '';
   const isGroup = message.chat.type === 'group' || message.chat.type === 'supergroup';
-
-  // Clean mention tag (e.g., "@Mikashu_bot สวัสดีครับ" -> "สวัสดีครับ")
-  let text = message.text.trim();
-  text = text.replace(/@\w+_bot\b/gi, '').trim();
-
-  if (!text) return null; // Ignore empty message after tag removal
-
-  const senderName = message.from ? `${message.from.first_name || ''} ${message.from.last_name || ''}`.trim() : 'User';
-  const isExec = isExecutiveSender(senderId);
-
-  console.log(`📥 Received Telegram Message [${message.chat.type}] from ${senderName}${isExec ? ' 👑[EXECUTIVE VIP]' : ''} (ID: ${senderId}, Chat ID: ${chatId}): "${text}"`);
+  const groupTitle = message.chat.title || 'Telegram Group';
 
   // Safe message sender that honors _dryRun flag to prevent accidental test messages to live groups
   const sendMessage = async (cId, mText, mParseMode = 'Markdown', mReplyMarkup = null) => {
@@ -380,13 +376,122 @@ export async function handleTelegramMessage(message) {
     return await sendTelegramMessage(cId, mText, mParseMode, mReplyMarkup);
   };
 
-  const companyId = process.env.DEFAULT_COMPANY_ID || await getDefaultCompanyId();
+  // 1. Intercept new_chat_members event (User joins or Bot added to group)
+  if (message.new_chat_members && Array.isArray(message.new_chat_members)) {
+    for (const member of message.new_chat_members) {
+      const mId = String(member.id);
+      const mFirstName = member.first_name || '';
+      const mLastName = member.last_name || '';
+      const mUsername = member.username || '';
+      const isBotMember = !!member.is_bot;
 
-  // Security & VIP Authorization Check (Evaluated Dynamically with VIP Whitelist):
+      console.log(`👋 New chat member in group ${chatId} (${groupTitle}): ${mFirstName} ${mLastName} (@${mUsername}, ID: ${mId}, isBot: ${isBotMember})`);
+
+      // If the bot itself was added to the group, register the group in telegram_groups
+      if (isBotMember && (mUsername.toLowerCase().includes('bot') || mId === process.env.TELEGRAM_BOT_ID)) {
+        await upsertTelegramGroup({
+          chatId,
+          groupName: groupTitle,
+          isActive: true
+        });
+        const welcomeMsg = `👋 สวัสดีค่ะ! น้องบอทเข้าร่วมกลุ่ม **${groupTitle}** เรียบร้อยแล้วนะคะ ✨\n\n📌 *คำแนะนำสำหรับผู้ดูแลระบบ:*\nกรุณาไปที่เมนูตั้งค่าใน **Backoffice** เพื่อเลือกผูกกลุ่มนี้เข้ากับบริษัทของคุณนะคะ`;
+        await sendMessage(chatId, welcomeMsg);
+      } else {
+        // Normal user joined: auto-capture user info into telegram_group_members
+        await upsertTelegramMember({
+          groupId: chatId,
+          telegramUserId: mId,
+          firstName: mFirstName,
+          lastName: mLastName,
+          username: mUsername,
+          role: 'member' // Default role for new members
+        });
+
+        // Also ensure group record exists
+        await upsertTelegramGroup({
+          chatId,
+          groupName: groupTitle
+        });
+
+        const welcomeUserMsg = `🎉 ยินดีต้อนรับคุณ **${mFirstName}** เข้าสู่กลุ่ม **${groupTitle}** นะคะ! ✨`;
+        await sendMessage(chatId, welcomeUserMsg);
+      }
+    }
+
+    // If message has no text, event processing is complete
+    if (!message.text) {
+      return { ok: true, event: 'new_chat_members' };
+    }
+  }
+
+  // If no text content, ignore
+  if (!message.text) return null;
+
+  // Clean mention tag (e.g., "@Mikashu_bot สวัสดีครับ" -> "สวัสดีครับ")
+  let text = message.text.trim();
+  text = text.replace(/@\w+_bot\b/gi, '').trim();
+
+  if (!text) return null; // Ignore empty message after tag removal
+
+  // 2. Auto-capture member on every group message (ensures existing members are cataloged)
+  if (isGroup && message.from) {
+    await upsertTelegramMember({
+      groupId: chatId,
+      telegramUserId: senderId,
+      firstName: message.from.first_name || '',
+      lastName: message.from.last_name || '',
+      username: message.from.username || ''
+    });
+    await upsertTelegramGroup({
+      chatId,
+      groupName: groupTitle
+    });
+  }
+
+  // 3. Dynamic Executive Role Resolution (RBAC from Supabase telegram_group_members)
+  let isExec = isExecutiveSender(senderId);
+  if (isGroup && senderId) {
+    const dbRole = await getTelegramMemberRole(chatId, senderId);
+    if (dbRole) {
+      isExec = (dbRole === 'executive' || dbRole === 'admin');
+    }
+  }
+
+  const senderName = message.from ? `${message.from.first_name || ''} ${message.from.last_name || ''}`.trim() : 'User';
+
+  console.log(`📥 Received Telegram Message [${message.chat.type}] from ${senderName}${isExec ? ' 👑[EXECUTIVE VIP]' : ''} (ID: ${senderId}, Chat ID: ${chatId}): "${text}"`);
+
+  // 4. Dynamic Group-to-Company Resolution & Choice A Enforcement
+  let companyId = null;
+  let companyInfo = null;
+
+  if (isGroup) {
+    companyInfo = await getCompanyByTelegramChatId(chatId);
+    if (companyInfo && companyInfo.companyId) {
+      companyId = companyInfo.companyId;
+    } else {
+      // Graceful fallback for legacy primary group (-5495142610) if migration not run yet
+      if (chatId === '-5495142610') {
+        companyId = process.env.DEFAULT_COMPANY_ID || await getDefaultCompanyId();
+      } else {
+        // Choice A: Unmapped group alert
+        console.warn(`⚠️ Unmapped Telegram Group: ${chatId} (${groupTitle}). Replying with unmapped notice.`);
+        const unmappedReply = `⚠️ **แจ้งเตือน:** กลุ่มนี้ยังไม่ได้เชื่อมโยงกับบริษัทในระบบ กรุณาให้ผู้ดูแลตั้งค่าผูกกลุ่มใน Backoffice ก่อนนะคะ ✨`;
+        await sendMessage(chatId, unmappedReply);
+        return { ok: false, error: 'Group unmapped to company' };
+      }
+    }
+  } else {
+    // Direct chat (DM with bot)
+    companyId = process.env.DEFAULT_COMPANY_ID || await getDefaultCompanyId();
+  }
+
+  // 5. Security & VIP Authorization Check:
   const allowedIds = getAllowedChatIds();
   const isAuthorized = allowedIds.length === 0 || 
                        allowedIds.includes(senderId) ||
-                       allowedIds.includes(chatId);
+                       allowedIds.includes(chatId) ||
+                       (isGroup && !!companyId);
 
   if (!isAuthorized) {
     console.warn(`🔒 Unauthorized Telegram User ID ${senderId} (${senderName}) blocked in group ${chatId}. Logging attempt to Supabase...`);
@@ -418,37 +523,25 @@ export async function handleTelegramMessage(message) {
     return { ok: false, error: 'Prompt Injection Blocked' };
   }
 
-  // Sensitive Data Access Control (Financial & Customer PII restricted to Executives)
-  const lowerText = text.toLowerCase();
-  const isProblemStatsQuery = lowerText.includes('ปัญหา') || 
-                              lowerText.includes('เคส') || 
-                              lowerText.includes('แชท') || 
-                              lowerText.includes('แชต') ||
-                              lowerText.includes('กี่ครั้ง') || 
-                              lowerText.includes('กี่เคส') ||
-                              lowerText.includes('กี่คน') ||
-                              lowerText.includes('อันดับ');
+  // Executive-Only Access Control in Groups (Members cannot query bot under any circumstances)
+  if (isGroup && !isExec) {
+    console.warn(`🔒 [Security Guard] Non-executive member ${senderName} (ID: ${senderId}) attempted to query bot in group ${chatId}: "${text}"`);
+    const restrictedReply = `🔒 *ขออภัยค่ะ คุณ ${senderName}*: สิทธิ์การสั่งการและสอบถามข้อมูลบอทในกลุ่ม สงวนสิทธิ์เฉพาะผู้บริหารเท่านั้นค่ะ ✨`;
 
-  const isSensitiveFinancial = !isProblemStatsQuery && (
-    lowerText.includes('ยอดเงิน') || 
-    lowerText.includes('ยอดฝาก') || 
-    lowerText.includes('ยอดถอน') || 
-    lowerText.includes('รายรับ') || 
-    lowerText.includes('รายจ่าย') || 
-    lowerText.includes('การเงิน') ||
-    lowerText.includes('ยอดสุทธิ') ||
-    lowerText.includes('กำไร') ||
-    lowerText.includes('ขาดทุน')
-  );
-  const isSensitiveCustomerPii = (lowerText.includes('รายชื่อ') && (lowerText.includes('ลูกค้า') || lowerText.includes('สมาชิก'))) ||
-                                 lowerText.includes('เบอร์โทร') ||
-                                 lowerText.includes('อีเมลลูกค้า');
+    await logAgentActivity({
+      query: text,
+      reply: restrictedReply,
+      toolUsed: 'non_executive_member_block',
+      durationMs: 0,
+      senderName,
+      senderId,
+      channel: 'telegram_group',
+      companyId,
+      chatId
+    });
 
-  if (isGroup && !isExec && (isSensitiveFinancial || isSensitiveCustomerPii)) {
-    console.warn(`🔒 [Security Guard] Non-executive ${senderName} (ID: ${senderId}) attempted to access sensitive company data: "${text}"`);
-    const restrictedReply = `🔒 *สิทธิ์การเข้าถึง*: ข้อมูลสรุปการเงินและข้อมูลลูกค้าระดับลึก สงวนสิทธิ์การสืบค้นเฉพาะผู้บริหารเท่านั้นค่ะ`;
     await sendMessage(chatId, restrictedReply);
-    return { ok: false, error: 'Restricted Data: Executive Only' };
+    return { ok: false, error: 'Restricted: Executive Only in Groups' };
   }
 
   // Handle /quota command or quota check queries
@@ -521,9 +614,34 @@ export async function handleTelegramMessage(message) {
                                mentionedMonths.length > 1;
     let textProgressMsg = '';
 
-    const isCustomerQuery = lower.includes('ลูกค้า') || lower.includes('สมัคร') || lower.includes('สมาชิก') || lower.includes('ผู้ใช้') || lower.includes('ยูส') || lower.includes('ใครบ้าง') || lower.includes('มีใคร');
+    const isChatIssueQuery = lower.includes('ปัญหา') || 
+                             lower.includes('เคส') || 
+                             lower.includes('ขัดข้อง') || 
+                             lower.includes('เออเร่อ') || 
+                             lower.includes('error') || 
+                             lower.includes('เรื่องอะไร') || 
+                             lower.includes('แชท') || 
+                             lower.includes('แชต');
 
-    if (isCustomerQuery) {
+    const isCustomerQuery = !isChatIssueQuery && (lower.includes('ลูกค้า') || lower.includes('สมัคร') || lower.includes('สมาชิก') || lower.includes('ผู้ใช้') || lower.includes('ยูส') || lower.includes('ใครบ้าง') || lower.includes('มีใคร'));
+
+    const isAdminResponseTimeQuery = (
+      lower.includes('ตอบช้าสุด') ||
+      lower.includes('ตอบช้ากี่นาที') ||
+      lower.includes('ช้าสุดกี่นาที') ||
+      lower.includes('ตอบกี่นาที') ||
+      lower.includes('ตอบแชทช้า') ||
+      lower.includes('ตอบแชตช้า') ||
+      lower.includes('แอดมินตอบช้า') ||
+      lower.includes('แอดมินตอบกี่นาที') ||
+      lower.includes('ความเร็วในการตอบ') ||
+      lower.includes('response time') ||
+      (lower.includes('แอดมิน') && lower.includes('ตอบ') && (lower.includes('ช้า') || lower.includes('กี่นาที') || lower.includes('นาที')))
+    );
+
+    if (isAdminResponseTimeQuery) {
+      textProgressMsg = '⏳ **กำลังตรวจสอบสถิติเวลาและความเร็วในการตอบแชตของแอดมินให้ค่ะ...**\nรบกวนรอสักครู่นะคะ ⏱️✨';
+    } else if (isCustomerQuery) {
       if (lower.includes('ทักซ้ำ') || lower.includes('แจ้งเรื่องเดิม') || lower.includes('ทักเรื่องเดิม') || (lower.includes('เรื่องเดิม') && (lower.includes('ซ้ำ') || lower.includes('อีกไหม')))) {
         textProgressMsg = '⏳ **กำลังตรวจสอบประวัติการทักแชตซ้ำเรื่องเดิมของลูกค้าให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🔄✨';
       } else if (lower.includes('ลูกค้าเก่า') && (lower.includes('เปอร์เซ็นต์') || lower.includes('เปอร์เซนต์') || lower.includes('%') || lower.includes('สัดส่วน') || lower.includes('กี่เปอร์'))) {
@@ -548,7 +666,9 @@ export async function handleTelegramMessage(message) {
         textProgressMsg = '⏳ **กำลังสืบค้นและรวบรวมข้อมูลลูกค้าให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨';
       }
     } else {
-      if (lower.includes('หมวดที่ 1') || lower.includes('หมวด 1')) {
+      if (lower.includes('สมัคร')) {
+        textProgressMsg = '⏳ **กำลังสืบค้นและรวบรวมข้อมูลปัญหาการสมัครสมาชิกให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🔍✨';
+      } else if (lower.includes('หมวดที่ 1') || lower.includes('หมวด 1')) {
         textProgressMsg = '⏳ **กำลังสกัดและรวบรวมรายละเอียดแชตหมวดที่ 1 ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🔍✨';
       } else if (lower.includes('หมวดที่ 2') || lower.includes('หมวด 2')) {
         textProgressMsg = '⏳ **กำลังสกัดและรวบรวมรายละเอียดแชตหมวดที่ 2 ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🔍✨';
@@ -570,6 +690,8 @@ export async function handleTelegramMessage(message) {
         textProgressMsg = '⏳ **กำลังวิเคราะห์สถิติช่วงเวลาหนาแน่นของปัญหาให้ค่ะ...**\nรบกวนรอสักครู่นะคะ ⏰✨';
       } else if (lower.includes('สรุปปัญหา') || lower.includes('สรุปแชท') || lower.includes('สรุปเคส')) {
         textProgressMsg = '⏳ **กำลังประมวลผลข้อมูลสรุปปัญหาแชทให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🤖✨';
+      } else if (isChatIssueQuery) {
+        textProgressMsg = '⏳ **กำลังสืบค้นและตรวจสอบรายละเอียดปัญหาแชตให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🔍✨';
       }
     }
 
