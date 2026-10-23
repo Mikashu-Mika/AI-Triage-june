@@ -1,4 +1,12 @@
 import { supabase } from './supabase.js';
+import { 
+  getCachedCategories, 
+  getCategoryDisplayName, 
+  findCategoryKeysByName,
+  findThaiMonthInText,
+  findAllThaiMonthsInText,
+  getDynamicMonthMeta
+} from './categoryHelper.js';
 
 /**
  * Helper to dynamically compute start & end cutoff dates in Thailand Timezone (UTC+7)
@@ -14,11 +22,22 @@ export function resolveDynamicTimeframe(periodMode, customLabel = null) {
     'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
   ];
 
+  const englishMonthNames = [
+    'january', 'february', 'march', 'april', 'may', 'june',
+    'july', 'august', 'september', 'october', 'november', 'december'
+  ];
+
   let startCutoff;
   let endCutoff = new Date(Date.now() + 86400000);
   let resolvedLabel = customLabel;
 
-  if (periodMode === 'this_month') {
+  const matchedThaiMonth = findThaiMonthInText(String(periodMode));
+
+  if (periodMode === 'monthly_breakdown') {
+    startCutoff = new Date(Date.UTC(currentYear, 0, 1, -7, 0, 0));
+    endCutoff = new Date(Date.UTC(currentYear + 1, 0, 1, -7, 0, 0));
+    if (!resolvedLabel) resolvedLabel = 'แต่ละเดือน';
+  } else if (periodMode === 'this_month') {
     startCutoff = new Date(Date.UTC(currentYear, currentMonthIdx, 1, -7, 0, 0));
     endCutoff = new Date(Date.UTC(currentYear, currentMonthIdx + 1, 1, -7, 0, 0));
     const monthName = thaiMonthNames[currentMonthIdx];
@@ -30,20 +49,18 @@ export function resolveDynamicTimeframe(periodMode, customLabel = null) {
     endCutoff = new Date(Date.UTC(currentYear, currentMonthIdx, 1, -7, 0, 0));
     const monthName = thaiMonthNames[lastMonthIdx];
     if (!resolvedLabel) resolvedLabel = `ประจำเดือนที่แล้ว (${monthName})`;
-  } else if (typeof periodMode === 'string' && thaiMonthNames.includes(periodMode)) {
-    const monthIdx = thaiMonthNames.indexOf(periodMode);
+  } else if (matchedThaiMonth) {
+    const monthIdx = matchedThaiMonth.idx;
     const targetYear = monthIdx > currentMonthIdx ? currentYear - 1 : currentYear;
     startCutoff = new Date(Date.UTC(targetYear, monthIdx, 1, -7, 0, 0));
     endCutoff = new Date(Date.UTC(targetYear, monthIdx + 1, 1, -7, 0, 0));
-    if (!resolvedLabel) resolvedLabel = `ประจำเดือน${periodMode}`;
-  } else if (periodMode === 'july') {
-    startCutoff = new Date('2026-07-01T00:00:00+07:00');
-    endCutoff = new Date('2026-08-01T00:00:00+07:00');
-    if (!resolvedLabel) resolvedLabel = 'ประจำเดือนกรกฎาคม';
-  } else if (periodMode === 'august') {
-    startCutoff = new Date('2026-08-01T00:00:00+07:00');
-    endCutoff = new Date('2026-09-01T00:00:00+07:00');
-    if (!resolvedLabel) resolvedLabel = 'ประจำเดือนสิงหาคม';
+    if (!resolvedLabel) resolvedLabel = `ประจำเดือน${matchedThaiMonth.full}`;
+  } else if (typeof periodMode === 'string' && englishMonthNames.includes(periodMode.toLowerCase())) {
+    const monthIdx = englishMonthNames.indexOf(periodMode.toLowerCase());
+    const targetYear = monthIdx > currentMonthIdx ? currentYear - 1 : currentYear;
+    startCutoff = new Date(Date.UTC(targetYear, monthIdx, 1, -7, 0, 0));
+    endCutoff = new Date(Date.UTC(targetYear, monthIdx + 1, 1, -7, 0, 0));
+    if (!resolvedLabel) resolvedLabel = `ประจำเดือน${thaiMonthNames[monthIdx]}`;
   } else if (periodMode === 'yesterday' || periodMode === 1.5) {
     const thTodayMidnight = new Date(`${thTodayStr}T00:00:00+07:00`);
     const thYesterdayDate = new Date(thTodayMidnight);
@@ -53,7 +70,7 @@ export function resolveDynamicTimeframe(periodMode, customLabel = null) {
     if (!resolvedLabel) resolvedLabel = 'เมื่อวาน';
   } else if (periodMode === 'today' || periodMode === 1) {
     startCutoff = new Date(`${thTodayStr}T00:00:00+07:00`);
-    if (!resolvedLabel) resolvedLabel = 'ในวันนี้';
+    if (!resolvedLabel) resolvedLabel = 'วันนี้';
   } else if (periodMode === 'this_week') {
     const thMidnight = new Date(`${thTodayStr}T00:00:00+07:00`);
     const dayOfWeek = thMidnight.getDay();
@@ -98,6 +115,7 @@ export function resolveDynamicTimeframe(periodMode, customLabel = null) {
  */
 export async function getChatAnalytics(companyId, days = 7, targetCategories = [], customTimeLabel = null) {
   try {
+    const categories = await getCachedCategories(companyId);
     const { startCutoff, endCutoff, resolvedLabel: resolvedTimeLabel } = resolveDynamicTimeframe(days, customTimeLabel);
 
     let query = supabase
@@ -133,7 +151,8 @@ export async function getChatAnalytics(companyId, days = 7, targetCategories = [
       ];
 
       issues.forEach(iss => {
-        const cat = iss.category_id || chat.category_id || 'deposit_withdrawal';
+        const defaultCatId = (categories && categories.length > 0) ? categories[0].id : 'other';
+        const cat = iss.category_id || chat.category_id || defaultCatId;
         const cleanCat = cat.includes(':') ? cat.split(':')[1] : cat;
         
         const isMatched = !isCategoryFilter || targetCategories.some(tc => cleanCat.includes(tc) || tc.includes(cleanCat));
@@ -165,12 +184,7 @@ export async function getChatAnalytics(companyId, days = 7, targetCategories = [
     let summaryThaiPriority = '';
 
     if (isCategoryFilter) {
-      const catNames = targetCategories.map(c => 
-        c === 'page_load_freeze' || c === 'ui_rendering_issue' ? 'หน้าเว็บค้าง/แสดงผลผิดปกติ' :
-        c === 'login_issue' ? 'การเข้าสู่ระบบ' :
-        c === 'promo_bonus' ? 'โปรโมชั่น/โบนัส' :
-        c === 'deposit_withdrawal' ? 'ฝาก-ถอนเงิน' : c
-      ).join(' และ ');
+      const catNames = targetCategories.map(c => getCategoryDisplayName(c, categories)).join(' และ ');
 
       const totalAllIssuesInPeriod = filtered.reduce((acc, c) => acc + (c.chat_issues?.length || 1), 0);
       const catPct = totalAllIssuesInPeriod > 0 ? Math.round((matchedIssues.length / totalAllIssuesInPeriod) * 100) : 100;
@@ -184,12 +198,7 @@ export async function getChatAnalytics(companyId, days = 7, targetCategories = [
         
         const problemOnlyCategoryEntries = Object.entries(categoryCounts).filter(([id]) => id !== 'other');
         const topCatList = (problemOnlyCategoryEntries.length > 0 ? problemOnlyCategoryEntries : Object.entries(categoryCounts)).sort((a,b) => b[1] - a[1]);
-        const topCatName = topCatList[0] ? (
-          topCatList[0][0] === 'page_load_freeze' || topCatList[0][0] === 'ui_rendering_issue' ? 'หน้าเว็บค้าง/แสดงผลผิดปกติ' :
-          topCatList[0][0] === 'login_issue' ? 'ปัญหาการเข้าสู่ระบบ' :
-          topCatList[0][0] === 'promo_bonus' ? 'สอบถามโปรโมชั่น/โบนัส' :
-          topCatList[0][0] === 'deposit_withdrawal' ? 'ปัญหาฝาก-ถอนเงิน' : topCatList[0][0]
-        ) : catNames;
+        const topCatName = topCatList[0] ? getCategoryDisplayName(topCatList[0][0], categories) : catNames;
 
         summaryThaiTopCategory = `คิดเป็น ${catPct}% ของเคสปัญหาทั้งหมดใน${timeLabel} (หมวดเฉพาะ ${topCatName} ${matchedIssues.length} กรณี จากปัญหารวม ${totalAllIssuesInPeriod} กรณี)`;
 
@@ -219,30 +228,29 @@ export async function getChatAnalytics(companyId, days = 7, targetCategories = [
         }))
         .sort((a, b) => b.count - a.count);
 
-      summaryThaiTotal = `${timeLabel}มีปัญหาเข้ามา ${matchedIssues.length || totalChats} กรณี (จากแชทรวม ${totalChats} รายการ)`;
-      
-      const topCatName = sortedCategories[0] ? (
-        sortedCategories[0].category_id === 'deposit_withdrawal' ? 'การฝาก-ถอนเงิน' :
-        sortedCategories[0].category_id === 'login_issue' ? 'ปัญหาการเข้าสู่ระบบ' :
-        sortedCategories[0].category_id === 'page_load_freeze' || sortedCategories[0].category_id === 'ui_rendering_issue' ? 'หน้าเว็บค้าง/แสดงผลผิดปกติ' :
-        sortedCategories[0].category_id === 'promo_bonus' ? 'สอบถามโปรโมชั่น/โบนัส' : sortedCategories[0].category_id
-      ) : 'ไม่มี';
-
-      summaryThaiTopCategory = `หมวดหมู่ปัญหาหลักที่พบมากที่สุดคือ ${topCatName} ${sortedCategories[0]?.count || 0} รายการ (คิดเป็น ${sortedCategories[0]?.percentage || 0}%)`;
-
-      const highCount = priorityCounts.high || 0;
-      const urgentCount = priorityCounts.urgent || 0;
-      const mediumCount = priorityCounts.medium || 0;
-
-      if (urgentCount > 0) {
-        summaryThaiPriority = `มีปัญหาด่วนที่สุด (Urgent) จำนวน ${urgentCount} รายการ และระดับสูง (High) ${highCount} รายการ`;
-      } else if (highCount > 0) {
-        summaryThaiPriority = `มีปัญหาระดับความสำคัญสูง (High Priority) จำนวน ${highCount} รายการ`;
-        if (mediumCount > 0) summaryThaiPriority += ` และระดับกลาง (Medium Priority) ${mediumCount} รายการ`;
-      } else if (mediumCount > 0) {
-        summaryThaiPriority = `มีปัญหาระดับความสำคัญกลาง (Medium Priority) จำนวน ${mediumCount} รายการ`;
-      } else {
+      if (matchedIssues.length === 0) {
+        summaryThaiTotal = `${timeLabel}ยังไม่มีรายการปัญหาเข้ามาในระบบ (0 กรณี จากแชทรวม ${totalChats} รายการ)`;
+        summaryThaiTopCategory = `ไม่พบรายงานปัญหาขัดข้องในระบบ`;
         summaryThaiPriority = `ไม่มีปัญหาระดับความสำคัญสูงหรือด่วนที่สุดใน${timeLabel}`;
+      } else {
+        summaryThaiTotal = `${timeLabel}มีปัญหาเข้ามา ${matchedIssues.length} กรณี (จากแชทรวม ${totalChats} รายการ)`;
+        const topCatName = sortedCategories[0] ? getCategoryDisplayName(sortedCategories[0].category_id, categories) : 'ไม่มี';
+        summaryThaiTopCategory = `หมวดหมู่ปัญหาหลักที่พบมากที่สุดคือ ${topCatName} ${sortedCategories[0]?.count || 0} รายการ (คิดเป็น ${sortedCategories[0]?.percentage || 0}%)`;
+
+        const highCount = priorityCounts.high || 0;
+        const urgentCount = priorityCounts.urgent || 0;
+        const mediumCount = priorityCounts.medium || 0;
+
+        if (urgentCount > 0) {
+          summaryThaiPriority = `มีปัญหาด่วนที่สุด (Urgent) จำนวน ${urgentCount} รายการ และระดับสูง (High) ${highCount} รายการ`;
+        } else if (highCount > 0) {
+          summaryThaiPriority = `มีปัญหาระดับความสำคัญสูง (High Priority) จำนวน ${highCount} รายการ`;
+          if (mediumCount > 0) summaryThaiPriority += ` และระดับกลาง (Medium Priority) ${mediumCount} รายการ`;
+        } else if (mediumCount > 0) {
+          summaryThaiPriority = `มีปัญหาระดับความสำคัญกลาง (Medium Priority) จำนวน ${mediumCount} รายการ`;
+        } else {
+          summaryThaiPriority = `ไม่มีปัญหาระดับความสำคัญสูงหรือด่วนที่สุดใน${timeLabel}`;
+        }
       }
     }
 
@@ -250,25 +258,7 @@ export async function getChatAnalytics(companyId, days = 7, targetCategories = [
     const groupedIssuesMap = {};
     matchedIssues.forEach(iss => {
       const catKey = iss.category_id;
-      const catName = catKey === 'deposit_withdrawal' ? 'ฝาก-ถอน' :
-                      catKey === 'login_issue' ? 'ปัญหาการเข้าสู่ระบบ' :
-                      catKey === 'access_blocked' ? 'เข้าหน้าเว็บไม่ได้/ลิงก์เสีย' :
-                      catKey === 'account_security' ? 'ความปลอดภัยของบัญชี' :
-                      catKey === 'api_error' ? 'ข้อผิดพลาดระบบ API' :
-                      catKey === 'device_compatibility' ? 'ปัญหาเบราว์เซอร์/อุปกรณ์' :
-                      catKey === 'feature_request' ? 'ขอเพิ่มฟีเจอร์' :
-                      catKey === 'feedback_complaint' ? 'ข้อเสนอแนะและร้องเรียน' :
-                      catKey === 'game_issue' ? 'ปัญหาการเล่นเกม' :
-                      catKey === 'interaction_lag' ? 'กดปุ่มแล้วไม่ตอบสนอง' :
-                      catKey === 'notification_issue' ? 'ปัญหาการแจ้งเตือน' :
-                      catKey === 'page_load_freeze' ? 'หน้าเว็บค้าง/โหลดช้า' :
-                      catKey === 'payment_gateway' ? 'ระบบการชำระเงิน/ธนาคาร' :
-                      catKey === 'performance_issue' ? 'ประสิทธิภาพระบบช้า' :
-                      catKey === 'promo_bonus' ? 'โปรโมชั่นและโบนัส' :
-                      catKey === 'registration' ? 'การสมัครสมาชิก' :
-                      catKey === 'ui_rendering_issue' ? 'การแสดงผลผิดเพี้ยน' :
-                      catKey === 'vip_privilege' ? 'สิทธิประโยชน์ระดับ VIP (VIP Privileges)' :
-                      catKey === 'other' ? 'ไม่ใช่ปัญหา' : catKey;
+      const catName = getCategoryDisplayName(catKey, categories);
 
       if (!groupedIssuesMap[catName]) groupedIssuesMap[catName] = [];
       const priorityLabel = (iss.priority || 'medium').toUpperCase();
@@ -286,35 +276,24 @@ export async function getChatAnalytics(companyId, days = 7, targetCategories = [
     });
 
     // Build Tier 2: Concise Category Summary List (Category Names + Counts ONLY)
-    let tier2CategoryList = `📋 **รายการปัญหาทั้งหมดใน${timeLabel} (รวม ${matchedIssues.length} กรณี จาก ${matchedChatsCount} แชท):**\n\n`;
-    let catIdx = 1;
-    for (const [catName, issueList] of Object.entries(groupedIssuesMap)) {
-      tier2CategoryList += `${catIdx}. **${catName}** (${issueList.length} กรณี)\n`;
-      catIdx++;
+    let tier2CategoryList = '';
+    if (matchedIssues.length === 0) {
+      tier2CategoryList = `📋 **รายการปัญหาทั้งหมดใน${timeLabel} (รวม 0 กรณี จาก ${matchedChatsCount} แชท):**\n\n🟢 ไม่พบรายการปัญหาเข้ามาในระบบค่ะ ระบบทำงานได้อย่างราบรื่นตามปกติค่ะ ✨`;
+    } else {
+      tier2CategoryList = `📋 **รายการปัญหาทั้งหมดใน${timeLabel} (รวม ${matchedIssues.length} กรณี จาก ${matchedChatsCount} แชท):**\n\n`;
+      let catIdx = 1;
+      for (const [catName, issueList] of Object.entries(groupedIssuesMap)) {
+        tier2CategoryList += `${catIdx}. **${catName}** (${issueList.length} กรณี)\n`;
+        catIdx++;
+      }
+      tier2CategoryList += `\n💡 *สามารถพิมพ์ถามเจาะลึกเพิ่มเติมได้ค่ะ เช่น "ขอรายละเอียดหมวดที่ 1" หรือ "1. ${Object.keys(groupedIssuesMap)[0] || 'หมวดปัญหา'} มีแชตไหนบ้าง"*`;
     }
-    tier2CategoryList += `\n💡 *สามารถพิมพ์ถามเจาะลึกเพิ่มเติมได้ค่ะ เช่น "ขอรายละเอียดหมวดที่ 1" หรือ "1. ${Object.keys(groupedIssuesMap)[0] || 'ปัญหาเข้าสู่ระบบ'} มีแชตไหนบ้าง"*`;
 
     // Build Tier 3: Category Drilldown Detail
     let tier3CategoryDrilldown = '';
     const catNameToKey = (catName) => {
-      return catName === 'ฝาก-ถอน' ? 'deposit_withdrawal' :
-             catName === 'ปัญหาการเข้าสู่ระบบ' ? 'login_issue' :
-             catName === 'เข้าหน้าเว็บไม่ได้/ลิงก์เสีย' ? 'access_blocked' :
-             catName === 'ความปลอดภัยของบัญชี' ? 'account_security' :
-             catName === 'ข้อผิดพลาดระบบ API' ? 'api_error' :
-             catName === 'ปัญหาเบราว์เซอร์/อุปกรณ์' ? 'device_compatibility' :
-             catName === 'ขอเพิ่มฟีเจอร์' ? 'feature_request' :
-             catName === 'ข้อเสนอแนะและร้องเรียน' ? 'feedback_complaint' :
-             catName === 'ปัญหาการเล่นเกม' ? 'game_issue' :
-             catName === 'กดปุ่มแล้วไม่ตอบสนอง' ? 'interaction_lag' :
-             catName === 'ปัญหาการแจ้งเตือน' ? 'notification_issue' :
-             catName === 'หน้าเว็บค้าง/โหลดช้า' ? 'page_load_freeze' :
-             catName === 'ระบบการชำระเงิน/ธนาคาร' ? 'payment_gateway' :
-             catName === 'ประสิทธิภาพระบบช้า' ? 'performance_issue' :
-             catName === 'โปรโมชั่นและโบนัส' ? 'promo_bonus' :
-             catName === 'การสมัครสมาชิก' ? 'registration' :
-             catName === 'การแสดงผลผิดเพี้ยน' ? 'ui_rendering_issue' :
-             catName === 'สิทธิประโยชน์ระดับ VIP' ? 'vip_privilege' : 'other';
+      const matchedKeys = findCategoryKeysByName(catName, categories);
+      return matchedKeys[0] || catName;
     };
 
     const filteredEntries = isCategoryFilter ? 
@@ -329,21 +308,24 @@ export async function getChatAnalytics(companyId, days = 7, targetCategories = [
           tier3CategoryDrilldown += `📌 **${catName}** (${issueList.length} กรณี):\n`;
         }
         issueList.forEach(item => {
-          tier3CategoryDrilldown += `   ${item}\n`;
+          tier3CategoryDrilldown += `${item}\n`;
         });
-        tier3CategoryDrilldown += `\n`;
+        tier3CategoryDrilldown += '\n';
       });
-tier3CategoryDrilldown = tier3CategoryDrilldown.trim();
+      tier3CategoryDrilldown += `💡 *สามารถตรวจเช็กประวัติการสนทนาฉบับเต็มได้ที่เมนูประวัติแชตในระบบค่ะ*`;
     }
 
-    // Build Original Executive Summary Formatted Pattern (Strictly matching 19 Official BO Categories)
-    const problemOnlyEntriesList = Object.entries(categoryCounts).filter(([id]) => id !== 'other');
-    const entriesToRank = problemOnlyEntriesList.length > 0 ? problemOnlyEntriesList : Object.entries(categoryCounts);
+    const entriesToRank = (isCategoryFilter && Object.entries(categoryCounts).length > 0)
+      ? Object.entries(categoryCounts)
+      : (Object.entries(categoryCounts).filter(([id]) => id !== 'other').length > 0
+          ? Object.entries(categoryCounts).filter(([id]) => id !== 'other')
+          : Object.entries(categoryCounts));
 
+    // Calculate Overall System Top 5 (Regardless of user's specific category filter)
     const overallCategoryCounts = {};
-    (filtered || []).forEach(chat => {
+    filtered.forEach(chat => {
       const issues = chat.chat_issues && chat.chat_issues.length > 0 ? chat.chat_issues : [
-        { category_id: chat.category_id }
+        { category_id: chat.category_id || 'other' }
       ];
       issues.forEach(iss => {
         const cat = iss.category_id || chat.category_id || 'other';
@@ -356,35 +338,17 @@ tier3CategoryDrilldown = tier3CategoryDrilldown.trim();
     const overallSorted = (overallProblemOnly.length > 0 ? overallProblemOnly : Object.entries(overallCategoryCounts))
       .sort((a, b) => b[1] - a[1]);
 
-    const catTHMapLocal = {
-      'deposit_withdrawal': 'การฝาก-ถอนเงิน',
-      'login_issue': 'ปัญหาการเข้าสู่ระบบ',
-      'access_blocked': 'เข้าหน้าเว็บไม่ได้/ลิงก์เสีย',
-      'account_security': 'ความปลอดภัยของบัญชี',
-      'api_error': 'ข้อผิดพลาดระบบ API',
-      'device_compatibility': 'ปัญหาเบราว์เซอร์/อุปกรณ์',
-      'feature_request': 'ขอเพิ่มฟีเจอร์',
-      'feedback_complaint': 'ข้อเสนอแนะและร้องเรียน',
-      'game_issue': 'ปัญหาการเล่นเกม',
-      'interaction_lag': 'กดปุ่มแล้วไม่ตอบสนอง',
-      'notification_issue': 'ปัญหาการแจ้งเตือน',
-      'page_load_freeze': 'หน้าเว็บค้าง/โหลดช้า',
-      'payment_gateway': 'ระบบการชำระเงิน/ธนาคาร',
-      'performance_issue': 'ประสิทธิภาพระบบช้า',
-      'promo_bonus': 'โปรโมชั่นและโบนัส',
-      'registration': 'การสมัครสมาชิก',
-      'ui_rendering_issue': 'การแสดงผลผิดเพี้ยน',
-      'vip_privilege': 'สิทธิประโยชน์ระดับ VIP',
-      'other': 'เรื่องอื่นๆ'
-    };
-
     let overallTopCatText = '';
     const totalIssuesOverall = filtered.reduce((acc, c) => acc + (c.chat_issues?.length || 1), 0);
-    overallSorted.slice(0, 5).forEach((item, idx) => {
-      const cName = catTHMapLocal[item[0]] || item[0];
-      const pct = totalIssuesOverall > 0 ? Math.round((item[1] / totalIssuesOverall) * 100) : 0;
-      overallTopCatText += `${idx + 1}. ${cName} - ${item[1]} กรณี (${pct}%)\n`;
-    });
+    if (overallSorted.length === 0 || totalIssuesOverall === 0) {
+      overallTopCatText = '🟢 ไม่พบรายการปัญหาในระบบค่ะ';
+    } else {
+      overallSorted.slice(0, 5).forEach((item, idx) => {
+        const cName = getCategoryDisplayName(item[0], categories);
+        const pct = totalIssuesOverall > 0 ? Math.round((item[1] / totalIssuesOverall) * 100) : 0;
+        overallTopCatText += `${idx + 1}. ${cName} - ${item[1]} กรณี (${pct}%)\n`;
+      });
+    }
 
     const totalAllPeriodIssues = filtered.reduce((acc, c) => acc + (c.chat_issues?.length || 1), 0);
     const baseForPct = isCategoryFilter ? totalAllPeriodIssues : matchedIssues.length;
@@ -392,25 +356,7 @@ tier3CategoryDrilldown = tier3CategoryDrilldown.trim();
     // Map & Deduplicate categories by unique display name to prevent duplicate lines
     const aggregatedCatMap = {};
     entriesToRank.forEach(([id, count]) => {
-      const catName = id === 'deposit_withdrawal' ? 'ฝาก-ถอน' :
-                      id === 'page_load_freeze' ? 'หน้าเว็บค้าง/โหลดช้า' :
-                      id === 'ui_rendering_issue' ? 'การแสดงผลผิดเพี้ยน' :
-                      id === 'login_issue' ? 'ปัญหาการเข้าสู่ระบบ' :
-                      id === 'access_blocked' ? 'เข้าหน้าเว็บไม่ได้/ลิงก์เสีย' :
-                      id === 'account_security' ? 'ความปลอดภัยของบัญชี' :
-                      id === 'api_error' ? 'ข้อผิดพลาดระบบ API' :
-                      id === 'device_compatibility' ? 'ปัญหาเบราว์เซอร์/อุปกรณ์' :
-                      id === 'feature_request' ? 'ขอเพิ่มฟีเจอร์' :
-                      id === 'feedback_complaint' ? 'ข้อเสนอแนะและร้องเรียน' :
-                      id === 'game_issue' ? 'ปัญหาการเล่นเกม' :
-                      id === 'interaction_lag' ? 'กดปุ่มแล้วไม่ตอบสนอง' :
-                      id === 'notification_issue' ? 'ปัญหาการแจ้งเตือน' :
-                      id === 'payment_gateway' ? 'ระบบการชำระเงิน/ธนาคาร' :
-                      id === 'performance_issue' ? 'ประสิทธิภาพระบบช้า' :
-                      id === 'promo_bonus' ? 'โปรโมชั่นและโบนัส' :
-                      id === 'registration' ? 'การสมัครสมาชิก' :
-                      id === 'vip_privilege' ? 'สิทธิประโยชน์ระดับ VIP (VIP Privileges)' :
-                      id === 'other' ? 'ไม่ใช่ปัญหา' : id;
+      const catName = getCategoryDisplayName(id, categories);
 
       if (!aggregatedCatMap[catName]) {
         aggregatedCatMap[catName] = 0;
@@ -434,24 +380,37 @@ tier3CategoryDrilldown = tier3CategoryDrilldown.trim();
       }
     });
 
-    const totalChatsCount = matchedChatsCount || filtered.length;
-    const totalIssuesCount = matchedIssues.length || totalChatsCount;
+    const totalChatsCount = isCategoryFilter ? matchedChatsCount : filtered.length;
+    const totalIssuesCount = matchedIssues.length;
 
     const periodText = resolvedTimeLabel || 'ช่วงเวลาที่เลือก';
+    const cleanPeriodText = (periodText.includes('นี้') || periodText.endsWith(')')) ? `ในช่วง${periodText}` : `ในช่วง${periodText}นี้`;
 
-    const topProblemCatTitle = sortedCategoriesList[0]?.name.split(' (')[0] || 'การฝาก-ถอนเงิน';
+    const hasIssues = totalIssuesCount > 0 && sortedCategoriesList.length > 0;
+
+    let topCategoriesSection = '';
+    let additionalInfoSection = '';
+
+    if (!hasIssues) {
+      topCategoriesSection = '🟢 ไม่พบรายงานปัญหาเข้ามาในระบบค่ะ (0 กรณี)\n';
+      additionalInfoSection = `✨ **ข้อมูลเพิ่มเติม:** ${cleanPeriodText} ยังไม่พบรายงานปัญหาขัดข้องใดๆ เข้ามาในระบบ ระบบทำงานได้อย่างราบรื่นตามปกติค่ะ ✨`;
+    } else {
+      topCategoriesSection = topCategoriesText;
+      const topProblemCatTitle = sortedCategoriesList[0]?.name.split(' (')[0] || 'ประเด็นทั่วไป';
+      additionalInfoSection = `💰 **ข้อมูลเพิ่มเติม:** ${cleanPeriodText} ปัญหาที่พบมากที่สุดคือ${topProblemCatTitle} ซึ่งเป็นประเด็นสำคัญที่ควรติดตามแก้ไขปรับปรุงค่ะ`;
+    }
 
     const executiveSummaryFormattedThai = `📊 **สรุปปัญหาแชท${periodText}**\n\n` +
       `- จำนวนแชททั้งหมด: ${totalChatsCount} ครั้ง\n` +
       `- ปัญหาที่ถูกระบุรวม: ${totalIssuesCount} กรณี\n\n` +
       `📌 **หมวดหมู่ปัญหาที่พบมากที่สุด:**\n` +
-      `${topCategoriesText}\n` +
+      `${topCategoriesSection}\n` +
       `📌 **การแบ่งปัญหาตามความสำคัญ:**\n` +
       `- ระดับสูง: ${priorityCounts.high || 0} กรณี\n` +
       `- ระดับกลาง: ${priorityCounts.medium || 0} กรณี\n` +
       `- ระดับต่ำ: ${priorityCounts.low || 0} กรณี\n` +
       `- กรณีฉุกเฉิน: ${priorityCounts.urgent || 0} กรณี\n\n` +
-      `💰 **ข้อมูลเพิ่มเติม:** ในช่วง${periodText}นี้ ปัญหาที่พบมากที่สุดคือ${topProblemCatTitle} ซึ่งเป็นประเด็นสำคัญที่ควรติดตามแก้ไขปรับปรุงค่ะ`;
+      `${additionalInfoSection}`;
 
     // Re-order groupedIssuesMap according to sortedCategoriesList (highest count first)
     const sortedGroupedIssuesMap = {};
@@ -524,7 +483,7 @@ export async function getFinancialBalance(companyId, timeframe = 'today') {
       net_balance: 0,
       pending_adjustments_count: 0,
       currency: 'THB',
-      message: 'ไม่พบข้อมูลรายการธุรกรรมฝาก-ถอนเงินในฐานข้อมูล Supabase'
+      message: 'ไม่พบข้อมูลรายการธุรกรรมการเงินและการชำระเงินในฐานข้อมูล Supabase'
     };
   }
 }
@@ -564,16 +523,87 @@ export async function getMarketingStats(companyId) {
  */
 export async function getCustomerAnalytics(companyId, days = 7, timeframeMode = 'today', userQuery = '') {
   try {
-    const { startCutoff, endCutoff, resolvedLabel } = resolveDynamicTimeframe(timeframeMode || days);
     const lowerQuery = (userQuery || '').toLowerCase();
-    const isListRequested = lowerQuery.includes('ใครบ้าง') || lowerQuery.includes('รายชื่อ') || lowerQuery.includes('รายละเอียด') || lowerQuery.includes('ใคร');
+    const mentionedMonths = findAllThaiMonthsInText(lowerQuery);
+    const isMonthlyBreakdown = timeframeMode === 'monthly_breakdown' || 
+                               days === 'monthly_breakdown' ||
+                               lowerQuery.includes('แต่ละเดือน') || 
+                               lowerQuery.includes('ทุกเดือน') || 
+                               lowerQuery.includes('รายเดือน') || 
+                               lowerQuery.includes('แยกตามเดือน') || 
+                               lowerQuery.includes('แต่ละ เดือน') || 
+                               mentionedMonths.length > 1;
 
     // 1. Query exact customers table from Supabase
     const { data: customers, error } = await supabase.from('customers').select('*').order('created_at', { ascending: false });
     if (error) throw error;
 
     const totalCustomersCount = (customers || []).length;
-    
+
+    // Monthly breakdown handler ("แต่ละเดือน", "ทุกเดือน", "กรกฎา สิงหา กันยา")
+    if (isMonthlyBreakdown) {
+      const monthMap = new Map();
+
+      (customers || []).forEach(c => {
+        if (!c.created_at) return;
+        const d = new Date(c.created_at);
+        const yyyymm = d.toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' }).slice(0, 7);
+        const monthFullTH = d.toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok', month: 'long' });
+        const monthYearTH = d.toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok', month: 'long', year: 'numeric' });
+
+        if (!monthMap.has(yyyymm)) {
+          monthMap.set(yyyymm, {
+            yyyymm,
+            monthFullTH,
+            monthYearTH,
+            count: 0,
+            customers: []
+          });
+        }
+        const entry = monthMap.get(yyyymm);
+        entry.count++;
+        entry.customers.push(c);
+      });
+
+      let summaryText = `👤 **สรุปยอดสมาชิกใหม่แยกตามแต่ละเดือน:**\n\n`;
+      let totalFiltered = 0;
+
+      if (mentionedMonths.length > 0) {
+        for (const m of mentionedMonths) {
+          let foundCount = 0;
+          for (const entry of monthMap.values()) {
+            if (entry.monthFullTH === m.full) {
+              foundCount = entry.count;
+              break;
+            }
+          }
+          summaryText += `- **เดือน${m.full}:** ${foundCount} คน\n`;
+          totalFiltered += foundCount;
+        }
+        summaryText += `\n📊 **รวมเฉพาะเดือนที่ระบุ (${mentionedMonths.length} เดือน):** **${totalFiltered} คน** ค่ะ`;
+      } else {
+        const sortedEntries = Array.from(monthMap.values()).sort((a, b) => a.yyyymm.localeCompare(b.yyyymm));
+        sortedEntries.forEach(entry => {
+          summaryText += `- **${entry.monthYearTH}:** ${entry.count} คน\n`;
+          totalFiltered += entry.count;
+        });
+        summaryText += `\n📊 **รวมทั้งหมด:** **${totalFiltered} คน** ค่ะ`;
+      }
+
+      summaryText += `\n\n💡 *สามารถพิมพ์ถามเจาะลึกเฉพาะเดือนได้ค่ะ เช่น "ขอดูรายชื่อของเดือนสิงหา"*`;
+
+      return {
+        period_days: 'monthly_breakdown',
+        total_customers_count: totalCustomersCount,
+        new_customers_count: totalFiltered,
+        breakdown: Array.from(monthMap.values()),
+        formatted_summary_thai: summaryText
+      };
+    }
+
+    const { startCutoff, endCutoff, resolvedLabel } = resolveDynamicTimeframe(timeframeMode || days);
+    const isListRequested = lowerQuery.includes('ใครบ้าง') || lowerQuery.includes('รายชื่อ') || lowerQuery.includes('รายละเอียด') || lowerQuery.includes('ใคร');
+
     // Filter new customers created within cutoff
     const newCustomersList = (customers || []).filter(c => {
       if (!c.created_at) return false;
@@ -616,15 +646,27 @@ export async function getCustomerAnalytics(companyId, days = 7, timeframeMode = 
     const labelText = resolvedLabel || (days === 1 ? 'ในวันนี้' : `ย้อนหลัง ${days} วัน`);
     let summaryText = '';
 
-    const isTotalQuery = lowerQuery.includes('ทั้งหมด') || lowerQuery.includes('รวม') || lowerQuery.includes('ที่มี');
+    const hasTimeContext = (timeframeMode !== 'all_time' && days !== 999) || 
+                           lowerQuery.includes('เดือน') || 
+                           lowerQuery.includes('วัน') || 
+                           lowerQuery.includes('สัปดาห์') || 
+                           lowerQuery.includes('อาทิตย์') ||
+                           !!findThaiMonthInText(lowerQuery);
 
-    if (isTotalQuery && !lowerQuery.includes('ใหม่')) {
+    const isExplicitAllTimeQuery = !hasTimeContext && (
+      lowerQuery.includes('ทั้งหมดในระบบ') || 
+      lowerQuery.includes('ตั้งแต่เปิดระบบ') || 
+      ((lowerQuery.includes('ทั้งหมด') || lowerQuery.includes('รวม')) && !lowerQuery.includes('ใหม่'))
+    );
+
+    if (isExplicitAllTimeQuery) {
       summaryText = `- จำนวนลูกค้าทั้งหมดในระบบมี **${totalCustomersCount} คน** ค่ะ\n\n💡 *สามารถพิมพ์ถามเจาะลึกเพิ่มเติมได้ค่ะ เช่น "วันนี้มีลูกค้าใหม่กี่คน"*`;
     } else if (!isListRequested) {
       if (newCustomersList.length === 0) {
         summaryText = `- ${labelText}ยังไม่มีลูกค้าใหม่สมัครสมาชิกค่ะ`;
       } else {
-        summaryText = `- ${labelText}มีลูกค้าใหม่สมัครสมาชิกทั้งหมด **${newCustomersList.length} คน** ค่ะ\n\n💡 *สามารถพิมพ์ถามเจาะลึกเพิ่มเติมได้ค่ะ เช่น "มีใครบ้าง"*`;
+        const countWord = (lowerQuery.includes('ทั้งหมด') || lowerQuery.includes('รวม')) ? 'ทั้งหมด ' : '';
+        summaryText = `- ${labelText}มีลูกค้าใหม่สมัครสมาชิก${countWord}**${newCustomersList.length} คน** ค่ะ\n\n💡 *สามารถพิมพ์ถามเจาะลึกเพิ่มเติมได้ค่ะ เช่น "มีใครบ้าง"*`;
       }
     } else {
       summaryText = `👤 **รายงานรายชื่อลูกค้าใหม่${labelText} (${newCustomersList.length} คน):**\n\n`;
@@ -845,6 +887,8 @@ export async function getUrgentActionRequiredScan(companyId, timeframeMode = 'to
       };
     }
 
+    const categories = await getCachedCategories(companyId);
+
     const issueList = [];
     const categoryCounts = {};
     let urgentCount = 0;
@@ -862,7 +906,8 @@ export async function getUrgentActionRequiredScan(companyId, timeframeMode = 'to
         else if (p === 'high') highCount++;
         else if (p === 'medium') mediumCount++;
 
-        const cat = iss.category_id || chat.category_id || 'deposit_withdrawal';
+        const defaultCatId = (categories && categories.length > 0) ? categories[0].id : 'other';
+        const cat = iss.category_id || chat.category_id || defaultCatId;
         const cleanCat = cat.includes(':') ? cat.split(':')[1] : cat;
 
         categoryCounts[cleanCat] = (categoryCounts[cleanCat] || 0) + 1;
@@ -877,25 +922,18 @@ export async function getUrgentActionRequiredScan(companyId, timeframeMode = 'to
       });
     });
 
-    const catTHMap = {
-      'deposit_withdrawal': 'การฝาก-ถอนเงิน',
-      'payment_gateway': 'ระบบการชำระเงิน/ธนาคาร',
-      'login_issue': 'ปัญหาการเข้าสู่ระบบ',
-      'access_blocked': 'เข้าหน้าเว็บไม่ได้/ลิงก์เสีย',
-      'page_load_freeze': 'หน้าเว็บค้าง/โหลดช้า',
-      'api_error': 'ข้อผิดพลาดระบบ API',
-      'ui_rendering_issue': 'การแสดงผลผิดเพี้ยน',
-      'feedback_complaint': 'ข้อเสนอแนะและร้องเรียน',
-      'promo_bonus': 'โปรโมชั่นและโบนัส',
-      'interaction_lag': 'กดปุ่มแล้วไม่ตอบสนอง'
-    };
-
     const problemEntries = Object.entries(categoryCounts).filter(([id]) => id !== 'other');
     const sortedCategories = (problemEntries.length > 0 ? problemEntries : Object.entries(categoryCounts)).sort((a, b) => b[1] - a[1]);
 
-    const topCatKey = sortedCategories[0] ? sortedCategories[0][0] : 'payment_gateway';
-    const topCatName = catTHMap[topCatKey] || topCatKey;
-    const topCatCount = sortedCategories[0] ? sortedCategories[0][1] : 1;
+    if (issueList.length === 0 || sortedCategories.length === 0) {
+      return {
+        urgent_action_summary_thai: `🟢 **รายงานเคสที่ต้องแก้ไขด่วน (${labelText}):**\n\n- ไม่พบเคสปัญหาที่ต้องแก้ไขด่วนใน${labelText}ค่ะ (0 กรณี)`
+      };
+    }
+
+    const topCatKey = sortedCategories[0][0];
+    const topCatName = getCategoryDisplayName(topCatKey, categories);
+    const topCatCount = sortedCategories[0][1];
 
     const topCategoryIssues = issueList.filter(i => i.category_id === topCatKey);
 
@@ -934,53 +972,230 @@ export async function getUrgentActionRequiredScan(companyId, timeframeMode = 'to
   }
 }
 
+// Built-in Standard Operating Procedures (SOP) Knowledge Base for Backoffice Incident Handling
+const DEFAULT_SOP_KNOWLEDGE = [
+  {
+    category_id: 'page_load_freeze',
+    title: 'คู่มือและแนวทางแก้ไขปัญหา: หน้าเว็บค้าง / โหลดช้า / จอขาว (Page Load & Freeze SOP)',
+    keywords: ['ค้าง', 'โหลดช้า', 'หน้าจอขาว', 'จอขาว', 'หมุนค้าง', 'เปิดไม่ขึ้น', 'ช้ามาก', 'page_load_freeze', 'เว็บช้า', 'เว็บค้าง'],
+    content: `🛠️ **แนวทางและขั้นตอนการแก้ไขปัญหา: หน้าเว็บค้าง / โหลดช้า / จอขาว (Page Load & Freeze SOP)**
+
+👤 **1. การประสานงานและดูแลลูกค้าหน้างาน (Admin & Support SOP):**
+- แนะนำลูกค้าทำการ Hard Reload: กด \`Ctrl + F5\` (คอมพิวเตอร์) หรือปิดเบราว์เซอร์แล้วเปิดใหม่ (มือถือ)
+- แนะนำลูกค้าล้างแคชและคุกกี้ (Clear Cache & Cookies) ของเบราว์เซอร์ หรือทดลองเปิดในโหมดไม่ระบุตัวตน (Incognito Mode)
+- แนะนำลูกค้าทดลองสลับสัญญาณอินเทอร์เน็ต (เช่น สลับจาก Wi-Fi เป็น 4G/5G) หรือเปลี่ยนเบราว์เซอร์ใช้งาน (เช่น สลับไปใช้ Google Chrome หรือ Safari)
+- หากยังพบปัญหา ให้ขอภาพหน้าจอ (Screenshot), หน้า URL หรือเมนูที่ค้าง, รุ่นอุปกรณ์ และเบราว์เซอร์ เพื่อส่งต่อทีมเทคนิค
+
+💻 **2. การตรวจสอบเชิงเทคนิคสำหรับทีมพัฒนาระบบ (Dev & DevOps SOP):**
+- ตรวจสอบ Server Resources (CPU, Memory Usage, Connection Pool) บนเซิร์ฟเวอร์หลัก
+- ตรวจสอบ CDN (Cloudflare / CloudFront) และการแคชไฟล์ Static Assets (JS, CSS, รูปภาพขนาดใหญ่)
+- ตรวจสอบ Network Tab ใน Browser DevTools เพื่อดูว่ามี API เส้นใดหน่วง (High Latency) หรือเกิด Timeout
+- ตรวจสอบ WebSocket / Real-time Connection ว่ามีการเชื่อมต่อค้างหรือ Reconnect วนซ้ำหรือไม่
+
+📢 **3. แผนการสื่อสารและจัดการสถานการณ์:**
+- หากมีลูกค้าแจ้งเข้ามาจำนวนมากพร้อมกัน ให้ประสานงานออกประกาศแจ้งสถานะบนหน้าเว็บทันที เพื่อแจ้งว่าทีมงานกำลังเร่งตรวจสอบและแก้ไขค่ะ`
+  },
+  {
+    category_id: 'access_blocked',
+    title: 'คู่มือและแนวทางแก้ไขปัญหา: เข้าหน้าเว็บไม่ได้ / Error 502 / การเข้าถึงถูกระงับ (Access Blocked SOP)',
+    keywords: ['เข้าไม่ได้', 'เข้าหน้าเว็บไม่ได้', '502', 'bad gateway', 'ระงับ', 'บล็อก', 'access_blocked', 'ลิงก์เสีย'],
+    content: `🛠️ **แนวทางและขั้นตอนการแก้ไขปัญหา: เข้าหน้าเว็บไม่ได้ / Error 502 / ลิงก์เสีย (Access Blocked SOP)**
+
+👤 **1. การดูแลลูกค้าหน้างาน (Support SOP):**
+- ตรวจสอบว่าลูกค้าเข้าผ่านลิงก์ทางเข้าล่าสุดหรือไม่ หากเป็นลิงก์เก่าให้ส่งลิงก์ทางเข้าสำรอง (Backup Domain / Mirror)
+- สอบถามว่าลูกค้าเปิด VPN หรือใช้เครือข่ายที่มีการบล็อกเนื้อหาหรือไม่
+- แนะนำให้ลูกค้ารีเซ็ตสัญญาณอินเทอร์เน็ต หรือตั้งค่า Public DNS (1.1.1.1 หรือ 8.8.8.8)
+
+💻 **2. การตรวจสอบฝั่ง Infrastructure & DevOps:**
+- ตรวจสอบ Web Application Firewall (WAF) และ Cloudflare ว่ามีการบล็อก IP หรือส่ง CAPTCHA ซ้ำซ้อนหรือไม่
+- ตรวจสอบ Reverse Proxy (Nginx) ว่า Forward Request ไปยัง Application Service ได้ปกติหรือไม่
+- ตรวจสอบสถานะ Domain Name Server (DNS) และใบรับรองความปลอดภัย (SSL Certificate)`
+  },
+  {
+    category_id: 'login_issue',
+    title: 'คู่มือและแนวทางแก้ไขปัญหา: ปัญหาระบบล็อกอิน / เข้าสู่ระบบ / OTP / ลืมรหัสผ่าน (Login Issue SOP)',
+    keywords: ['ล็อกอิน', 'เข้าสู่ระบบ', 'รหัสผ่าน', 'otp', 'login', 'พาสเวิร์ด', 'login_issue'],
+    content: `🛠️ **แนวทางและขั้นตอนการแก้ไขปัญหา: ล็อกอินไม่ได้ / OTP / ลืมรหัสผ่าน (Login Issue SOP)**
+
+👤 **1. การดูแลลูกค้าหน้างาน (Support SOP):**
+- ตรวจสอบสถานะบัญชีลูกค้าในระบบหลังบ้านว่าถูกระงับชั่วคราวจากการใส่รหัสผิดเกินกำหนดหรือไม่
+- หากลูกค้าลืมรหัสผ่าน ให้แนะนำใช้ฟังก์ชัน "ลืมรหัสผ่าน" เพื่อรับลิงก์รีเซ็ตผ่านเบอร์โทรหรืออีเมล
+- กรณี OTP ไม่เข้า: ตรวจสอบเบอร์โทรศัพท์ของลูกค้า และแนะนำให้ลูกค้ารอ 1-2 นาทีแล้วกดขอรับรหัสใหม่
+
+💻 **2. การตรวจสอบฝั่งระบบ (Dev & System):**
+- ตรวจสอบสถานะและเครดิตของ SMS Gateway ผู้ให้บริการส่ง OTP
+- ตรวจสอบ Session Storage และ Token Expiration Policy ในระบบ Authentication`
+  },
+  {
+    category_id: 'deposit_withdrawal',
+    title: 'คู่มือและแนวทางแก้ไขปัญหา: ปัญหาการเงิน / ฝากเงิน-ถอนเงินล่าช้า (Financial & Transactions SOP)',
+    keywords: ['ฝาก', 'ถอน', 'เงินไม่เข้า', 'ปรับยอด', 'สลิป', 'ธนาคาร', 'ล่าช้า', 'deposit_withdrawal'],
+    content: `🛠️ **แนวทางและขั้นตอนการแก้ไขปัญหา: ฝาก-ถอนล่าช้า / เงินไม่เข้า (Financial Transactions SOP)**
+
+👤 **1. การดูแลลูกค้าหน้างาน (Finance & Support SOP):**
+- ขอหลักฐานสลิปการโอนเงินที่แสดงเลขที่รายการ วันที่ เวลา และยอดเงินอย่างชัดเจน
+- ตรวจสอบรายการเดินบัญชี (Statement) ของธนาคารปลายทางว่ามียอดเงินเข้าจริงหรือไม่
+- หากยอดเงินเข้าแล้วแต่ระบบออโต้ยังไม่ปรับ ให้เจ้าหน้าที่ฝ่ายการเงินดำเนินการปรับยอดแบบ Manual ทันที
+- แจ้งกรอบเวลาการดำเนินการที่ชัดเจนให้ลูกค้าทราบ (เช่น ตรวจสอบเรียบร้อยภายใน 5-15 นาที)
+
+💻 **2. การตรวจสอบระบบเชื่อมต่อ:**
+- ตรวจสอบสถานะการเชื่อมต่อ API ของระบบ Auto-Bank และ Payment Gateway
+- ตรวจสอบว่าธนาคารปลายทางมีประกาศปิดปรับปรุงระบบชั่วคราวหรือไม่`
+  },
+  {
+    category_id: 'ui_rendering_issue',
+    title: 'คู่มือและแนวทางแก้ไขปัญหา: ปัญหากราฟิก / แสดงผลเพี้ยน / ตัวหนังสือซ้อน (UI Rendering Issue SOP)',
+    keywords: ['แสดงผล', 'เพี้ยน', 'ตัวหนังสือซ้อน', 'รูปไม่ขึ้น', 'ui_rendering_issue', 'ภาพไม่ตรง'],
+    content: `🛠️ **แนวทางและขั้นตอนการแก้ไขปัญหา: หน้าเว็บแสดงผลเพี้ยน / ภาพไม่ขึ้น (UI Rendering SOP)**
+
+👤 **1. คำแนะนำสำหรับลูกค้า:**
+- แนะนำลูกค้าล้าง Browser Cache เพื่อโหลดไฟล์ CSS และ Layout เวอร์ชันล่าสุด
+- แนะนำปิดส่วนขยายเบราว์เซอร์ (Extensions) ที่อาจรบกวนการแสดงผล เช่น AdBlocker หรือ Translation tool
+- ตรวจสอบขนาดการซูมหน้าจอของเบราว์เซอร์ (Zoom Level) ให้อยู่ที่ 100%
+
+💻 **2. การตรวจสอบฝั่ง Frontend Developer:**
+- ตรวจสอบ Responsive CSS บนอุปกรณ์ต่างๆ โดยเฉพาะ Safari บน iOS และ Chrome บน Android
+- เคลียร์ Cache บน Cloudflare / CDN หลังการ Deploy โค้ดเวอร์ชันใหม่`
+  },
+  {
+    category_id: 'interaction_lag',
+    title: 'คู่มือและแนวทางแก้ไขปัญหา: ปัญหาปุ่มไม่ตอบสนอง / กดไม่ไป / ระบบหน่วง (Interaction Lag SOP)',
+    keywords: ['ปุ่มไม่ตอบสนอง', 'กดไม่ไป', 'กดไม่ได้', 'หน่วง', 'ช้า', 'interaction_lag'],
+    content: `🛠️ **แนวทางและขั้นตอนการแก้ไขปัญหา: ปุ่มกดไม่ตอบสนอง / ระบบหน่วง (Interaction Lag SOP)**
+
+👤 **1. การดูแลลูกค้าหน้างาน:**
+- แนะนำลูกค้าไม่กดย้ำปุ่มหลายครั้งติดต่อกันเพื่อป้องกันการส่งคำขอซ้ำซ้อน
+- แนะนำลูกค้ารีเฟรชหน้าเว็บและรอระบบประมวลผลคำขอก่อนหน้า
+
+💻 **2. การตรวจสอบฝั่ง Developer:**
+- ตรวจสอบ Event Listener และปุ่มว่ามีสถานะ Disabled/Loading ค้างอยู่หรือไม่
+- ตรวจสอบฟังก์ชัน Debounce / Throttle ของปุ่มกดทำรายการสำคัญ
+- ตรวจสอบความเร็ว API Endpoints ที่ถูกเรียกใช้งานเมื่อกดปุ่ม`
+  },
+  {
+    category_id: 'feedback_complaint',
+    title: 'คู่มือและแนวทางแก้ไขปัญหา: ข้อร้องเรียนและการรับมือสถานการณ์ตึงเครียด (Customer Complaint SOP)',
+    keywords: ['ร้องเรียน', 'บริการช้า', 'แอดมิน', 'ไม่พอใจ', 'ขู่อายัด', 'feedback_complaint'],
+    content: `🛠️ **แนวทางและขั้นตอนการรับมือ: ข้อร้องเรียน / ลูกค้าอารมณ์ร้อน (Customer Escalation SOP)**
+
+👤 **1. หลักการสื่อสารด้วยความเห็นอกเห็นใจ (Empathy First):**
+- กล่าวขออภัยในความไม่สะดวกด้วยความสุภาพ จริงใจ และรับฟังปัญหาอย่างตั้งใจ
+- ไม่โต้เถียงหรือใช้คำพูดปฏิเสธลูกค้า ใช้คำพูดแสดงความเข้าใจ เช่น "ทางเราเข้าใจความกังวลของลูกค้านะคะ จะเร่งดำเนินการตรวจสอบให้ทันทีค่ะ"
+- แสดงความกระตือรือร้นในการช่วยแก้ปัญหาอย่างเป็นรูปธรรม
+
+📌 **2. การส่งต่อเคสด่วน (Urgent Escalation):**
+- ส่งต่อเคสที่มีความไม่พอใจสูงหรือมีความเสี่ยงให้หัวหน้างาน (Supervisor) ดูแลทันที
+- แจ้งระยะเวลาการติดตามผลที่แน่นอน และอัปเดตความคืบหน้าให้ลูกค้าทราบเป็นระยะ`
+  },
+  {
+    category_id: 'api_error',
+    title: 'คู่มือและแนวทางแก้ไขปัญหา: ข้อผิดพลาดระบบ API / เซิร์ฟเวอร์ขัดข้อง (API Error SOP)',
+    keywords: ['api', 'เซิร์ฟเวอร์', 'database', 'ฐานข้อมูล', 'api_error', 'เออเร่อ'],
+    content: `🛠️ **แนวทางและขั้นตอนการแก้ไขปัญหา: ข้อผิดพลาดระบบ API (API Error SOP)**
+
+💻 **1. การตรวจสอบและแก้ไขสำหรับทีม Dev / DevOps:**
+- ตรวจสอบ API Server Error Logs (รหัส 500, 503, 504) ในระบบ Monitoring
+- ตรวจสอบสถานะ Database Connection Pool ว่าเต็มหรือมี Slow Query ค้างอยู่หรือไม่
+- ตรวจสอบโควตา Rate Limit หรือ Third-party API Dependencies
+- ดำเนินการรีสตาร์ต Service หรือขยายขนาด Worker Instance ตามความเหมาะสม`
+  }
+];
+
+const DEFAULT_GENERAL_SOP = {
+  category_id: 'general_incident',
+  title: 'คู่มือและแนวทางมาตรฐานการรับมือและแก้ไขปัญหาของระบบ (Incident Management SOP)',
+  content: `🛠️ **แนวทางและขั้นตอนมาตรฐานการรับมือปัญหาของระบบ (Incident Management SOP)**
+
+📌 **1. ขั้นตอนการคัดกรองปัญหาหน้างาน (Triage & Support):**
+- สอบถามรายละเอียดปัญหาจากลูกค้าอย่างชัดเจน (หน้าที่เกิดปัญหา, ภาพหน้าจอ, เวลาที่เกิด)
+- ระบุระดับความรวดเร็วและความสำคัญของปัญหา (ด่วนฉุกเฉิน / สูง / กลาง / ต่ำ)
+- แก้ไขปัญหาเบื้องต้น เช่น การรีเฟรช ล้างแคช หรือเปลี่ยนเครือข่าย
+
+📌 **2. ขั้นตอนการส่งต่อและประสานงาน (Escalation):**
+- ส่งต่อเคสปัญหาทางเทคนิคไปยังทีม Developer พร้อมระบุรายละเอียดและตัวอย่างเคส
+- หากเป็นปัญหาด้านการเงิน ส่งต่อไปยังทีม Finance พร้อมหลักฐานรายการเดินบัญชี
+
+📌 **3. การติดตามผลและสื่อสาร (Post-resolution):**
+- แจ้งผลการแก้ไขกลับไปยังลูกค้าทันทีเมื่อระบบกลับมาใช้งานได้ปกติ
+- บันทึกสาเหตุของปัญหาเพื่อใช้วิเคราะห์และป้องกันไม่ให้เกิดซ้ำในอนาคตค่ะ`
+};
+
 /**
- * RAG Knowledge Base Retrieval (Query SOPs, manuals, FAQs from Supabase knowledge_base table)
+ * RAG Knowledge Base Retrieval (Query SOPs, manuals, FAQs from Supabase knowledge_base table or built-in SOPs)
  * @param {string} userQuery
  * @param {string} [companyId]
+ * @param {string[]} [targetCategories]
  */
-export async function queryKnowledgeBase(userQuery, companyId) {
+export async function queryKnowledgeBase(userQuery, companyId, targetCategories = []) {
   try {
     let query = supabase.from('knowledge_base').select('*');
     if (companyId) query = query.eq('company_id', companyId);
 
     const { data: items, error } = await query;
-    if (error) throw error;
+    if (error) console.warn('Supabase knowledge_base query warning:', error.message);
 
     const lowerQuery = (userQuery || '').toLowerCase();
 
-    // Match articles by keyword relevance
-    const matched = (items || []).filter(item => {
+    // 1. Try to match custom articles in Supabase first
+    const matchedCustom = (items || []).filter(item => {
       const title = (item.title || '').toLowerCase();
       const content = (item.content || '').toLowerCase();
-      return lowerQuery.split(' ').some(w => w.length > 2 && (title.includes(w) || content.includes(w))) ||
-             lowerQuery.includes('ฝาก') || lowerQuery.includes('ถอน') || lowerQuery.includes('ช้า') || lowerQuery.includes('วิธี') || lowerQuery.includes('คู่มือ');
+      return lowerQuery.split(' ').some(w => w.length > 2 && (title.includes(w) || content.includes(w)));
     });
 
-    const results = matched.length > 0 ? matched : (items || []).slice(0, 3);
+    if (matchedCustom.length > 0) {
+      const first = matchedCustom[0];
+      return {
+        query: userQuery,
+        total_matches: matchedCustom.length,
+        knowledge_articles: matchedCustom.map(item => ({
+          id: item.id,
+          title: item.title,
+          category: item.category || 'คู่มือระบบ',
+          content: item.content
+        })),
+        formatted_sop_thai: `🛠️ **${first.title}**\n\n${first.content}\n\n💡 *หากต้องการข้อมูลหรือแนวทางเพิ่มเติม สอบถามมิกะได้ตลอดเลยนะคะ* 😊`
+      };
+    }
 
-    return {
-      query: userQuery,
-      total_matches: results.length,
-      knowledge_articles: results.map(item => ({
-        id: item.id,
-        title: item.title,
-        category: item.category || 'คู่มือระบบ',
-        content: item.content
-      }))
-    };
-  } catch (err) {
-    console.error('Error querying knowledge base:', err.message);
+    // 2. If no custom articles found in Supabase, match built-in SOP Knowledge Base
+    const catKeys = Array.isArray(targetCategories) ? targetCategories : [];
+    let matchedSop = DEFAULT_SOP_KNOWLEDGE.find(sop => 
+      catKeys.includes(sop.category_id) ||
+      sop.keywords.some(k => lowerQuery.includes(k))
+    );
+
+    if (!matchedSop) {
+      matchedSop = DEFAULT_GENERAL_SOP;
+    }
+
     return {
       query: userQuery,
       total_matches: 1,
       knowledge_articles: [
         {
-          title: 'คู่มือการฝากถอนเงินล่าช้า',
-          category: 'คู่มือระบบ',
-          content: 'ขั้นตอนการทำธุรกรรมฝากถอนเงิน: รายการฝากอัตโนมัติใช้เวลาปรับยอดไม่เกิน 1 นาที หากธนาคารปลายทางเกิดความล่าช้าให้ทีม Finance ดำเนินการคีย์มือทันที'
+          id: matchedSop.category_id,
+          title: matchedSop.title,
+          category: matchedSop.category_id,
+          content: matchedSop.content
         }
-      ]
+      ],
+      formatted_sop_thai: matchedSop.content + '\n\n💡 *หากต้องการให้มิกะช่วยตรวจสอบเคสตัวอย่างหรือสถิติปัญหาของระบบเพิ่มเติม แจ้งได้เลยนะคะ* 😊'
+    };
+  } catch (err) {
+    console.error('Error querying knowledge base:', err.message);
+    const fallbackSop = DEFAULT_SOP_KNOWLEDGE[0];
+    return {
+      query: userQuery,
+      total_matches: 1,
+      knowledge_articles: [
+        {
+          title: fallbackSop.title,
+          category: fallbackSop.category_id,
+          content: fallbackSop.content
+        }
+      ],
+      formatted_sop_thai: fallbackSop.content
     };
   }
 }
@@ -1049,18 +1264,10 @@ export async function getHourlyPeakAnalysis(companyId, periodMode = 1, targetCat
       issues = issues.filter(iss => targetCategories.includes(iss.category_id));
     }
 
-    const categoryLabelMap = {
-      'interaction_lag': 'แอดมินตอบช้า/รอนาน',
-      'feedback_complaint': 'แอดมินตอบช้า/ร้องเรียน',
-      'login_issue': 'การเข้าสู่ระบบ',
-      'page_load_freeze': 'หน้าเว็บค้าง/โหลดช้า',
-      'ui_rendering_issue': 'การแสดงผลผิดเพี้ยน',
-      'deposit_withdrawal': 'ฝาก-ถอนเงิน',
-      'promo_bonus': 'โปรโมชั่น/โบนัส'
-    };
+    const categories = await getCachedCategories(companyId);
 
     const targetCatNames = isCategoryFiltered
-      ? targetCategories.map(c => categoryLabelMap[c] || c).join(' / ')
+      ? targetCategories.map(c => getCategoryDisplayName(c, categories)).join(' / ')
       : null;
 
     const hourlyCounts = {};
@@ -1137,7 +1344,7 @@ export async function getDailyPeakAnalysis(companyId, timeframeMode = 'this_mont
     const { data: chats, error } = await query;
     if (error) throw error;
 
-    const customLabel = resolvedLabel || 'ประจำเดือนนี้ (สิงหาคม)';
+    const customLabel = resolvedLabel || 'ประจำเดือนนี้';
 
     if (!chats || chats.length === 0) {
       return {
@@ -1145,27 +1352,8 @@ export async function getDailyPeakAnalysis(companyId, timeframeMode = 'this_mont
       };
     }
 
-    const catMap = {
-      'deposit_withdrawal': 'ฝาก-ถอน',
-      'login_issue': 'ปัญหาการเข้าสู่ระบบ',
-      'access_blocked': 'เข้าหน้าเว็บไม่ได้/ลิงก์เสีย',
-      'account_security': 'ความปลอดภัยของบัญชี',
-      'api_error': 'ข้อผิดพลาดระบบ API',
-      'device_compatibility': 'ปัญหาเบราว์เซอร์/อุปกรณ์',
-      'feature_request': 'ขอเพิ่มฟีเจอร์',
-      'feedback_complaint': 'ข้อเสนอแนะและร้องเรียน',
-      'game_issue': 'ปัญหาการเล่นเกม',
-      'interaction_lag': 'กดปุ่มแล้วไม่ตอบสนอง',
-      'notification_issue': 'ปัญหาการแจ้งเตือน',
-      'page_load_freeze': 'หน้าเว็บค้าง/โหลดช้า',
-      'payment_gateway': 'ระบบการชำระเงิน/ธนาคาร',
-      'performance_issue': 'ประสิทธิภาพระบบช้า',
-      'promo_bonus': 'โปรโมชั่นและโบนัส',
-      'registration': 'การสมัครสมาชิก',
-      'ui_rendering_issue': 'การแสดงผลผิดเพี้ยน',
-      'vip_privilege': 'สิทธิประโยชน์ระดับ VIP',
-      'other': 'เรื่องอื่นๆ'
-    };
+    const categories = await getCachedCategories(companyId);
+    const defaultCatId = (categories && categories.length > 0) ? categories[0].id : 'other';
 
     const dateGroups = {};
     const dateCatCounts = {};
@@ -1177,7 +1365,7 @@ export async function getDailyPeakAnalysis(companyId, timeframeMode = 'this_mont
       const dateStr = dateObj.toLocaleDateString('th-TH', { timeZone: 'Asia/Bangkok', day: 'numeric', month: 'long', year: 'numeric' });
 
       const issues = (chat.chat_issues && chat.chat_issues.length > 0) ? chat.chat_issues : [
-        { category_id: chat.category_id || 'deposit_withdrawal' }
+        { category_id: chat.category_id || defaultCatId }
       ];
 
       issues.forEach(iss => {
@@ -1185,9 +1373,9 @@ export async function getDailyPeakAnalysis(companyId, timeframeMode = 'this_mont
         dateGroups[dateStr] = (dateGroups[dateStr] || 0) + 1;
 
         if (!dateCatCounts[dateStr]) dateCatCounts[dateStr] = {};
-        const catKey = iss.category_id || chat.category_id || 'deposit_withdrawal';
+        const catKey = iss.category_id || chat.category_id || defaultCatId;
         const cleanCat = catKey.includes(':') ? catKey.split(':')[1] : catKey;
-        const catName = catMap[cleanCat] || cleanCat || 'เรื่องอื่นๆ';
+        const catName = getCategoryDisplayName(cleanCat, categories);
         dateCatCounts[dateStr][catName] = (dateCatCounts[dateStr][catName] || 0) + 1;
       });
     });
@@ -1336,27 +1524,7 @@ export async function getRepeatCustomerIssueTracker(companyId, timeframeMode = '
     const { data: chats, error } = await query;
     if (error) throw error;
 
-    const catTHMap = {
-      'deposit_withdrawal': 'การฝาก-ถอนเงิน',
-      'login_issue': 'ปัญหาการเข้าสู่ระบบ',
-      'access_blocked': 'เข้าหน้าเว็บไม่ได้/ลิงก์เสีย',
-      'account_security': 'ความปลอดภัยของบัญชี',
-      'api_error': 'ข้อผิดพลาดระบบ API',
-      'device_compatibility': 'ปัญหาเบราว์เซอร์/อุปกรณ์',
-      'feature_request': 'ขอเพิ่มฟีเจอร์',
-      'feedback_complaint': 'ข้อเสนอแนะและร้องเรียน',
-      'game_issue': 'ปัญหาการเล่นเกม',
-      'interaction_lag': 'กดปุ่มแล้วไม่ตอบสนอง',
-      'notification_issue': 'ปัญหาการแจ้งเตือน',
-      'page_load_freeze': 'หน้าเว็บค้าง/โหลดช้า',
-      'payment_gateway': 'ระบบการชำระเงิน/ธนาคาร',
-      'performance_issue': 'ประสิทธิภาพระบบช้า',
-      'promo_bonus': 'โปรโมชั่นและโบนัส',
-      'registration': 'การสมัครสมาชิก',
-      'ui_rendering_issue': 'การแสดงผลผิดเพี้ยน',
-      'vip_privilege': 'สิทธิประโยชน์ระดับ VIP',
-      'other': 'เรื่องอื่นๆ'
-    };
+    const categories = await getCachedCategories(companyId);
 
     const customerMap = {};
     (chats || []).forEach(chat => {
@@ -1384,7 +1552,7 @@ export async function getRepeatCustomerIssueTracker(companyId, timeframeMode = '
 
           if (matchingYChat) {
             const custName = tChat.customers?.name || `ลูกค้า ID: ${custId.slice(0, 8)}`;
-            const catName = catTHMap[tCat] || tCat || 'เรื่องเดิม';
+            const catName = getCategoryDisplayName(tCat, categories);
             
             const tTimeStr = new Date(tChat.created_at).toLocaleTimeString('th-TH', { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit' }) + ' น.';
             const yTimeStr = new Date(matchingYChat.created_at).toLocaleTimeString('th-TH', { timeZone: 'Asia/Bangkok', hour: '2-digit', minute: '2-digit' }) + ' น.';
@@ -1448,8 +1616,16 @@ export async function getComparisonPeriodAnalytics(companyId, type = 'day_over_d
       p1Data = await getChatAnalytics(companyId, 'this_week');
       p2Data = await getChatAnalytics(companyId, 'last_week');
     } else {
-      p1Label = 'เดือนนี้ (สิงหาคม)';
-      p2Label = 'เดือนที่แล้ว (กรกฎาคม)';
+      const thaiMonthNames = [
+        'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
+        'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'
+      ];
+      const thTodayStr = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Bangkok' }).format(new Date());
+      const curMonthIdx = parseInt(thTodayStr.split('-')[1], 10) - 1;
+      const curMonthName = thaiMonthNames[curMonthIdx];
+      const lastMonthName = thaiMonthNames[(curMonthIdx - 1 + 12) % 12];
+      p1Label = `เดือนนี้ (${curMonthName})`;
+      p2Label = `เดือนที่แล้ว (${lastMonthName})`;
       p1Data = await getChatAnalytics(companyId, 'this_month');
       p2Data = await getChatAnalytics(companyId, 'last_month');
     }

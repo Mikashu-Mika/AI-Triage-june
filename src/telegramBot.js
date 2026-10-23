@@ -2,13 +2,52 @@ import https from 'https';
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
-import { processAgentQuery, logAgentActivity } from './agentService.js';
+import { processAgentQuery, logAgentActivity, detectPromptInjection } from './agentService.js';
 import { generateExcelReport } from './excelService.js';
+import { 
+  getCachedCategories, 
+  getCategoryDisplayName, 
+  findCategoryKeysByName,
+  findThaiMonthInText, 
+  findAllThaiMonthsInText, 
+  getDynamicMonthMeta, 
+  getDefaultCompanyId, 
+  getPeriodThaiText 
+} from './categoryHelper.js';
+import { checkCompanyQuota } from './quotaService.js';
 
 dotenv.config();
 
+export const DEFAULT_ALLOWED_CHAT_IDS = [
+  '834472739',     // คุณมิกะ (JUNE 🐰)
+  '8167753903',    // Fr€nzy
+  '1848586712',    // Core Admin / Team
+  '-5495142610',   // Telegram Group
+  '6266062853'     // พี่เดล (P'Del)
+];
+
+// Explicit Executive / VIP Identification
+export const EXECUTIVE_USER_IDS = [
+  '834472739',     // คุณมิกะ (JUNE 🐰)
+  '6266062853',    // พี่เดล (P'Del)
+  '1848586712',    // Core Admin / Team
+  '8167753903'     // Fr€nzy
+];
+
+export function isExecutiveSender(senderId) {
+  if (!senderId) return false;
+  return EXECUTIVE_USER_IDS.includes(String(senderId));
+}
+
+export function getAllowedChatIds() {
+  const envIds = (process.env.TELEGRAM_ALLOWED_CHAT_IDS || '').split(',').map(id => id.trim()).filter(Boolean);
+  return Array.from(new Set([...DEFAULT_ALLOWED_CHAT_IDS, ...envIds]));
+}
+
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
-const TELEGRAM_ALLOWED_CHAT_IDS = (process.env.TELEGRAM_ALLOWED_CHAT_IDS || '').split(',').map(id => id.trim()).filter(Boolean);
+const TELEGRAM_ALLOWED_CHAT_IDS = getAllowedChatIds();
+
+export const getDynamicMonthLabels = getDynamicMonthMeta;
 
 /**
  * Send Document (File) to Telegram chat via multipart/form-data POST
@@ -243,6 +282,9 @@ export async function handleTelegramCallbackQuery(callbackQuery) {
 
   console.log(`🔘 Received Telegram Callback Query button click [${data}] from ${senderName} (Chat ID: ${chatId})`);
 
+  const { curMonthName, lastMonthName } = getDynamicMonthLabels();
+  const getPeriodThai = getPeriodThaiText;
+
   // Map button callback_data to Thai natural language query with short byte-compliant callback_data
   let mappedQuery = '';
   let progressMsg = '';
@@ -251,21 +293,11 @@ export async function handleTelegramCallbackQuery(callbackQuery) {
     const parts = data.split(':');
     const catKey = parts[1] || 'feedback_complaint';
     const period = parts[2] || 'today';
-    const periodThai = period === 'yesterday' ? 'ของเมื่อวาน' :
-                       period === 'this_month' ? 'ของเดือนนี้ (สิงหาคม)' :
-                       period === 'last_month' ? 'ของเดือนที่แล้ว (กรกฎาคม)' : 'ของวันนี้';
+    const periodThai = getPeriodThai(period);
     
-    const catTHNameMap = {
-      'feedback_complaint': 'ข้อเสนอแนะและร้องเรียน',
-      'deposit_withdrawal': 'ฝาก-ถอน',
-      'page_load_freeze': 'หน้าเว็บค้าง/โหลดช้า',
-      'login_issue': 'ปัญหาการเข้าสู่ระบบ',
-      'payment_gateway': 'ระบบการชำระเงิน/ธนาคาร',
-      'api_error': 'ข้อผิดพลาดระบบ API',
-      'promo_bonus': 'โปรโมชั่นและโบนัส',
-      'ui_rendering_issue': 'การแสดงผลผิดเพี้ยน'
-    };
-    const catTHName = catTHNameMap[catKey] || catKey;
+    const companyId = process.env.DEFAULT_COMPANY_ID || await getDefaultCompanyId();
+    const categories = await getCachedCategories(companyId);
+    const catTHName = getCategoryDisplayName(catKey, categories);
 
     mappedQuery = `ขอรายละเอียดดูแชตหมวด ${catTHName} ${periodThai}`;
     progressMsg = `⏳ **กำลังสกัดและรวบรวมรายการแชตเรื่อง ${catTHName} ${periodThai} ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🔍✨`;
@@ -273,30 +305,22 @@ export async function handleTelegramCallbackQuery(callbackQuery) {
     const parts = data.split(':');
     const catName = parts[1];
     const period = parts[2] || 'today';
-    const periodThai = period === 'yesterday' ? 'ของเมื่อวาน' :
-                       period === 'this_month' ? 'ของเดือนนี้ (สิงหาคม)' :
-                       period === 'last_month' ? 'ของเดือนที่แล้ว (กรกฎาคม)' : 'ของวันนี้';
+    const periodThai = getPeriodThai(period);
     mappedQuery = `ขอรายละเอียดเรื่อง${catName} ${periodThai}`;
     progressMsg = `⏳ **กำลังสกัดและรวบรวมรายละเอียดแชตเรื่อง${catName} ${periodThai} ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🔍✨`;
   } else if (data.startsWith('cat_1') || data.startsWith('drill_cat_1')) {
     const period = data.includes(':') ? data.split(':')[1] : 'today';
-    const periodThai = period === 'yesterday' ? 'ของเมื่อวาน' :
-                       period === 'this_month' ? 'ของเดือนนี้ (สิงหาคม)' :
-                       period === 'last_month' ? 'ของเดือนที่แล้ว (กรกฎาคม)' : 'ของวันนี้';
+    const periodThai = getPeriodThai(period);
     mappedQuery = `ขอรายละเอียดหมวดที่ 1 ${periodThai}`;
     progressMsg = `⏳ **กำลังสกัดและรวบรวมรายละเอียดแชตหมวดที่ 1 ${periodThai} ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🔍✨`;
   } else if (data.startsWith('cat_2') || data.startsWith('drill_cat_2')) {
     const period = data.includes(':') ? data.split(':')[1] : 'today';
-    const periodThai = period === 'yesterday' ? 'ของเมื่อวาน' :
-                       period === 'this_month' ? 'ของเดือนนี้ (สิงหาคม)' :
-                       period === 'last_month' ? 'ของเดือนที่แล้ว (กรกฎาคม)' : 'ของวันนี้';
+    const periodThai = getPeriodThai(period);
     mappedQuery = `ขอรายละเอียดหมวดที่ 2 ${periodThai}`;
     progressMsg = `⏳ **กำลังสกัดและรวบรวมรายละเอียดแชตหมวดที่ 2 ${periodThai} ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🔍✨`;
   } else if (data.startsWith('drill_hourly')) {
     const period = data.includes(':') ? data.split(':')[1] : 'today';
-    const periodThai = period === 'yesterday' ? 'ของเมื่อวาน' :
-                       period === 'this_month' ? 'ของเดือนนี้' :
-                       period === 'last_month' ? 'ของเดือนที่แล้ว' : 'ของวันนี้';
+    const periodThai = getPeriodThai(period);
     mappedQuery = `ช่วงเวลาหนาแน่น ${periodThai} มีกี่โมง`;
     progressMsg = `⏳ **กำลังวิเคราะห์สถิติช่วงเวลาหนาแน่นของปัญหา ${periodThai} ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ ⏰✨`;
   } else if (data === 'query_today') {
@@ -304,7 +328,7 @@ export async function handleTelegramCallbackQuery(callbackQuery) {
     progressMsg = '⏳ **กำลังรวบรวมและสรุปข้อมูลปัญหาประจำวันนี้ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 📅✨';
   } else if (data === 'query_this_month') {
     mappedQuery = 'สรุปปัญหาในเดือนนี้หน่อย';
-    progressMsg = '⏳ **กำลังรวบรวมและสรุปข้อมูลปัญหาประจำเดือนสิงหาคม ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 📊✨';
+    progressMsg = `⏳ **กำลังรวบรวมและสรุปข้อมูลปัญหาประจำเดือน${curMonthName} ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 📊✨`;
   } else {
     mappedQuery = data;
     progressMsg = '⏳ **กำลังประมวลผลคำสั่งให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🤖✨';
@@ -343,13 +367,23 @@ export async function handleTelegramMessage(message) {
   if (!text) return null; // Ignore empty message after tag removal
 
   const senderName = message.from ? `${message.from.first_name || ''} ${message.from.last_name || ''}`.trim() : 'User';
+  const isExec = isExecutiveSender(senderId);
 
-  console.log(`📥 Received Telegram Message [${message.chat.type}] from ${senderName} (ID: ${senderId}, Chat ID: ${chatId}): "${text}"`);
+  console.log(`📥 Received Telegram Message [${message.chat.type}] from ${senderName}${isExec ? ' 👑[EXECUTIVE VIP]' : ''} (ID: ${senderId}, Chat ID: ${chatId}): "${text}"`);
 
-  const companyId = process.env.DEFAULT_COMPANY_ID || '2c3f46cc-fae8-4ef8-99e1-874dec8b2af2';
+  // Safe message sender that honors _dryRun flag to prevent accidental test messages to live groups
+  const sendMessage = async (cId, mText, mParseMode = 'Markdown', mReplyMarkup = null) => {
+    if (message._dryRun) {
+      console.log(`[DRY-RUN] Suppressed Telegram message to ${cId}: "${(mText || '').slice(0, 60)}..."`);
+      return { ok: true, result: { message_id: 99999 } };
+    }
+    return await sendTelegramMessage(cId, mText, mParseMode, mReplyMarkup);
+  };
 
-  // Security & VIP Authorization Check (Evaluated Dynamically):
-  const allowedIds = (process.env.TELEGRAM_ALLOWED_CHAT_IDS || '').split(',').map(id => id.trim()).filter(Boolean);
+  const companyId = process.env.DEFAULT_COMPANY_ID || await getDefaultCompanyId();
+
+  // Security & VIP Authorization Check (Evaluated Dynamically with VIP Whitelist):
+  const allowedIds = getAllowedChatIds();
   const isAuthorized = allowedIds.length === 0 || 
                        allowedIds.includes(senderId) ||
                        allowedIds.includes(chatId);
@@ -371,13 +405,120 @@ export async function handleTelegramMessage(message) {
       chatId
     });
 
-    await sendTelegramMessage(chatId, unauthorizedReply);
+    await sendMessage(chatId, unauthorizedReply);
     return { ok: false, error: 'Unauthorized User ID' };
+  }
+
+  // Prompt Injection Pre-check in Telegram
+  const injection = detectPromptInjection(text);
+  if (injection.isMalicious) {
+    console.warn(`🛡️ [Telegram Security] Prompt Injection detected from ${senderName} (ID: ${senderId}): "${text}"`);
+    const injectionReply = `🛡️ *แจ้งเตือนความปลอดภัย*: ตรวจพบข้อความที่ไม่ปลอดภัยหรือพยายามแทรกแซงคำสั่งระบบ ขอปฏิเสธการประมวลผลคำสั่งนี้ค่ะ ✨`;
+    await sendMessage(chatId, injectionReply);
+    return { ok: false, error: 'Prompt Injection Blocked' };
+  }
+
+  // Sensitive Data Access Control (Financial & Customer PII restricted to Executives)
+  const lowerText = text.toLowerCase();
+  const isProblemStatsQuery = lowerText.includes('ปัญหา') || 
+                              lowerText.includes('เคส') || 
+                              lowerText.includes('แชท') || 
+                              lowerText.includes('แชต') ||
+                              lowerText.includes('กี่ครั้ง') || 
+                              lowerText.includes('กี่เคส') ||
+                              lowerText.includes('กี่คน') ||
+                              lowerText.includes('อันดับ');
+
+  const isSensitiveFinancial = !isProblemStatsQuery && (
+    lowerText.includes('ยอดเงิน') || 
+    lowerText.includes('ยอดฝาก') || 
+    lowerText.includes('ยอดถอน') || 
+    lowerText.includes('รายรับ') || 
+    lowerText.includes('รายจ่าย') || 
+    lowerText.includes('การเงิน') ||
+    lowerText.includes('ยอดสุทธิ') ||
+    lowerText.includes('กำไร') ||
+    lowerText.includes('ขาดทุน')
+  );
+  const isSensitiveCustomerPii = (lowerText.includes('รายชื่อ') && (lowerText.includes('ลูกค้า') || lowerText.includes('สมาชิก'))) ||
+                                 lowerText.includes('เบอร์โทร') ||
+                                 lowerText.includes('อีเมลลูกค้า');
+
+  if (isGroup && !isExec && (isSensitiveFinancial || isSensitiveCustomerPii)) {
+    console.warn(`🔒 [Security Guard] Non-executive ${senderName} (ID: ${senderId}) attempted to access sensitive company data: "${text}"`);
+    const restrictedReply = `🔒 *สิทธิ์การเข้าถึง*: ข้อมูลสรุปการเงินและข้อมูลลูกค้าระดับลึก สงวนสิทธิ์การสืบค้นเฉพาะผู้บริหารเท่านั้นค่ะ`;
+    await sendMessage(chatId, restrictedReply);
+    return { ok: false, error: 'Restricted Data: Executive Only' };
+  }
+
+  // Handle /quota command or quota check queries
+  const isQuotaCmd = text.startsWith('/quota') || 
+                     text.toLowerCase() === 'โควต้า' || 
+                     text.toLowerCase() === 'เช็คโควต้า' || 
+                     text.toLowerCase() === 'ตรวจสอบโควต้า' ||
+                     text.toLowerCase() === 'แพ็กเกจ';
+
+  if (isQuotaCmd) {
+    try {
+      const quota = await checkCompanyQuota(companyId);
+      const resetDateTh = new Date(quota.billingCycle.resetDate).toLocaleDateString('th-TH', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
+      const limitStr = quota.monthlyLimit !== null ? `${quota.monthlyLimit.toLocaleString()} แชต` : 'ไม่จำกัด (Unlimited)';
+      const remainStr = quota.remaining !== null ? `${quota.remaining.toLocaleString()} แชต` : 'ไม่จำกัด (Unlimited)';
+      const statusIcon = quota.isExceeded ? '🔴 โควต้าเต็มแล้ว' : (quota.packageStatus === 'active' ? '🟢 ใช้งานได้ปกติ' : '🟡 ' + quota.packageStatus);
+      const tgLimitStr = quota.telegramGroupLimit !== null 
+        ? (quota.telegramGroupLimit === 0 ? '❌ ไม่รวมในแพ็กเกจ' : `✅ ${quota.telegramGroupLimit} กลุ่ม`)
+        : '✅ ไม่จำกัด';
+
+      const reply = `📊 **ข้อมูลแพ็กเกจและโควต้าการใช้งาน (Sift AI)**\n\n` +
+        `🏢 **บริษัท:** ${quota.companyName}\n` +
+        `🏷️ **ประเภทลูกค้า:** ${quota.themeName}\n` +
+        `💎 **แพ็กเกจปัจจุบัน:** **${quota.packageName}** (${statusIcon})\n\n` +
+        `📈 **การใช้งานในรอบเดือนนี้:**\n` +
+        `• ใช้งานไปแล้ว: **${quota.currentUsage.toLocaleString()}** แชต\n` +
+        `• โควต้าทั้งหมด: **${limitStr}**\n` +
+        `• โควต้าคงเหลือ: **${remainStr}**\n` +
+        `• คิดเป็น: **${quota.usagePercent}%** ของโควต้า\n\n` +
+        `🤖 **สิทธิ์ AI Telegram Bot:** ${tgLimitStr}\n` +
+        `🔔 **ระบบเสียงเตือน:** ${quota.hasSoundAlert ? '✅ รองรับ' : '❌ ไม่รองรับ'}\n` +
+        `🔄 **วันเริ่มรอบบิลถัดไป:** ${resetDateTh}`;
+
+      await sendMessage(chatId, reply);
+      return { ok: true, quota };
+    } catch (quotaErr) {
+      console.error('Error fetching quota for Telegram:', quotaErr.message);
+    }
+  }
+
+  // Telegram Group Check: Verify if company's package supports Telegram Bot in groups
+  if (isGroup) {
+    try {
+      const quota = await checkCompanyQuota(companyId);
+      if (quota.telegramGroupLimit === 0) {
+        const noGroupReply = `🔒 *แจ้งเตือนแพ็กเกจ*: แพ็กเกจ Starter ของบริษัท **${quota.companyName}** ยังไม่รองรับการใช้งาน AI Telegram Bot ในกลุ่มค่ะ\n\n💡 แนะนำอัปเกรดเป็นแพ็กเกจ **Pro** (รองรับ 1 กลุ่ม) หรือ **Enterprise** (รองรับ 3 กลุ่ม) เพื่อเปิดใช้งานนะคะ ✨`;
+        await sendMessage(chatId, noGroupReply);
+        return { ok: false, error: 'Telegram group not supported in package' };
+      }
+    } catch (qErr) {
+      console.warn('Could not check telegram group limit:', qErr.message);
+    }
   }
 
   // Send immediate progress acknowledgment if it is a text-typed summary/drilldown query and not coming from callback
   if (!message.skipProgress) {
     const lower = text.toLowerCase();
+    const { curMonthName, lastMonthName } = getDynamicMonthMeta();
+    const matchedMonth = findThaiMonthInText(lower);
+    const mentionedMonths = findAllThaiMonthsInText(lower);
+    const isMonthlyBreakdown = lower.includes('แต่ละเดือน') || 
+                               lower.includes('ทุกเดือน') || 
+                               lower.includes('รายเดือน') || 
+                               lower.includes('แยกตามเดือน') || 
+                               lower.includes('แต่ละ เดือน') || 
+                               mentionedMonths.length > 1;
     let textProgressMsg = '';
 
     const isCustomerQuery = lower.includes('ลูกค้า') || lower.includes('สมัคร') || lower.includes('สมาชิก') || lower.includes('ผู้ใช้') || lower.includes('ยูส') || lower.includes('ใครบ้าง') || lower.includes('มีใคร');
@@ -387,20 +528,24 @@ export async function handleTelegramMessage(message) {
         textProgressMsg = '⏳ **กำลังตรวจสอบประวัติการทักแชตซ้ำเรื่องเดิมของลูกค้าให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🔄✨';
       } else if (lower.includes('ลูกค้าเก่า') && (lower.includes('เปอร์เซ็นต์') || lower.includes('เปอร์เซนต์') || lower.includes('%') || lower.includes('สัดส่วน') || lower.includes('กี่เปอร์'))) {
         textProgressMsg = '⏳ **กำลังวิเคราะห์สัดส่วนเปอร์เซ็นต์แชตจากลูกค้าเก่าให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👥✨';
+      } else if (isMonthlyBreakdown) {
+        textProgressMsg = '⏳ **กำลังสืบค้นและรวบรวมข้อมูลสมาชิกใหม่แยกตามแต่ละเดือนให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 📊✨';
+      } else if (lower.includes('ใครบ้าง') || lower.includes('มีใคร') || lower.includes('รายชื่อ')) {
+        textProgressMsg = '⏳ **กำลังดึงรายชื่อลูกค้าให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨';
+      } else if (lower.includes('เดือนที่แล้ว') || lower.includes('เดือนก่อน')) {
+        textProgressMsg = `⏳ **กำลังสืบค้นและรวบรวมข้อมูลลูกค้าประจำเดือน${lastMonthName} ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨`;
+      } else if (matchedMonth) {
+        textProgressMsg = `⏳ **กำลังสืบค้นและรวบรวมข้อมูลลูกค้าประจำเดือน${matchedMonth.full} ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨`;
+      } else if (lower.includes('เดือนนี้') || lower.includes(curMonthName)) {
+        textProgressMsg = `⏳ **กำลังสืบค้นและรวบรวมข้อมูลลูกค้าประจำเดือน${curMonthName} ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨`;
+      } else if (lower.includes('เมื่อวาน')) {
+        textProgressMsg = '⏳ **กำลังสืบค้นและรวบรวมข้อมูลลูกค้าเมื่อวาน ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨';
+      } else if (lower.includes('วันนี้')) {
+        textProgressMsg = '⏳ **กำลังสืบค้นและรวบรวมข้อมูลลูกค้าประจำวันนี้ ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨';
       } else if (lower.includes('ทั้งหมด') || lower.includes('รวม') || lower.includes('ที่มี')) {
         textProgressMsg = '⏳ **กำลังสืบค้นจำนวนลูกค้าทั้งหมดในระบบให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨';
-      } else if (lower.includes('วันนี้')) {
-        textProgressMsg = '⏳ **กำลังสืบค้นและรวบรวมข้อมูลลูกค้าใหม่ประจำวันนี้ ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨';
-      } else if (lower.includes('เมื่อวาน')) {
-        textProgressMsg = '⏳ **กำลังสืบค้นและรวบรวมข้อมูลลูกค้าใหม่เมื่อวาน ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨';
-      } else if (lower.includes('เดือนที่แล้ว') || lower.includes('กรกฎาคม')) {
-        textProgressMsg = '⏳ **กำลังสืบค้นและรวบรวมข้อมูลลูกค้าใหม่ประจำเดือนที่แล้ว ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨';
-      } else if (lower.includes('เดือน') || lower.includes('ประจำเดือน') || lower.includes('เดือนนี้') || lower.includes('สิงหาคม')) {
-        textProgressMsg = '⏳ **กำลังสืบค้นและรวบรวมข้อมูลลูกค้าใหม่ประจำเดือนนี้ ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨';
-      } else if (lower.includes('ใครบ้าง') || lower.includes('มีใคร') || lower.includes('รายชื่อ')) {
-        textProgressMsg = '⏳ **กำลังดึงรายชื่อลูกค้าใหม่ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨';
       } else {
-        textProgressMsg = '⏳ **กำลังสืบค้นและรวบรวมข้อมูลลูกค้าใหม่ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨';
+        textProgressMsg = '⏳ **กำลังสืบค้นและรวบรวมข้อมูลลูกค้าให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨';
       }
     } else {
       if (lower.includes('หมวดที่ 1') || lower.includes('หมวด 1')) {
@@ -411,8 +556,14 @@ export async function handleTelegramMessage(message) {
         textProgressMsg = '⏳ **กำลังวิเคราะห์สถิติวันที่มีปัญหาพุ่งสูงที่สุดให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 📅✨';
       } else if (lower.includes('ไหม') || lower.includes('หมายถึง') || lower.includes('มีใคร') || lower.includes('มีเคส')) {
         textProgressMsg = '⏳ **กำลังสืบค้นและตรวจสอบรายละเอียดปัญหาให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🔍✨';
-      } else if (lower.includes('เดือน') || lower.includes('ประจำเดือน') || lower.includes('เดือนนี้')) {
-        textProgressMsg = '⏳ **กำลังรวบรวมและสรุปข้อมูลปัญหาประจำเดือนสิงหาคม ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 📊✨';
+      } else if (isMonthlyBreakdown) {
+        textProgressMsg = '⏳ **กำลังรวบรวมและสรุปข้อมูลปัญหาแยกตามแต่ละเดือนให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 📊✨';
+      } else if (lower.includes('เดือนที่แล้ว') || lower.includes('เดือนก่อน')) {
+        textProgressMsg = `⏳ **กำลังรวบรวมและสรุปข้อมูลปัญหาประจำเดือน${lastMonthName} ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 📊✨`;
+      } else if (matchedMonth) {
+        textProgressMsg = `⏳ **กำลังรวบรวมและสรุปข้อมูลปัญหาประจำเดือน${matchedMonth.full} ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 📊✨`;
+      } else if (lower.includes('เดือนนี้') || lower.includes(curMonthName)) {
+        textProgressMsg = `⏳ **กำลังรวบรวมและสรุปข้อมูลปัญหาประจำเดือน${curMonthName} ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 📊✨`;
       } else if (lower.includes('วันนี้') || lower.includes('ประจำวัน')) {
         textProgressMsg = '⏳ **กำลังรวบรวมและสรุปข้อมูลปัญหาประจำวันนี้ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 📅✨';
       } else if (lower.includes('หนาแน่น') || lower.includes('ช่วงเวลา')) {
@@ -422,8 +573,16 @@ export async function handleTelegramMessage(message) {
       }
     }
 
+    if (isExec) {
+      if (!textProgressMsg) {
+        textProgressMsg = '👑⚡ **ผู้บริหารสอบถาม**: กำลังดึงข้อมูลและประมวลผลให้เป็นอันดับแรกค่ะ...\nรบกวนรอสักครู่นะคะ ✨';
+      } else {
+        textProgressMsg = '👑⚡ **ผู้บริหารสอบถาม**: ' + textProgressMsg.replace(/^⏳ \*\*/, '**');
+      }
+    }
+
     if (textProgressMsg) {
-      await sendTelegramMessage(chatId, textProgressMsg);
+      await sendMessage(chatId, textProgressMsg);
     }
   }
 
@@ -447,7 +606,8 @@ export async function handleTelegramMessage(message) {
       senderName,
       senderId,
       channel: isGroup ? 'telegram_group' : 'telegram_direct',
-      chatId
+      chatId,
+      isExecutive: isExec
     });
 
     // Format optional Inline Keyboard Buttons if attached
@@ -457,7 +617,7 @@ export async function handleTelegramMessage(message) {
     }
 
     // Send formatted response to Telegram
-    const result = await sendTelegramMessage(chatId, agentResponse.reply, 'Markdown', replyMarkup);
+    const result = await sendMessage(chatId, agentResponse.reply, 'Markdown', replyMarkup);
 
     // If Excel export requested (more than 20 items), generate and send Excel document
     if (agentResponse && agentResponse.excelExport && Array.isArray(agentResponse.excelExport.items) && agentResponse.excelExport.items.length > 0) {
@@ -471,8 +631,10 @@ export async function handleTelegramMessage(message) {
 
         if (excelFilePath && fs.existsSync(excelFilePath)) {
           const docCaption = `📎 **ไฟล์รายงานสถิติปัญหาฉบับเต็ม (.xlsx)**\nประจำ${agentResponse.excelExport.periodLabel || 'ปัจจุบัน'} (รวม **${agentResponse.excelExport.items.length} รายการ**)`;
-          await sendTelegramDocument(chatId, excelFilePath, docCaption);
-          console.log(`✅ Telegram Excel document sent successfully to chat ${chatId}: ${excelFilePath}`);
+          if (!message._dryRun) {
+            await sendTelegramDocument(chatId, excelFilePath, docCaption);
+            console.log(`✅ Telegram Excel document sent successfully to chat ${chatId}: ${excelFilePath}`);
+          }
         }
       } catch (excelErr) {
         console.error('Error sending Telegram Excel document:', excelErr.message);
@@ -482,11 +644,12 @@ export async function handleTelegramMessage(message) {
     return result;
   } catch (err) {
     console.error('Error processing Telegram message:', err.message);
-    await sendTelegramMessage(chatId, '⚠️ ขออภัยค่ะ เกิดข้อผิดพลาดในการประมวลผลคำสั่ง กรุณาลองใหม่อีกครั้งนะคะ');
+    await sendMessage(chatId, '⚠️ ขออภัยค่ะ เกิดข้อผิดพลาดในการประมวลผลคำสั่ง กรุณาลองใหม่อีกครั้งนะคะ');
     return { ok: false, error: err.message };
   } finally {
     clearInterval(typingInterval);
   }
+
 }
 
 /**

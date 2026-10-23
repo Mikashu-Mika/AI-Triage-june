@@ -1,22 +1,33 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 
-import { supabase, getPendingChats, updateTriageResult, updateChatIssues, authenticateCompany, initializeCompanyCategories, getCategories, authenticateUser, getAllUsers, createUser, updateUser, deleteUser, getAllCompanies, getAllCustomers, createCustomer, updateCustomer, deleteCustomer, ROLE_HIERARCHY } from './supabase.js';
+import { supabase, getPendingChats, updateTriageResult, updateChatIssues, authenticateCompany, initializeCompanyCategories, getCategories, authenticateUser, getAllUsers, createUser, updateUser, deleteUser, getAllCompanies, getAllCustomers, createCustomer, updateCustomer, deleteCustomer, updateCompanyPackage, ROLE_HIERARCHY } from './supabase.js';
 import { getEmbedding } from './ollama.js';
 import { runTriagePipeline, processSingleChat } from './triageService.js';
 import { extractTextFromImage } from './ocr.js';
 import { processAgentQuery } from './agentService.js';
 import { handleTelegramMessage, handleTelegramCallbackQuery, startTelegramPolling, initTelegramBot, setTelegramWebhook } from './telegramBot.js';
+import { enforceCompanyQuota, checkCompanyQuota, PACKAGE_CONFIG } from './quotaService.js';
+import { waitForInteractiveIdle, isInteractiveActive, getInteractiveCount, setTriageQueueStateGetter, getQueueMetrics } from './aiScheduler.js';
 
 dotenv.config();
 
 // Simple background triage queue to process requests sequentially and avoid overloading CPU/Ollama
 const triageQueue = [];
 let isQueueProcessing = false;
+let currentProcessingChatId = null;
+
+// Connect AI Scheduler with Triage Queue state for real-time monitoring & metrics
+setTriageQueueStateGetter(() => ({
+  queueLength: triageQueue.length,
+  currentChatId: currentProcessingChatId,
+  isProcessing: isQueueProcessing
+}));
 
 function enqueueTriage(chatId) {
   // Avoid duplicate entries in queue
@@ -28,41 +39,168 @@ function enqueueTriage(chatId) {
 
 async function processTriageQueue() {
   if (isQueueProcessing || triageQueue.length === 0) return;
+
+  // Priority Check: If any Telegram query is active or waiting, PAUSE background triage!
+  if (isInteractiveActive()) {
+    console.log(`⏸️ [Priority Queue] Telegram task is active (${getInteractiveCount()} pending). Pausing triage queue...`);
+    await waitForInteractiveIdle('Triage Queue');
+    console.log(`▶️ [Priority Queue] Resuming triage queue after Telegram completed.`);
+  }
+
+  if (triageQueue.length === 0) return;
+
   isQueueProcessing = true;
 
   const nextChatId = triageQueue.shift();
+  currentProcessingChatId = nextChatId;
   console.log(`[Queue] Starting background triage for chat ${nextChatId} (Remaining in queue: ${triageQueue.length})`);
   try {
     await processSingleChat(nextChatId);
   } catch (err) {
     console.error(`[Queue] Background triage failed for ${nextChatId}:`, err.message);
   } finally {
+    currentProcessingChatId = null;
     isQueueProcessing = false;
     processTriageQueue();
   }
 }
 
-// Auto-enqueue any orphaned pending chats OR chats missing category_id from database on startup
-(async () => {
-  try {
-    const { data: orphaned } = await supabase
-      .from('chats')
-      .select('id')
-      .or('status.eq.pending,category_id.is.null');
+// Background scanner to auto-enqueue any un-triaged or incomplete chats from database
+let isScanningPending = false;
+async function scanAndEnqueuePendingChats(isStartup = false) {
+  // If Telegram query is currently active or waiting, skip background scan to yield CPU/DB
+  if (isInteractiveActive()) {
+    console.log(`⏸️ [Priority Scanner] Telegram query active. Skipping background scan.`);
+    return;
+  }
 
-    if (orphaned && orphaned.length > 0) {
-      console.log(`[Queue] Found ${orphaned.length} orphaned/un-triaged chats in database on startup. Auto-enqueueing...`);
-      orphaned.forEach(c => enqueueTriage(c.id));
+  if (isScanningPending) return;
+  isScanningPending = true;
+  try {
+    const { data: orphaned, error: err1 } = await supabase
+      .from('chats')
+      .select('id, status, embedding, summary, category_id, chat_issues(id, recommended_reply)')
+      .or('status.eq.pending,embedding.is.null')
+      .neq('status', 'quota_exceeded')
+      .order('created_at', { ascending: false })
+      .limit(50);
+
+    if (err1) throw err1;
+
+    // Fast-path: If a chat already has summary, category_id, and AI sentence-level chat_issues (empty sub-issue recommended_reply),
+    // it only needs embedding and status='completed' (fast path: <1s instead of 60s LLM re-triage)
+    const trulyUnprocessed = [];
+    for (const chat of (orphaned || [])) {
+      const hasValidAiIssues = Array.isArray(chat.chat_issues) && chat.chat_issues.length > 0 && chat.chat_issues.every(i => !i.recommended_reply);
+      if (chat.summary && chat.category_id && hasValidAiIssues) {
+        if (!chat.embedding) {
+          getEmbedding(chat.summary).then(emb => {
+            supabase.from('chats').update({ status: 'completed', embedding: emb }).eq('id', chat.id).then();
+          }).catch(() => {
+            supabase.from('chats').update({ status: 'completed' }).eq('id', chat.id).then();
+          });
+        } else if (chat.status === 'pending') {
+          supabase.from('chats').update({ status: 'completed' }).eq('id', chat.id).then();
+        }
+      } else {
+        trulyUnprocessed.push(chat.id);
+      }
+    }
+
+    // Also check recent chats that have 0 issues in chat_issues, no summary, or mock non-empty sub-issue recommended_reply
+    const { data: allRecent, error: err2 } = await supabase
+      .from('chats')
+      .select('id, summary, chat_issues(id, recommended_reply)')
+      .neq('status', 'quota_exceeded')
+      .order('created_at', { ascending: false })
+      .limit(30);
+
+    if (err2) throw err2;
+
+    const missingIssues = (allRecent || []).filter(c => (
+      !c.summary ||
+      !c.chat_issues ||
+      c.chat_issues.length === 0 ||
+      c.chat_issues.some(i => i.recommended_reply && i.recommended_reply !== '')
+    ));
+    const toEnqueue = new Set([
+      ...trulyUnprocessed,
+      ...missingIssues.map(c => c.id)
+    ]);
+
+    // Exclude the chat currently being processed and chats already waiting in queue
+    const newItems = Array.from(toEnqueue).filter(id => id !== currentProcessingChatId && !triageQueue.includes(id));
+
+    if (newItems.length > 0) {
+      console.log(`[Queue] ${isStartup ? 'Startup scan' : 'Background auto-scanner'} found ${newItems.length} un-triaged chats in database. Auto-enqueueing...`);
+      newItems.forEach(id => enqueueTriage(id));
     }
   } catch (err) {
-    console.error('Failed to auto-enqueue un-triaged chats on startup:', err.message);
+    if (isStartup) {
+      console.error('Failed to auto-enqueue un-triaged chats on startup:', err.message);
+    }
+  } finally {
+    isScanningPending = false;
   }
-})();
+}
+
+// 1. Initial scan on server startup
+scanAndEnqueuePendingChats(true);
+
+// 2. Continuous background polling safeguard (every 10 seconds)
+setInterval(() => {
+  scanAndEnqueuePendingChats(false);
+}, 10000);
+
+// 3. Supabase Realtime event listener for instant 0-second detection
+function initRealtimeListener() {
+  try {
+    supabase
+      .channel('chats-realtime-listener')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'chats' },
+        (payload) => {
+          const newChat = payload.new;
+          if (newChat && newChat.id) {
+            console.log(`⚡ [Realtime] New chat inserted (${newChat.id}). Auto-enqueueing for AI Triage...`);
+            enqueueTriage(newChat.id);
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'chats' },
+        (payload) => {
+          const updated = payload.new;
+          if (updated && updated.id && (updated.status === 'pending' || !updated.embedding)) {
+            if (updated.id !== currentProcessingChatId && !triageQueue.includes(updated.id)) {
+              console.log(`⚡ [Realtime] Chat ${updated.id} status is pending/incomplete. Auto-enqueueing...`);
+              enqueueTriage(updated.id);
+            }
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log(`📡 [Realtime] Supabase chat subscription status: ${status}`);
+      });
+  } catch (err) {
+    console.warn('⚠️ [Realtime] Failed to initialize Supabase realtime listener:', err.message);
+  }
+}
+
+initRealtimeListener();
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(express.static('public'));
+
+// Serve web UI for package and quota management
+app.get('/packages', (req, res) => {
+  res.sendFile(path.resolve('public/packages.html'));
+});
 
 const PORT = process.env.PORT || 4000;
 
@@ -85,6 +223,80 @@ async function authCompany(req, res, next) {
   } catch (err) {
     res.status(500).json({ error: 'Internal Server Error during authentication: ' + err.message });
   }
+}
+
+const ADMIN_API_KEY = process.env.ADMIN_API_KEY || 'sift-admin-secret-2026';
+
+// Middleware: Authenticate admin using X-Admin-Key or user credentials (system_admin / super_admin)
+async function authAdminOrKey(req, res, next) {
+  const adminKey = req.headers['x-admin-key'] || req.query.admin_key || req.body?.admin_key;
+  if (adminKey && adminKey === ADMIN_API_KEY) {
+    req.isAdmin = true;
+    return next();
+  }
+
+  // Fallback to user credentials if provided
+  const email = req.headers['x-user-email'];
+  const password = req.headers['x-user-password'];
+  if (email && password) {
+    try {
+      const user = await authenticateUser(email, password);
+      if (user && (user.role === 'system_admin' || user.role === 'super_admin')) {
+        req.user = user;
+        req.isAdmin = true;
+        return next();
+      }
+      return res.status(403).json({ error: 'Forbidden: Admin privileges required.' });
+    } catch (err) {
+      return res.status(500).json({ error: 'Auth error: ' + err.message });
+    }
+  }
+
+  return res.status(401).json({ error: 'Unauthorized: Admin authentication required (X-Admin-Key or admin credentials).' });
+}
+
+// Middleware: Authenticate either Company (Client ID/Secret) or Admin (X-Admin-Key / User credentials)
+async function authCompanyOrAdmin(req, res, next) {
+  const adminKey = req.headers['x-admin-key'] || req.query.admin_key || req.body?.admin_key;
+  if (adminKey && adminKey === ADMIN_API_KEY) {
+    req.isAdmin = true;
+    req.company = { id: req.body?.company_id || req.query?.company_id || null, name: 'Admin Override' };
+    return next();
+  }
+
+  const email = req.headers['x-user-email'];
+  const password = req.headers['x-user-password'];
+  if (email && password) {
+    try {
+      const user = await authenticateUser(email, password);
+      if (user) {
+        req.user = user;
+        req.company = { id: user.company_id, name: user.name };
+        return next();
+      }
+      return res.status(401).json({ error: 'Unauthorized: Invalid email or password.' });
+    } catch (err) {
+      return res.status(500).json({ error: 'Auth error: ' + err.message });
+    }
+  }
+
+  const clientId = req.headers['x-client-id'] || req.body?.client_id || req.query?.client_id;
+  const clientSecret = req.headers['x-client-secret'] || req.body?.client_secret || req.query?.client_secret;
+
+  if (clientId && clientSecret) {
+    try {
+      const company = await authenticateCompany(clientId, clientSecret);
+      if (company) {
+        req.company = company;
+        return next();
+      }
+      return res.status(401).json({ error: 'Unauthorized: Invalid Client ID or Client Secret.' });
+    } catch (err) {
+      return res.status(500).json({ error: 'Authentication error: ' + err.message });
+    }
+  }
+
+  return res.status(401).json({ error: 'Unauthorized: Missing company credentials or Admin key.' });
 }
 
 // Setup MCP Server instance
@@ -121,14 +333,18 @@ mcpServer.setRequestHandler(ListToolsRequestSchema, async () => {
             id: { type: 'string', description: 'รหัส ID ของแชต' },
             category_id: { type: 'string', description: 'รหัสหมวดหมู่แชต (เช่น deposit_withdrawal, login_issue)' },
             priority: { type: 'string', description: 'ระดับความสำคัญ (low, medium, high, urgent)' },
-            summary: { type: 'string', description: 'บทสรุปความต้องการของลูกค้าสั้นๆ เป็นภาษาไทย' }
+            summary: { type: 'string', description: 'บทสรุปความต้องการของลูกค้าสั้นๆ เป็นภาษาไทย' },
+            detected_issues: {
+              type: 'array',
+              description: 'รายการประเด็นปัญหาย่อยที่วิเคราะห์ได้จาก Qwen 2.5 14B'
+            }
           },
           required: ['id', 'category_id', 'priority', 'summary']
         }
       },
       {
         name: 'run_triage_pipeline',
-        description: 'รันกระบวนการคัดแยกแชตค้างประมวลผลทั้งหมดอัตโนมัติ ด้วย qwen2.5:14b และ bge-m3',
+        description: 'รันกระบวนการคัดแยกแชตค้างประมวลผลทั้งหมดอัตโนมัติ ด้วย qwen2.5:14b (วิเคราะห์) และ bge-m3 (embedding)',
         inputSchema: {
           type: 'object',
           properties: {}
@@ -151,7 +367,7 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
     } 
     
     if (name === 'save_triage_result') {
-      const { id, category_id, priority, summary } = args;
+      const { id, category_id, priority, summary, detected_issues } = args;
       const embedding = await getEmbedding(summary);
       const updated = await updateTriageResult(id, {
         category_id,
@@ -159,6 +375,9 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
         summary,
         embedding
       });
+      if (detected_issues && Array.isArray(detected_issues) && detected_issues.length > 0) {
+        await saveChatIssues(id, detected_issues);
+      }
       return {
         content: [{ type: 'text', text: JSON.stringify({ message: 'บันทึกผลสำเร็จ', data: updated }, null, 2) }]
       };
@@ -232,31 +451,57 @@ app.get('/health', async (req, res) => {
   res.json(status);
 });
 
-// REST API: AI Interactive Agent Chat (Process Thai questions/commands)
-app.post('/api/agent/chat', async (req, res) => {
+// REST API: AI Interactive Agent Chat (Process Thai questions/commands) - Protected
+app.post('/api/agent/chat', authCompanyOrAdmin, async (req, res) => {
   const { query, company_id } = req.body;
   if (!query) {
     return res.status(400).json({ error: 'Missing parameter: query is required.' });
   }
+  // Enforce company boundary: non-admins cannot query other companies
+  const targetCompanyId = req.isAdmin ? (company_id || req.company?.id) : req.company?.id;
   try {
-    const response = await processAgentQuery(query, company_id);
+    const response = await processAgentQuery(query, targetCompanyId);
     res.json(response);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// REST API: Telegram Bot Webhook Endpoint
+// REST API: Telegram Bot Webhook Endpoint (Secured & Consolidated)
 app.post('/api/telegram/webhook', async (req, res) => {
-  try {
-    const update = req.body;
-    if (update && update.message) {
-      handleTelegramMessage(update.message).catch(err => console.error('Telegram Webhook error:', err));
+  // Webhook Secret Token Verification if TELEGRAM_WEBHOOK_SECRET is configured
+  const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET;
+  if (webhookSecret) {
+    const headerToken = req.headers['x-telegram-bot-api-secret-token'];
+    if (headerToken !== webhookSecret) {
+      console.warn('🔒 [Security Alert] Unauthorized Telegram Webhook call rejected: invalid secret token.');
+      return res.status(403).json({ error: 'Forbidden: Invalid webhook secret token.' });
     }
-    res.status(200).send('OK');
-  } catch (error) {
-    res.status(500).json({ error: error.message });
   }
+
+  res.status(200).send('OK'); // Acknowledge Telegram Webhook instantly to prevent timeouts
+
+  const update = req.body;
+  if (!update || typeof update !== 'object') return;
+
+  try {
+    if (update.message) {
+      handleTelegramMessage(update.message).catch(err => {
+        console.error('Error in Telegram Webhook Message Handler:', err.message);
+      });
+    } else if (update.callback_query) {
+      handleTelegramCallbackQuery(update.callback_query).catch(err => {
+        console.error('Error in Telegram Callback Query Handler:', err.message);
+      });
+    }
+  } catch (err) {
+    console.error('Error dispatching Telegram webhook:', err.message);
+  }
+});
+
+// REST API: Live Priority Queue Status & Monitor (For Dashboard & QA Testers)
+app.get('/api/queue/status', (req, res) => {
+  res.json(getQueueMetrics());
 });
 
 // REST API: Get pending chats for authenticated company
@@ -270,7 +515,7 @@ app.get('/api/chats/pending', authCompany, async (req, res) => {
 });
 
 // REST API: Trigger batch triage for authenticated company
-app.post('/api/triage/run', authCompany, async (req, res) => {
+app.post('/api/triage/run', authCompany, enforceCompanyQuota, async (req, res) => {
   try {
     const report = await runTriagePipeline(req.company.id);
     res.json(report);
@@ -279,8 +524,8 @@ app.post('/api/triage/run', authCompany, async (req, res) => {
   }
 });
 
-// REST API: Save triage result manually
-app.post('/api/triage/save', async (req, res) => {
+// REST API: Save triage result manually - Protected
+app.post('/api/triage/save', authCompanyOrAdmin, async (req, res) => {
   const { id, category_id, priority, summary } = req.body;
   if (!id || !category_id || !priority || !summary) {
     return res.status(400).json({ error: 'Missing parameters: id, category_id, priority, summary' });
@@ -295,7 +540,7 @@ app.post('/api/triage/save', async (req, res) => {
 });
 
 // REST API: Ingest a new chat session from live chat (Real-time Seam) - Authenticated
-app.post('/api/chats/ingest', authCompany, async (req, res) => {
+app.post('/api/chats/ingest', authCompany, enforceCompanyQuota, async (req, res) => {
   const { id, customer_id, conversation } = req.body;
   if (!id || !customer_id || !conversation) {
     return res.status(400).json({ error: 'Missing parameters: id, customer_id, conversation' });
@@ -340,6 +585,58 @@ app.post('/api/chats/ingest', authCompany, async (req, res) => {
 
     res.json({ message: 'Chat ingested successfully and queued for real-time AI Triage', data });
   } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// REST API: Trigger on-demand AI Triage for a single chat (Dynamic Real-time Triage) - Protected
+app.post('/api/chats/:id/triage', authCompanyOrAdmin, async (req, res) => {
+  const { id } = req.params;
+  if (!id) {
+    return res.status(400).json({ error: 'Missing parameter: id is required' });
+  }
+  try {
+    // Check if chat exists and enforce company boundary
+    const { data: chatRec } = await supabase.from('chats').select('company_id').eq('id', id).maybeSingle();
+    if (!chatRec) {
+      return res.status(404).json({ error: `Chat ${id} not found.` });
+    }
+
+    if (chatRec.company_id && !req.isAdmin && req.company?.id && chatRec.company_id !== req.company.id) {
+      return res.status(403).json({ error: 'Forbidden: Cannot trigger triage on another company\'s chat.' });
+    }
+
+    // Check if chat's company has exceeded quota before triggering
+    if (chatRec.company_id) {
+      const quota = await checkCompanyQuota(chatRec.company_id);
+      if (quota.isExceeded) {
+        return res.status(429).json({
+          error: 'โควต้าการใช้งานต่อเดือนครบแล้ว (Monthly Chat Quota Exceeded)',
+          message: `บริษัท ${quota.companyName} ใช้โควต้าแชตครบกำหนดของแพ็กเกจ ${quota.packageName} (${quota.monthlyLimit?.toLocaleString()} แชต) แล้วในรอบนี้`,
+          quota
+        });
+      }
+    }
+
+    console.log(`[API] Triggering on-demand triage for chat: ${id}...`);
+    await processSingleChat(id);
+
+    // Fetch updated chat and relational issues
+    const { data: updatedChat, error: chatErr } = await supabase
+      .from('chats')
+      .select('*, chat_issues(*)')
+      .eq('id', id)
+      .single();
+
+    if (chatErr) throw chatErr;
+
+    res.json({
+      message: `Chat ${id} triaged successfully by AI (Qwen 2.5 + BGE-M3)`,
+      chat: updatedChat,
+      issues: updatedChat.chat_issues || []
+    });
+  } catch (error) {
+    console.error(`[API] On-demand triage failed for ${id}:`, error.message);
     res.status(500).json({ error: error.message });
   }
 });
@@ -464,7 +761,7 @@ app.get('/api/categories', authCompany, async (req, res) => {
 
 // POST create a new category (isolated to the company)
 app.post('/api/categories', authCompany, async (req, res) => {
-  const { id, name, description } = req.body;
+  const { id, name, name_en, description } = req.body;
   if (!id || !name || !description) {
     return res.status(400).json({ error: 'Missing parameters: id, name, description' });
   }
@@ -475,15 +772,20 @@ app.post('/api/categories', authCompany, async (req, res) => {
     // Prefix ID with company_id to keep it globally unique
     const uniqueId = `${req.company.id}:${id}`;
 
+    const insertPayload = {
+      id: uniqueId,
+      name,
+      description,
+      embedding,
+      company_id: req.company.id
+    };
+    if (name_en) {
+      insertPayload.name_en = name_en;
+    }
+
     const { data, error } = await supabase
       .from('categories')
-      .insert({
-        id: uniqueId,
-        name,
-        description,
-        embedding,
-        company_id: req.company.id
-      })
+      .insert(insertPayload)
       .select()
       .single();
 
@@ -497,7 +799,7 @@ app.post('/api/categories', authCompany, async (req, res) => {
 // PUT update an existing category
 app.put('/api/categories/:id', authCompany, async (req, res) => {
   const { id } = req.params;
-  const { name, description } = req.body;
+  const { name, name_en, description } = req.body;
   
   if (!name || !description) {
     return res.status(400).json({ error: 'Missing parameters: name, description' });
@@ -524,6 +826,9 @@ app.put('/api/categories/:id', authCompany, async (req, res) => {
 
     // 3. Update the category
     const updateData = { name, description };
+    if (name_en !== undefined) {
+      updateData.name_en = name_en;
+    }
     if (embedding) {
       updateData.embedding = embedding;
     }
@@ -606,6 +911,116 @@ app.post('/api/companies/register', async (req, res) => {
 });
 
 // ==========================================
+// REST API: Subscription Packages & Quotas
+// ==========================================
+
+// Get all subscription packages & pricing specs (Partner & Standard)
+app.get('/api/packages', (req, res) => {
+  res.json({
+    message: 'Sift AI Subscription Packages',
+    packages: PACKAGE_CONFIG
+  });
+});
+
+// Get all companies with real-time quota and package details (Sanitized, NO client_secret)
+app.get('/api/companies', async (req, res) => {
+  try {
+    const companies = await getAllCompanies(false);
+    const withQuotas = await Promise.all(companies.map(async (c) => {
+      try {
+        const quota = await checkCompanyQuota(c.id);
+        return {
+          id: c.id,
+          name: c.name,
+          domain: c.domain,
+          customer_type: c.customer_type,
+          package_tier: c.package_tier,
+          custom_quota: c.custom_quota,
+          package_status: c.package_status,
+          telegram_group_limit: c.telegram_group_limit,
+          billing_cycle_anchor: c.billing_cycle_anchor,
+          created_at: c.created_at,
+          quota
+        };
+      } catch (e) {
+        return {
+          id: c.id,
+          name: c.name,
+          domain: c.domain,
+          customer_type: c.customer_type,
+          package_tier: c.package_tier,
+          custom_quota: c.custom_quota,
+          package_status: c.package_status,
+          telegram_group_limit: c.telegram_group_limit,
+          billing_cycle_anchor: c.billing_cycle_anchor,
+          created_at: c.created_at,
+          quota: null
+        };
+      }
+    }));
+    res.json(withQuotas);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get current authenticated company quota and usage
+app.get('/api/quota/status', authCompany, async (req, res) => {
+  try {
+    const quota = await checkCompanyQuota(req.company.id);
+    res.json(quota);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get quota for specific company (Protected: Admin or own company)
+app.get('/api/companies/:id/quota', authCompanyOrAdmin, async (req, res) => {
+  if (!req.isAdmin && req.company?.id && req.company.id !== req.params.id) {
+    return res.status(403).json({ error: 'Forbidden: Cannot view another company\'s quota.' });
+  }
+  try {
+    const quota = await checkCompanyQuota(req.params.id);
+    res.json(quota);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Update company package & quota settings (Admin only - Protected with X-Admin-Key or Admin session)
+app.put('/api/companies/:id/package', authAdminOrKey, async (req, res) => {
+  const { id } = req.params;
+  const { customer_type, package_tier, custom_quota, package_status, billing_cycle_anchor, telegram_group_limit } = req.body;
+  
+  if (customer_type && !['partner', 'standard'].includes(customer_type)) {
+    return res.status(400).json({ error: 'Invalid customer_type. Must be "partner" or "standard"' });
+  }
+  if (package_tier && !['starter', 'pro', 'enterprise', 'custom'].includes(package_tier)) {
+    return res.status(400).json({ error: 'Invalid package_tier. Must be "starter", "pro", "enterprise", or "custom"' });
+  }
+
+  try {
+    const updated = await updateCompanyPackage(id, {
+      customer_type,
+      package_tier,
+      custom_quota,
+      package_status,
+      billing_cycle_anchor,
+      telegram_group_limit
+    });
+
+    const quota = await checkCompanyQuota(id);
+    res.json({
+      message: 'Company package updated successfully',
+      company: updated,
+      quota
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// ==========================================
 // REST API: Optimized Analytics Stats Endpoints
 // ==========================================
 
@@ -657,6 +1072,8 @@ app.get('/api/stats/categories', authCompany, async (req, res) => {
       return {
         id: cat.id,
         name: cat.name,
+        name_th: cat.name_th || cat.name,
+        name_en: cat.name_en,
         count
       };
     });
@@ -874,10 +1291,10 @@ app.delete('/api/users/:id', authUser, requireRole('super_admin'), async (req, r
   }
 });
 
-// GET /api/companies - List all companies (system_admin only)
-app.get('/api/companies', authUser, requireRole('system_admin'), async (req, res) => {
+// GET /api/companies - List all companies with full details (system_admin only)
+app.get('/api/admin/companies', authUser, requireRole('system_admin'), async (req, res) => {
   try {
-    const companies = await getAllCompanies();
+    const companies = await getAllCompanies(true);
     res.json(companies);
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -885,34 +1302,36 @@ app.get('/api/companies', authUser, requireRole('system_admin'), async (req, res
 });
 
 // ==========================================
-// CUSTOMER MANAGEMENT REST API ENDPOINTS
+// CUSTOMER MANAGEMENT REST API ENDPOINTS (Protected)
 // ==========================================
 
-// GET /api/customers - List all customer members
-app.get('/api/customers', async (req, res) => {
+// GET /api/customers - List all customer members (Protected: own company only)
+app.get('/api/customers', authCompanyOrAdmin, async (req, res) => {
   try {
-    const companyId = req.query.company_id || undefined;
-    const customers = await getAllCustomers(companyId);
+    const targetCompanyId = req.isAdmin ? (req.query.company_id || undefined) : req.company?.id;
+    const customers = await getAllCustomers(targetCompanyId);
     res.json(customers);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// POST /api/customers - Create a new customer member (for Postman testing & UI)
-app.post('/api/customers', async (req, res) => {
+// POST /api/customers - Create a new customer member (Protected: own company only)
+app.post('/api/customers', authCompanyOrAdmin, async (req, res) => {
   try {
     const { id, name, email, phone, company_id } = req.body;
     if (!name) {
       return res.status(400).json({ error: 'กรุณาระบุชื่อลูกค้า (name)' });
     }
 
+    const targetCompanyId = req.isAdmin ? (company_id || req.company?.id) : req.company?.id;
+
     const newCustomer = await createCustomer({
       id,
       name,
       email,
       phone,
-      company_id
+      company_id: targetCompanyId
     });
 
     res.status(201).json({
@@ -924,10 +1343,19 @@ app.post('/api/customers', async (req, res) => {
   }
 });
 
-// PUT /api/customers/:id - Update an existing customer
-app.put('/api/customers/:id', async (req, res) => {
+// PUT /api/customers/:id - Update an existing customer (Protected: own company only)
+app.put('/api/customers/:id', authCompanyOrAdmin, async (req, res) => {
   try {
     const { id } = req.params;
+
+    // Verify ownership if not admin
+    if (!req.isAdmin && req.company?.id) {
+      const { data: existing } = await supabase.from('customers').select('company_id').eq('id', id).maybeSingle();
+      if (existing && existing.company_id && existing.company_id !== req.company.id) {
+        return res.status(403).json({ error: 'Forbidden: Cannot edit another company\'s customer.' });
+      }
+    }
+
     const updated = await updateCustomer(id, req.body);
     res.json({ message: 'อัปเดตข้อมูลลูกค้าสำเร็จ', customer: updated });
   } catch (error) {
@@ -935,32 +1363,23 @@ app.put('/api/customers/:id', async (req, res) => {
   }
 });
 
-// DELETE /api/customers/:id - Delete a customer
-app.delete('/api/customers/:id', async (req, res) => {
+// DELETE /api/customers/:id - Delete a customer (Protected: own company only)
+app.delete('/api/customers/:id', authCompanyOrAdmin, async (req, res) => {
   try {
     const { id } = req.params;
+
+    // Verify ownership if not admin
+    if (!req.isAdmin && req.company?.id) {
+      const { data: existing } = await supabase.from('customers').select('company_id').eq('id', id).maybeSingle();
+      if (existing && existing.company_id && existing.company_id !== req.company.id) {
+        return res.status(403).json({ error: 'Forbidden: Cannot delete another company\'s customer.' });
+      }
+    }
+
     const deleted = await deleteCustomer(id);
     res.json({ message: 'ลบข้อมูลลูกค้าสำเร็จ', customer: deleted });
   } catch (error) {
     res.status(500).json({ error: error.message });
-  }
-});
-
-// POST /api/telegram/webhook - Telegram Webhook Receiver Endpoint
-app.post('/api/telegram/webhook', (req, res) => {
-  res.status(200).send('OK'); // Acknowledge Telegram Webhook instantly to prevent timeouts
-  const update = req.body;
-  console.log('📥 Telegram Webhook Payload Received:', JSON.stringify(update));
-  if (update) {
-    if (update.message) {
-      handleTelegramMessage(update.message).catch(err => {
-        console.error('Error in Telegram Webhook Handler:', err.message);
-      });
-    } else if (update.callback_query) {
-      handleTelegramCallbackQuery(update.callback_query).catch(err => {
-        console.error('Error in Telegram Callback Query Handler:', err.message);
-      });
-    }
   }
 });
 

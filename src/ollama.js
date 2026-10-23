@@ -118,7 +118,7 @@ const MODEL_EMBEDDING = process.env.MODEL_EMBEDDING || 'bge-m3';
  * @param {Array<{id: string, name: string, description: string}>} availableCategories - Dynamic categories list.
  * @returns {Promise<{category_id: string, priority: string, summary: string}>}
  */
-export async function generateTriage(conversation, availableCategories = [], trainingExamples = []) {
+export async function generateTriage(conversation, availableCategories = [], trainingExamples = [], segmentedClauses = []) {
   // Build dynamic categories text for LLM prompt
   const categoriesPromptList = availableCategories.map(
     c => `- "${c.id}": ${c.name} ${c.description ? `(${c.description})` : ''}`
@@ -132,161 +132,212 @@ Expected Output JSON:
 ${ex.expected_output}`).join('\n\n')}\n`;
   }
 
-  const systemPrompt = `You are an AI Customer Intelligence Platform. Analyze the customer chat conversation and respond with a JSON object.
-Do NOT include any markdown code blocks, explanation, or extra characters. Only output the JSON object.
+  const clausesBlock = Array.isArray(segmentedClauses) && segmentedClauses.length > 0
+    ? `\nPRE-SEGMENTED ATOMIC CLAUSES (DISCOURSE TOKENIZER OUTPUT - CLASSIFY EACH CLAUSE AGAINST AVAILABLE CATEGORIES):\n${segmentedClauses.map((cl, idx) => `${idx + 1}. "${cl}"`).join('\n')}\n`
+    : '';
 
-CRITICAL LANGUAGE RULE: ALL text output in the JSON (summary, recommended_reply, root_cause, etc.) MUST be in Thai language ONLY. Do NOT use Chinese, English, or any other language in the output values. If you are unsure how to express something, use Thai.
+  const systemPrompt = `You are an AI Customer Intelligence & Triage Platform.
+Analyze the customer chat conversation and respond with a strictly formatted JSON object.
+Do NOT include any markdown code blocks, explanation, or extra characters. Only output the raw JSON object.
 
-CRITICAL DIRECTIVE ON FEW-SHOT EXAMPLES:
-You MUST strictly align your output categorization with the FEW-SHOT TRAINING EXAMPLES below. If the input conversation matches or is highly similar to any training example, you MUST copy the category_id, intent, priority, and department directly from that training example's expected output.
+CRITICAL LANGUAGE RULE: ALL text output in the JSON (summary, recommended_reply, root_cause, ai_recommendation, sub_category, problem_summary) MUST be in Thai language ONLY. Do NOT use Chinese, English, or any other language in the output text values.
 
 ${examplesPrompt}
-CRITICAL CLASSIFICATION RULE (CRITERIA FOR PROBLEMS VS INQUIRIES):
-You must strictly distinguish between actual system/financial problems (errors, delays, bugs, failures) and normal transactions or FAQ inquiries.
+CRITICAL DIRECTIVE ON CATEGORIES (100% DYNAMIC LOADING):
+You must classify customer statements strictly based on the AVAILABLE CATEGORIES provided below. Compare the customer's issues against the Name and Description of each category:
+${categoriesPromptList || '- "other": เรื่องอื่นๆ (สอบถามทั่วไป/ไม่ใช่ปัญหาของระบบ)'}
 
-CRITICAL RULE ON SYSTEM BLOCKERS VS GENERAL TRANSACTIONS (PREVENT KEYWORD HIJACKS):
-- A system/technical blocker is any case where the customer reports they cannot view, load, access, click, or play (e.g., "ดูไม่ได้" (cannot watch/stream/load), "เข้าไม่ได้" (cannot login/access), "กดไม่ได้" (cannot click), "จอเขียว/จอขาว" (blank/color screen), "ค้าง" (frozen/stuck), "ช้า" (slow/lag)).
-- A transaction or inquiry is any case where the customer asks to perform a normal operation (e.g., asking for bank details "ขอบช", asking for a bonus "ขอโบนัส", asking for a promotion, asking for a link).
-- If a conversation contains BOTH a system blocker and a transaction/inquiry, the primary problem (at the top level of the JSON) is ALWAYS the system blocker! You MUST classify the chat under the category representing that specific blocker (such as the loading, rendering, or access issue categories available in the list), and NOT under the transaction/inquiry categories.
-- However, in the "detected_issues" array, you MUST still list the inquiries/requests as separate items under their respective categories (e.g. "other" for general requests/inquiries, "promo_bonus" for claiming promotions, etc.). Do NOT omit them from the "detected_issues" array just because they are not technical blockers.
-- Set resolution to "Pending", and priority to "medium" or "high" because the user is blocked from using the system.
+CORE PRINCIPLE 1: ATOMIC MULTI-ISSUE EXTRACTION (STRICT CATEGORY SEPARATION)
+- Break down the customer conversation into distinct statements/clauses (use the PRE-SEGMENTED ATOMIC CLAUSES when provided).
+- If a sentence contains connectors (such as "ทั้งที่...", "และ...", "แต่...", "แถม...") that describe two different symptoms matching DIFFERENT categories in AVAILABLE CATEGORIES (e.g. payment failure vs money already deducted, or page freeze vs missing confirmation email), they MUST be separated into distinct objects in "detected_issues".
+- NEVER omit closing complaint/dissatisfaction/service improvement statements (classify them under the matching complaint/feedback category in AVAILABLE CATEGORIES).
+- STRICT CATEGORY PURITY: 1 issue object in "detected_issues" can ONLY contain statements that belong to the EXACT SAME category_id.
+- NEVER combine sentences belonging to DIFFERENT categories into the same issue object!
+- Do NOT join sentences across different categories with " / ".
+- NEVER EXTRACT INCOMPLETE NOUN PHRASES (ห้ามสร้างประเด็นจากคำนามลอยๆ ที่ไม่มีกริยาบอกปัญหา):
+  * Standalone phrases like "การส่งอีเมลยืนยัน", "และการเข้าสู่ระบบ", "ขั้นตอนสมัครสมาชิก" that lack a predicate (no verb indicating a failure or broken feature) MUST NEVER be extracted as independent issues.
+  * When a customer writes an enumerated suggestion/request: "อยากให้ตรวจสอบขั้นตอนสมัครสมาชิก การส่งอีเมลยืนยัน และการเข้าสู่ระบบ พร้อมปรับปรุงข้อความแจ้งข้อผิดพลาดให้ลูกค้าเข้าใจว่าต้องทำอะไรต่อ", keep this ENTIRE statement as a SINGLE issue under "feedback_complaint"! Do NOT break the list items into separate issues!
+- Example 1 (Web Browsing, Freeze, UI Rendering & Lag):
+  - "ผมกำลังจะซื้อน้ำหอมครับ" -> Category "other" (Context / general action, urgency: "low", Dept: Support)
+  - "หน้าเว็บเปิดได้แต่โหลดรายละเอียดกลิ่นนานมาก" -> Category "page_load_freeze" (Loading delay, urgency: "medium", Dept: Support)
+  - "รูปสินค้าบางรูปไม่ขึ้นครับ" -> Category "ui_rendering_issue" (Graphics / image rendering issue, urgency: "low", Dept: Support)
+  - "กดเลือกขนาด 50ml แล้วปุ่มไม่ตอบสนอง" -> Category "interaction_lag" (Button response lag, urgency: "medium", Dept: Support)
+  - "พอกดหลายครั้งระบบถึงเลือกให้" -> Category "interaction_lag" (Button response lag / delay, urgency: "medium", Dept: Support)
+  - "ผมเพิ่มลงตะกร้าแล้วจำนวนสินค้าไม่อัปเดตทันที" -> Category "page_load_freeze" (Data update / cart freeze, urgency: "medium", Dept: Support)
+  - "ต้องรีเฟรชหน้าถึงจะเห็นจำนวนที่ถูกต้อง" -> Category "ui_rendering_issue" (Display / UI rendering update, urgency: "low", Dept: Support)
 
-CRITICAL RULE ON SEMANTIC PROBLEM GROUPING & DISTINCT CATEGORIES (KRU SAM LOGIC):
-- Do NOT classify duplicate sentences of the SAME issue blindly line-by-line (e.g., group "ฝากเงินไปแล้ว", "เงินถูกหักแล้ว", "ยอดเงินยังไม่เข้า", "รายการแจ้งว่าสำเร็จ" into 1 single issue "ฝากเงินแล้วยอดไม่เข้าระบบ" under category_id "deposit_withdrawal").
-- HOWEVER, every DIFFERENT category problem reported in the chat MUST be extracted as its own separate issue object in "detected_issues"! NEVER combine two different categories into a single issue object!
-- For example:
-  - "ฝากเงินแล้วยอดไม่เข้า" -> category_id: "deposit_withdrawal" (Primary Issue)
-  - "กดรีเฟรชแล้วหน้าเว็บค้าง" -> category_id: "page_load_freeze" (Secondary Issue A)
-  - "ระบบขึ้น Service Unavailable" -> category_id: "api_error" (Secondary Issue B)
-- When a chat contains these 3 distinct problems, you MUST output EXACTLY 3 separate issues in "detected_issues" covering "deposit_withdrawal", "page_load_freeze", and "api_error".
+- Example 2 (Registration, Lag, Alerts, Login & Feedback 5-Issue Separation):
+  - "กรอกข้อมูลครบแล้วกดสมัครทีไรก็ขึ้นข้อความว่าระบบเกิดข้อผิดพลาดทุกครั้ง" / "หลังจากลองใหม่หลายรอบกลับมีข้อความแจ้งว่าอีเมลนี้ถูกใช้งานแล้ว" -> Category "registration" (Urgency: high, Dept: Support)
+  - "บางครั้งปุ่มสมัครก็ค้างและไม่มีการตอบสนอง" -> Category "interaction_lag" (Urgency: medium, Dept: Support)
+  - "ทั้งที่ฉันยังไม่ได้รับอีเมลยืนยันบัญชีเลยค่ะ" -> Category "notification_issue" (Urgency: medium, Dept: Support)
+  - "พอลองเข้าสู่ระบบก็ถูกแจ้งว่ายังไม่สามารถใช้งานบัญชีได้เพราะไม่ได้ยืนยันอีเมล" -> Category "login_issue" (Urgency: high, Dept: Support)
+  - "ปัญหาแบบนี้ทำให้การเริ่มใช้งานร้านยุ่งยากมากจนฉันเกือบจะเปลี่ยนไปซื้อจากร้านอื่นแล้วค่ะ อยากให้ตรวจสอบขั้นตอนสมัครสมาชิก การส่งอีเมลยืนยัน และการเข้าสู่ระบบ พร้อมปรับปรุงข้อความแจ้งข้อผิดพลาดให้ลูกค้าเข้าใจว่าต้องทำอะไรต่อ" -> Category "feedback_complaint" (Urgency: medium, Dept: Support)
 
-CRITICAL RULE ON API ERROR & SERVICE UNAVAILABLE:
-- Any message mentioning "Service Unavailable", "API Error", "Server Error", "Timeout", "Internal Error", "503", "502", "504" MUST be classified under category_id "api_error" (ระบบขัดข้อง/API Error).
-- "Service Unavailable" is ALWAYS an "api_error", NEVER classify it as "other"!
+- Example 3 (Login, Alerts & Account Security Separation):
+  - "ระบบบอกว่า Session หมดอายุ" / "พอล็อกอินใหม่ก็ถูกเด้งออกอีก" / "ลองเปลี่ยนรหัสผ่านแล้วก็ยังเข้าไม่ได้" -> Category matching login failures (e.g., login_issue) (Urgency: high, Dept: Support)
+  - "ก่อนหน้านี้ผมได้รับอีเมลแจ้งว่ามีการเปลี่ยนข้อมูลบัญชี" -> Category matching notifications/alerts (e.g., notification_issue) (Urgency: low/medium, Dept: Support)
+  - "แต่ผมไม่ได้เป็นคนเปลี่ยนครับ" / "ตอนนี้ผมกังวลว่าบัญชีอาจมีปัญหา" -> Category matching account security / unauthorized actions / suspected compromise (e.g., account_security) (Urgency: high/urgent, Dept: Support)
+  - "ผมเข้า Account เพื่อเช็คออเดอร์ครับ" -> Category matching general user actions/inquiry (e.g., other) (Urgency: low, Dept: Support)
 
-CRITICAL RULE ON ACCOUNT SECURITY & ACCOUNT CHANGES:
-- Any message about changing account details (e.g. "เปลี่ยนรหัสผ่าน", "เปลี่ยนนามสกุล", "เปลี่ยนเบอร์โทร", "เปลี่ยนอีเมล", "ใครมาเปลี่ยนรหัส", "บัญชีถูกแฮก", "ยืนยันตัวตน") MUST be classified as "account_security". These are NOT general inquiries!
-- If the customer reports that someone else changed their password without permission (e.g. "ใครมาเปลี่ยนรหัสผ่าน"), this is a HIGH PRIORITY security incident. Set urgency to "high" and department to "Admin".
-- Account modification requests (name change, password change, phone number change) are real issues that require admin verification, NOT normal inquiries.
+- Example 4 (UI Rendering, Device Compatibility, Lag, Feedback & Feature Request Separation):
+  - "ฉันกำลังเลือกซื้อเครื่องใช้ไฟฟ้าผ่านโทรศัพท์มือถือ แต่หน้าเว็บของร้านแสดงผลผิดปกติหลายอย่างค่ะ รูปเครื่องดูดฝุ่นถูกตัดจนเห็นสินค้าไม่ครบ ข้อมูลกำลังไฟและขนาดตัวเครื่องแสดงไม่จบประโยค และปุ่มเลือกสีบางปุ่มอยู่เลยขอบหน้าจอออกไปจนกดไม่ได้" -> Category "ui_rendering_issue" (Graphics / responsive UI rendering defect)
+  - "พอลองเปิดเว็บไซต์เดียวกันบนคอมพิวเตอร์กลับเห็นข้อมูลครบกว่าและเลือกสินค้าได้ตามปกติ ฉันต้องสลับไปใช้คอมพิวเตอร์เพื่อซื้อของ ทั้งที่ต้องการความสะดวกในการสั่งซื้อผ่านมือถือ" -> Category "device_compatibility" (Mobile vs Desktop / browser differences)
+  - "นอกจากนี้เมื่อกดเปลี่ยนตัวเลือกสินค้าในมือถือ ระบบยังตอบสนองช้าจนไม่แน่ใจว่ากดสำเร็จหรือไม่" -> Category "interaction_lag" (Button lag / interaction delay)
+  - "ปัญหาแบบนี้ไม่ควรเกิดขึ้นกับร้านค้าออนไลน์ในปัจจุบันเลยค่ะ อยากให้ปรับปรุงการแสดงผลให้รองรับหน้าจอมือถืออย่างเหมาะสม" -> Category "feedback_complaint" (Customer complaint / dissatisfaction)
+  - "และเพิ่มฟังก์ชันเปรียบเทียบสเปกกับราคาของเครื่องใช้ไฟฟ้าหลายรุ่นในหน้าเดียว เพื่อช่วยให้ลูกค้าตัดสินใจได้ง่ายขึ้น" -> Category "feature_request" (New feature / functionality request)
+  You MUST output SEPARATE issue objects for different categories! NEVER bundle them into a single string under one category!
 
-CRITICAL RULE ON DISPLAY GLITCHES & BLANK SCREENS:
-- Any message mentioning screen display glitches (e.g. "มืด", "จอมืด", "จอดำ", "หน้าจอมืด", "มืดเหมือนเดิม", "จอขาว", "หน้าจอขาว", "จอเขียว") MUST be classified as "ui_rendering_issue" (การแสดงผลผิดเพี้ยน). Screen display glitches are ALWAYS real technical problems and MUST NEVER be classified as "other"!
+CORE PRINCIPLE 2: QUESTIONS & INQUIRIES ARE NOT PROBLEMS (คำถาม/ข้อสงสัย ไม่ใช่ปัญหา)
+- A customer asking questions about how things work, duration, rules, or system status is an INQUIRY, NOT A SYSTEM INCIDENT!
+- Look for question / inquiry signals:
+  * Asking about duration or time: "กี่นาที", "กี่โมง", "ใช้เวลานานไหม", "นานไหม" (e.g. "ถอนใช้เวลากี่นาที" is a question asking about banking duration, NOT a deposit/withdrawal failure!)
+  * Asking about availability or status: "เปิดไหม", "เปิดอยู่ไหม", "ปิดปรับปรุงไหม", "ได้ไหม" (e.g. "เว็ปเปิดไหม" is an inquiry, NOT a website outage!)
+  * Asking about conditions, rewards, or terms: "ได้อะไร", "ทำเทิร์นด้วยหรอ", "ทำยังไง", "เท่าไหร่", "หรอ", "ไหม" (e.g. "สมัครใหม่ได้อะไร", "โบนัสทำเทิร์นด้วยหรอ" are inquiries about terms, NOT promotion bugs!)
+  * Asking for information or benefits: "มีโปรอะไรบ้าง", "ขอเครดิตฟรีมีไหม", "ขอบัญชีหน่อย"
+- INQUIRY CLASSIFICATION RULE:
+  * If a statement is merely asking a question without reporting that an actual transaction failed or a feature broke, you MUST classify it under "other" (เรื่องอื่นๆ / สอบถามข้อมูลทั่วไป / ไม่ใช่ปัญหาของระบบ), with urgency: "low", priority: "low", department: "Support", resolution: "Solved".
+  * NEVER classify inquiries under defect categories like "deposit_withdrawal", "login_issue", or "promo_bonus"! Those categories are strictly for ACTUAL FAILURES (e.g. "โอนเงินแล้วยอดไม่เข้า", "ถอนเงินแล้วดีเลย์ 2 ชั่วโมง", "เข้าสู่ระบบไม่ได้รหัสผ่านผิด", "ยอดโบนัสไม่เข้า").
 
-CRITICAL RULE ON HTTP ERRORS & ACCESS BLOCKED:
-- Any message mentioning HTTP error codes or page access errors (e.g. "Error 403", "ขึ้น Error 403", "Error 502", "Error 504", "Error 404", "Error 500", "Error 503", "Error", "เข้าเว็บไม่ได้", "หน้าเว็บไม่ขึ้น", "ลิงก์เสีย") MUST be classified as "access_blocked" (เข้าหน้าเว็บไม่ได้/ลิงก์เสีย).
-- HTTP Error messages are ALWAYS real technical problems and MUST NEVER be classified as "other"!
+CORE PRINCIPLE 3: CUSTOMER FEEDBACK & COMPLAINTS vs TECHNICAL BUGS (การบ่น/ร้องเรียนการบริการ vs บั๊ก)
+- If a customer complains, vents, expresses dissatisfaction about service/waiting time, or tells the store what it should do (e.g. "ต้องเสียเวลาตามเรื่องเองแบบนี้ไม่โอเคมาก", "ร้านควรตรวจสอบยอดเงินและแจ้งสถานะให้ลูกค้าทราบ", "แบบนี้บริการแย่มากค่ะ", "ใช้งานยากมากค่ะ ช่วยปรับปรุงระบบด้วยนะคะ"):
+  * Classify under "feedback_complaint" (ข้อเสนอแนะและร้องเรียน), with department: "Support".
 
-CRITICAL RULE ON NOTIFICATION ISSUES VS LOGIN ISSUES:
-- Any issue mentioning not receiving SMS, not receiving OTP, OTP not sending, not receiving email ("ไม่ได้รับ OTP", "OTP ไม่ส่ง", "ไม่ได้รับ SMS", "ไม่ได้รับอีเมล", "OTP ไม่เข้า", "แจ้งเตือนล่าช้า") MUST be categorized as "notification_issue" (ปัญหาการแจ้งเตือน). Do NOT classify OTP/SMS delivery failures as "login_issue".
-- Even if the customer was attempting to reset password or log in when the OTP failed, the specific problem of OTP/SMS/email non-delivery MUST be assigned category_id "notification_issue" in detected_issues.
-- NEVER combine a login/password reset problem ("ลืมรหัสผ่าน/เข้าไม่ได้") with an OTP/SMS non-delivery problem into a single issue object! You MUST split them into TWO SEPARATE issues in detected_issues:
-  1. Issue A: "ลืมรหัสผ่าน/บัญชีถูกล็อก" -> category_id: "login_issue"
-  2. Issue B: "ไม่ได้รับ OTP ทางอีเมลและ SMS" -> category_id: "notification_issue"
+CORE PRINCIPLE 4: ACCOUNT SECURITY & SENSITIVE DATA CHANGES (ความปลอดภัยบัญชีและการเปลี่ยนข้อมูลสำคัญ)
+- When a customer reports that account info was altered without their authorization (e.g. "แต่ผมไม่ได้เป็นคนเปลี่ยนครับ", "ไม่ได้ทำรายการเอง", "ไม่ได้กดเปลี่ยน", "สงสัยว่าโดนแฮก", "กังวลว่าบัญชีอาจมีปัญหา/โดนแฮก", "มีคนอื่นเข้าใช้") OR requests to modify sensitive account credentials or financial accounts (e.g. "ขอเปลี่ยนบัญชีธนาคาร", "เปลี่ยนบัญชีธนาคารให้หน่อย", "เปลี่ยนเลขบัญชี", "ขอแก้เลขที่บัญชี", "ผูกบัญชีใหม่", "ขอเปลี่ยนเบอร์โทรศัพท์"):
+  * Modifying bank accounts, phone numbers, or credentials is a high-risk security operation!
+  * You MUST classify under "account_security" (ความปลอดภัยของบัญชี), with urgency: "high" (or "urgent"), priority: "high", department: "Support".
+  * NEVER classify changing bank account, phone number, or credentials under "other" or "deposit_withdrawal"!
 
-1. Normal Requests & General Inquiries (e.g. asking for bank account "ขอบช", asking to make a normal deposit "ฝากตัง", asking to change bank account details "เปลี่ยนบัญชี"/"ขอเปลี่ยนเลขบัญชี" without errors, asking to help register "สมัครให้หน่อย"/"ขอลิงก์สมัคร" without errors, asking how referral works "แนะนำเพื่อนได้อะไร", asking for promo codes / claiming normal benefits "ขอโบนัสไทม์" without errors):
-   - These are NOT problems!
-   - You MUST classify these as "other" (หมวดหมู่อื่นๆ / ไม่ใช่ปัญหา). Do NOT classify them under "deposit_withdrawal", "login_issue", "registration", "account_security", or "promo_bonus" because those categories are strictly reserved for actual SYSTEM/FINANCIAL ISSUES, ERRORS, PROCESS FAILURES, OR SECURITY HACKS/THREATS.
-   - For example, "สมัครให้หน่อย" is a request for registration assistance (other), whereas "สมัครสมาชิกไม่ได้" is a registration failure (registration). "เปลี่ยนบัญชี" is a standard request to update bank account info (other), whereas "ใครมาเปลี่ยนรหัสผ่าน" is a security incident (account_security).
-   - Set "resolution" to "Solved" (because it is a standard inquiry that can be replied immediately without technical action).
-   - Set "urgency" to "low" and "priority" to "low".
-   - Set "business_impact" to "None" and "business_impact_score" to 0.0.
-   - Set "department" to "Support".
-   - Set "root_cause" to "None (General Inquiry / Standard Request)".
+CORE PRINCIPLE 5: NOTIFICATIONS & OTP ALERTS vs REGISTRATION/LOGIN (การแจ้งเตือนและระบบส่ง OTP)
+- When a customer mentions OTP / SMS / email notification problems (e.g. "ทำไม otp ไม่มา", "ไม่ได้รับ OTP", "otp ไม่เข้า", "otp ไม่ส่ง", "ขอ otp แล้วไม่ได้", "sms ไม่เข้า", "และไม่มีอีเมลยืนยันเลยค่ะ", "ยังไม่ได้รับอีเมลยืนยัน", "ทั้งที่ฉันยังไม่ได้รับอีเมลยืนยันบัญชีเลยค่ะ"):
+  * OTP / SMS / Email Notification failure is an issue with the notification/email gateway.
+  * You MUST classify under "notification_issue" (ปัญหาการแจ้งเตือน), department: "Support".
 
-2. Actual System Issues & Failures (e.g. promo errors "แนะนำเพื่อนแล้วไม่ได้รางวัลหรือเครดิตเพิ่มเติม", "ทำไมซื้อของแล้วแต้มสะสมไม่ขึ้น", "ทำไมถึงไม่ได้สิทธิ์แลกสินค้าฟรี", deposit delays "โอนเงินแล้วยอดไม่ขึ้น", withdrawal delays "ถอนเงินช้ามากครึ่งชั่วโมงแล้ว", access errors "เข้าสู่ระบบไม่ได้", "เว็บค้างหน้าดาวน์โหลด"):
-   - These are actual issues!
-   - Classify them under the matching category (e.g., "promo_bonus" for bonus/promotion errors/delays, "deposit_withdrawal" for deposit delays, "login_issue" for access issues, etc.).
-   - Set "resolution" to "Pending" (or "Escalated" if it requires another department).
-   - Set "urgency" and "priority" based on the severity (medium, high, urgent).
-
-3. PRIORITIZE SYSTEM BLOCKERS OVER GENERAL REQUESTS/PROMOTIONS:
-   - If the conversation contains any active technical/system blocker, display error, or system failure (e.g., "ดูไม่ได้" (cannot watch/load), "ค้าง" (frozen), "กดไม่ได้" (cannot click), "เข้าไม่ได้" (cannot login), "จอขาว/โหลดช้า"), you MUST prioritize this technical issue as the primary category (e.g., "page_load_freeze", "interaction_lag", "ui_rendering_issue", "game_issue") over any general request or promotion claim in the same conversation.
-   - For example: if a customer says "ดูไม่ได้ แจ้งรับโบนัสครับ", the core blocker is "ดูไม่ได้" (cannot watch/load the game/page) which is a technical issue. You must classify this under "page_load_freeze" or "game_issue", set "resolution" to "Pending", and set priority to "medium" or "high", rather than classifying it as a promotion claim (promo_bonus).
-
-LANGUAGE & SHORT MESSAGES RULE:
-- All generated text fields ("summary", "recommended_reply", "ai_recommendation", "sub_category", "root_cause") MUST be in polite, professional Thai language.
-- Do NOT output any system instructions, guidelines, or meta-comments inside the JSON values.
-- If the conversation is extremely short (e.g. "ฝากตัง", "ขอบช"), do not complain about lack of details. Generate a standard polite reply asking for more details or providing standard information (e.g., for "ขอบช" you can write: "สวัสดีค่ะ นี่คือรายละเอียดบัญชีธนาคารสำหรับโอนเงินค่ะ...", for "ฝากตัง" write: "สวัสดีค่ะ คุณลูกค้าสามารถทำรายการฝากเงินได้ที่เมนูฝากถอนหน้าเว็บไซต์ได้เลยค่ะ").
-
-CRITICAL RULE ON RECOMMENDED REPLIES (OVERRIDING FEW-SHOT EXAMPLES):
-- For any issue in the "detected_issues" array or the main "recommended_reply" classified under "deposit_withdrawal" (ฝาก-ถอน/ยอดเงินไม่เข้า/ดีเลย์):
-  You MUST IGNORE the reply style of the few-shot training examples. Instead, you MUST strictly generate a reply that guides the customer and asks for their transfer slip ("สลิปโอนเงิน") to initiate the verification step, using this exact pattern or very similar:
-  "สวัสดีค่ะ รบกวนขอสลิปโอนเงินของคุณลูกค้า เพื่อให้ทางแอดมิน/ทีมงาน ดำเนินการตรวจสอบการทำรายการฝากเงินในระบบ และหากรายการถูกต้อง เจ้าหน้าที่จะเร่งปรับยอดเครดิตให้โดยเร็วที่สุดค่ะ"
-
-CRITICAL RULE ON DEPARTMENT ROUTING:
-- "Head Admin": Use for third-party game provider outages ("ค่ายเกมล่ม", "ค่าย PG ค้าง", "ค่ายเกมปิดปรับปรุง", "เข้าเล่นเกมสล็อต/บาคาร่า/คาสิโนไม่ได้เนื่องจากระบบค่ายเกมขัดข้อง"), severe account takeover security incidents, or urgent administrative escalations.
-- "Developer": Use ONLY for internal website/app bugs, UI display glitches, button click issues, or internal website loading errors ("ปุ่มกดทับซ้อน", "หน้าเว็บค้าง", "ตัวหนังสือเบี้ยว", "โหลดหน้าเว็บไม่ขึ้น"). Do NOT assign third-party game provider outages to Developer!
-- "Finance": Use for deposit/withdrawal delays, transfer slip verification, and monetary balance adjustments.
-- "Support": Use for general customer assistance, password reset guidance, and standard inquiries.
-- "Marketing": Use for promotions, bonuses, referral programs, and marketing campaigns.
+CORE PRINCIPLE 6: TOP-LEVEL CATEGORY & PRIORITY
+- The top-level "category_id" of the JSON must represent the PRIMARY / HIGHEST SEVERITY system defect that blocks or impacts the user.
+- If the chat contains ONLY inquiries, questions, context, or non-problems, the top-level "category_id" MUST be "other" (or "feedback_complaint" if venting), and priority MUST be "low".
+- Set top-level "priority" and "urgency" matching the highest severity issue found.
 
 The JSON object must have exactly these keys:
-- "category_id": The ID of the matching category. Use one of these exact IDs:
-${categoriesPromptList || '- "other": หมวดหมู่อื่นๆ'}
-- "sub_category": A specific sub-category string identifying the issue (e.g. "ถอนเงินล่าช้า", "ลืมรหัสผ่าน", "ปุ่มกดยืนยันไม่ได้").
-- "intent": The primary user intent. Use one of: "refund", "withdraw", "deposit", "register", "verify", "promotion", "report_issue", "complain", "inquire", "follow_up".
-- "root_cause": The root cause of the issue (e.g. "ธนาคารขัดข้อง", "ระบบตรวจสอบดีเลย์", "ปัญหาระบบอินเทอร์เน็ตของผู้ใช้งาน", "โบนัสติดเงื่อนไขเทิร์นโอเวอร์").
-- "sentiment": The user's emotional state. Use one of: "โกรธ", "ไม่พอใจ", "สับสน", "สงสัย", "ชมเชย", "ปกติ".
-- "urgency": The urgency level. Use one of: "low", "medium", "high", "urgent".
-- "priority": The priority rating. Use one of: "low", "medium", "high", "urgent".
-- "department": The department that should handle this. Use one of: "Finance", "Support", "Developer", "Marketing", "Admin", "Head Admin", "VIP".
-- "summary": A brief 1-sentence summary of the customer's problem in Thai language.
-- "keywords": An array of 2-4 important keywords in Thai language.
-- "confidence": A float number between 0.0 and 100.0 representing your confidence.
-- "recommended_reply": A recommended response draft in Thai language, addressing the customer politely and offering a clear instruction or resolution based on their issue.
-- "resolution": The resolution status of the ticket. Use one of: "Solved", "Pending", "Escalated", "Rejected", "Duplicate".
-- "business_impact": The business risk associated with this issue. Use one of: "Revenue Risk" (if it affects deposit/withdrawal/bets), "Customer Risk" (if they are angry or threaten to leave), "None".
-- "business_impact_score": A float number between 0.0 and 100.0 representing the impact score (higher means worse impact).
-- "ai_recommendation": Proactive suggestions to prevent or solve this (e.g. "แนะนำเช็คระบบ API ธนาคารด่วน", "แนะนำเพิ่มข้อมูลวิธีทำเทิร์นโอเวอร์ใน FAQ", "แนะนำแอดมินส่งต่อหน้าจอตรวจสอบยอดค้าง").
-- "detected_issues": An array of objects representing each separate problem found in the chat. Each object must have exactly these keys:
-  - "issue_no": An integer (1, 2, ...).
-  - "problem_summary": A brief 1-sentence description of this specific problem in Thai.
-  - "category_id": The matching category ID for this problem from the available categories list.
-  - "urgency": The urgency level for this specific problem (low, medium, high, urgent).
-  - "department": The department for this specific problem (Finance, Support, Developer, Marketing, Admin, Head Admin, VIP).
-  - "recommended_reply": A polite response draft in Thai addressing this specific problem.
+- "category_id": The ID of the matching primary category (use one of the exact IDs from the available list).
+- "sub_category": A specific sub-category string identifying the issue in Thai (e.g. "หน้าเว็บโหลดช้า", "การแสดงผลรูปภาพ", "ปุ่มตอบสนองช้า").
+- "intent": Primary user intent: "refund", "withdraw", "deposit", "register", "verify", "promotion", "report_issue", "complain", "inquire", "follow_up".
+- "root_cause": Plausible root cause in Thai (e.g. "ประสิทธิภาพหน้าเว็บ/เซิร์ฟเวอร์โหลดช้า", "ระบบแสดงผลรูปภาพขัดข้อง", "บริบทการใช้งานทั่วไป").
+- "sentiment": User's emotional state in Thai: "โกรธ", "ไม่พอใจ", "สับสน", "สงสัย", "ชมเชย", "ปกติ".
+- "urgency": Urgency level: "low", "medium", "high", "urgent".
+- "priority": Priority rating: "low", "medium", "high", "urgent".
+- "department": Department to handle this: "Finance", "Support", "Developer", "Marketing", "Admin", "Head Admin", "VIP".
+- "summary": A concise 1-sentence summary of the customer's situation in Thai.
+- "keywords": An array of 2-4 key Thai keywords.
+- "confidence": Float between 0.0 and 100.0.
+- "recommended_reply": A brief 1-sentence polite greeting or acknowledgment in Thai.
+- "resolution": Status: "Solved", "Pending", "Escalated", "Rejected", "Duplicate".
+- "business_impact": Risk level: "Revenue Risk", "Customer Risk", "None".
+- "business_impact_score": Float between 0.0 and 100.0.
+- "ai_recommendation": Actionable recommendation for admin/support in Thai.
+- "detected_issues": An array of objects representing EVERY customer clause/statement in the chat without skipping any clause! Each object MUST have:
+  - "issue_no": Integer (1, 2, ...).
+  - "problem_summary": The verbatim clause from the customer belonging strictly to this single category.
+  - "category_id": The exact category ID for this specific issue from the available list.
+  - "urgency": Urgency for this specific issue ("low", "medium", "high", "urgent"). For "other"/non-problem, use "low".
+  - "department": Department for this specific issue ("Support", "Developer", "Finance", etc.).
+`;
 
-Example:
-{
-  "category_id": "deposit_withdrawal",
-  "sub_category": "ยอดเงินไม่อัปเดต",
-  "intent": "deposit",
-  "root_cause": "ธนาคารขัดข้องชั่วคราว",
-  "sentiment": "ไม่พอใจ",
-  "urgency": "high",
-  "priority": "high",
-  "department": "Finance",
-  "summary": "ลูกค้าแจ้งว่าโอนเงินเข้ามาแล้วระบบไม่ปรับยอดอัตโนมัติเนื่องจากธนาคารปลายทางขัดข้อง",
-  "keywords": ["ฝากเงิน", "ไม่เข้า", "ยอดเงิน"],
-  "confidence": 95.50,
-  "recommended_reply": "สวัสดีค่ะ ขออภัยในความไม่สะดวกด้วยนะคะ ปัจจุบันระบบธนาคารขัดข้องชั่วคราว ทีมงานกำลังดำเนินการตรวจสอบและจะปรับยอดให้คุณภายใน 15 นาทีค่ะ",
-  "resolution": "Escalated",
-  "business_impact": "Revenue Risk",
-  "business_impact_score": 90.0,
-  "ai_recommendation": "แนะนำแอดมินส่งต่อไปยังแผนก Finance ทันที และให้ประสานงาน Developer เช็ค API Gateway",
-  "detected_issues": [
-    {
-      "issue_no": 1,
-      "problem_summary": "โอนเงินเข้ามาแล้วระบบไม่ปรับยอดเครดิตให้อัตโนมัติ",
-      "category_id": "deposit_withdrawal",
-      "urgency": "high",
-      "department": "Finance",
-      "recommended_reply": "สวัสดีค่ะ ทางทีมงานกำลังประสานงานตรวจสอบการทำรายการฝากเงินกับธนาคารปลายทางเพื่อเร่งปรับยอดเครดิตให้โดยด่วนที่สุดค่ะ"
-    }
-  ]
-}`;
+  // Dynamically extract all valid category IDs from Supabase for this company to build strict enum
+  const validCategoryIds = Array.from(new Set([
+    ...availableCategories.map(c => c.id).filter(Boolean),
+    ...availableCategories.map(c => (c.id || '').split(':').pop().trim()).filter(Boolean),
+    'other'
+  ]));
+
+  const dynamicJsonSchema = {
+    type: 'object',
+    properties: {
+      category_id: {
+        type: 'string',
+        enum: validCategoryIds
+      },
+      sub_category: { type: 'string' },
+      intent: {
+        type: 'string',
+        enum: ['refund', 'withdraw', 'deposit', 'register', 'verify', 'promotion', 'report_issue', 'complain', 'inquire', 'follow_up']
+      },
+      root_cause: { type: 'string' },
+      sentiment: {
+        type: 'string',
+        enum: ['โกรธ', 'ไม่พอใจ', 'สับสน', 'สงสัย', 'ชมเชย', 'ปกติ']
+      },
+      urgency: {
+        type: 'string',
+        enum: ['low', 'medium', 'high', 'urgent']
+      },
+      priority: {
+        type: 'string',
+        enum: ['low', 'medium', 'high', 'urgent']
+      },
+      department: {
+        type: 'string',
+        enum: ['Finance', 'Support', 'Developer', 'Marketing', 'Admin', 'Head Admin', 'VIP']
+      },
+      summary: { type: 'string' },
+      keywords: {
+        type: 'array',
+        items: { type: 'string' }
+      },
+      confidence: { type: 'number' },
+      recommended_reply: { type: 'string' },
+      resolution: {
+        type: 'string',
+        enum: ['Solved', 'Pending', 'Escalated', 'Rejected', 'Duplicate']
+      },
+      business_impact: {
+        type: 'string',
+        enum: ['Revenue Risk', 'Customer Risk', 'None']
+      },
+      business_impact_score: { type: 'number' },
+      ai_recommendation: { type: 'string' },
+      detected_issues: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            issue_no: { type: 'integer' },
+            problem_summary: { type: 'string' },
+            category_id: {
+              type: 'string',
+              enum: validCategoryIds
+            },
+            urgency: {
+              type: 'string',
+              enum: ['low', 'medium', 'high', 'urgent']
+            },
+            department: {
+              type: 'string',
+              enum: ['Finance', 'Support', 'Developer', 'Marketing', 'Admin', 'Head Admin', 'VIP']
+            }
+          },
+          required: ['problem_summary', 'category_id', 'urgency', 'department']
+        }
+      }
+    },
+    required: [
+      'category_id',
+      'summary',
+      'detected_issues'
+    ]
+  };
 
   try {
     const response = await postRequest(`${OLLAMA_URL}/api/chat`, {
       model: MODEL_LLM,
       messages: [
         { role: 'system', content: systemPrompt },
-        { role: 'user', content: `Analyze this conversation:\n${conversation}` }
+        { role: 'user', content: `Analyze this conversation:\n${conversation}${clausesBlock}` }
       ],
       stream: false,
-      format: 'json',
+      format: dynamicJsonSchema,
       options: {
-        num_ctx: 8192,
+        num_ctx: 4096,
         temperature: 0.1
       }
     }, 900000);
@@ -300,11 +351,30 @@ Example:
     
     const result = repairAndParseJSON(content);
     
-    // Find matching category or default to 'other' or the first one
+    // Dynamically match category_id against availableCategories (supporting direct ID, clean key suffix, and name match)
     let category_id = result.category_id;
-    const isValidCategory = availableCategories.some(c => c.id === category_id);
-    if (!isValidCategory) {
-      category_id = availableCategories[0]?.id || 'other';
+    const cleanKey = (category_id || '').split(':').pop().trim().toLowerCase();
+    
+    const matchedCategory = availableCategories.find(c => {
+      const cCleanKey = (c.id || '').split(':').pop().trim().toLowerCase();
+      const cName = (c.name || '').toLowerCase();
+      return (
+        c.id === category_id ||
+        cCleanKey === cleanKey ||
+        cName === (category_id || '').toLowerCase() ||
+        cName.includes(cleanKey)
+      );
+    });
+
+    if (matchedCategory) {
+      category_id = matchedCategory.id;
+    } else {
+      // Dynamic fallback to the company's 'other' category, never blind first category
+      const otherCategory = availableCategories.find(c => {
+        const cCleanKey = (c.id || '').split(':').pop().trim().toLowerCase();
+        return cCleanKey === 'other';
+      });
+      category_id = otherCategory ? otherCategory.id : 'other';
     }
 
     // Post-processing: Strip Chinese/CJK characters from all text fields

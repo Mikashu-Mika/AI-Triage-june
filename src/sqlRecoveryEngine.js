@@ -1,6 +1,7 @@
 import { supabase } from './supabase.js';
 import { auditAnswerRelevancy, calculateConfidenceScore } from './auditLayer.js';
 import { resolveDynamicTimeframe } from './financialMarketingService.js';
+import { findThaiMonthInText, getDynamicMonthMeta } from './categoryHelper.js';
 
 /**
  * Autonomous Dynamic SQL Synthesizer & Recovery Engine
@@ -17,6 +18,10 @@ export async function autonomousSqlRecovery(userQuery, companyId, auditResult) {
   let days = 1;
   let timeLabel = 'วันนี้';
 
+  const { curMonthName: curMonthThai, lastMonthName: lastMonthThai } = getDynamicMonthMeta();
+  const matchedMonthObj = findThaiMonthInText(lowerQuery);
+  const matchedSpecificMonth = matchedMonthObj ? matchedMonthObj.full : null;
+
   const nWeeksMatch = lowerQuery.match(/(?:ย้อนหลัง|ช่วง|สรุปย้อนหลัง|สถิตีย้อนหลัง)?\s*(\d+)\s*(?:สัปดาห์|อาทิตย์)/i);
   const nDaysMatch = lowerQuery.match(/(?:ย้อนหลัง|ช่วง|สรุปย้อนหลัง|สถิตีย้อนหลัง)?\s*(\d+)\s*วัน/i) || lowerQuery.match(/ย้อนหลัง\s*(\d+)/i);
 
@@ -30,12 +35,15 @@ export async function autonomousSqlRecovery(userQuery, companyId, auditResult) {
   } else if (lowerQuery.includes('เมื่อวาน')) {
     days = 1.5;
     timeLabel = 'เมื่อวาน';
-  } else if (lowerQuery.includes('เดือนนี้') || lowerQuery.includes('สิงหาคม')) {
-    days = 30;
-    timeLabel = 'เดือนนี้';
-  } else if (lowerQuery.includes('เดือนที่แล้ว') || lowerQuery.includes('กรกฎาคม')) {
+  } else if (lowerQuery.includes('เดือนนี้') || lowerQuery.includes(curMonthThai)) {
+    days = 'this_month';
+    timeLabel = `เดือนนี้ (${curMonthThai})`;
+  } else if (lowerQuery.includes('เดือนที่แล้ว') || lowerQuery.includes(lastMonthThai)) {
     days = 'last_month';
-    timeLabel = 'เดือนที่แล้ว';
+    timeLabel = `เดือนที่แล้ว (${lastMonthThai})`;
+  } else if (matchedSpecificMonth) {
+    days = matchedSpecificMonth;
+    timeLabel = `เดือน${matchedSpecificMonth}`;
   }
 
   // 2. Dynamic Schema & Category Extraction
