@@ -195,7 +195,7 @@ export async function composeAnswer({ query, focus, results, unsupportedTopics }
         role: 'user',
         content: `QUESTION: ${query}\nFOCUS: ${focus || '-'}\nFACTS (JSON):\n${JSON.stringify(facts)}\n${unsupportedTopics.length ? `UNSUPPORTED NOTES (include verbatim):\n${unsupportedText(unsupportedTopics)}\n` : ''}\nWrite the answer.`
       }
-    ], { temperature: 0.2, maxTokens: needsAdvice ? 1200 : 700, timeoutMs: 120000 });
+    ], { temperature: 0.2, maxTokens: needsAdvice ? 1200 : 700 });
 
     const reply = stripForeignScripts(content);
     if (!reply) return { reply: deterministic, mode: 'deterministic' };
@@ -230,7 +230,7 @@ export async function composeChitchat(query, history = []) {
 - Never invent statistics, numbers or business facts in this reply. Do not start every reply with "สวัสดี".`
       },
       { role: 'user', content: `${context}\n\nMessage: ${query}` }
-    ], { temperature: 0.6, maxTokens: 200, timeoutMs: 60000 });
+    ], { temperature: 0.6, maxTokens: 200 });
     const reply = stripForeignScripts(content);
     return reply && numbersIn(reply).every(n => parseInt(n, 10) <= 24) ? reply : fallback;
   } catch {

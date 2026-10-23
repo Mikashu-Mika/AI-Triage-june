@@ -65,8 +65,11 @@ export async function runExecAgent({ query, companyId, chatId }) {
     plan = await routeQuery({ query, categories, history });
   } catch (err) {
     console.error('❌ [Exec Agent] Router failed:', err.message);
+    const isTimeout = /timeout/i.test(err.message);
     return {
-      reply: '⚠️ ขออภัยค่ะ ระบบวิเคราะห์คำถามไม่สำเร็จในขณะนี้ (AI ไม่ตอบสนอง) กรุณาลองใหม่อีกครั้งนะคะ',
+      reply: isTimeout
+        ? '⚠️ ขออภัยค่ะ AI ใช้เวลาวิเคราะห์คำถามนานเกินกำหนด (เครื่องที่รัน AI อาจทำงานหนักหรือเพิ่งเริ่มโหลดโมเดล) กรุณาลองใหม่อีกครั้งนะคะ'
+        : '⚠️ ขออภัยค่ะ ระบบวิเคราะห์คำถามไม่สำเร็จในขณะนี้ (เชื่อมต่อ AI ไม่ได้) กรุณาลองใหม่อีกครั้งนะคะ',
       toolUsed: 'router_error',
       rawData: null,
       excelExport: null,

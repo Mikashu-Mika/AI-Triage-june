@@ -69,11 +69,10 @@ const PLAN_SCHEMA = {
 };
 
 function buildSystemPrompt(categories) {
-  const today = todayContext();
   const categoryLines = [...categories.values()].map(c => `- ${c.key}: ${c.name}`).join('\n');
   return `You are the intent router of "Sift AI", a Thai executive assistant over customer-chat analytics.
 Read the executive's question (Thai) and the recent conversation, then output ONE JSON plan. Do not answer the question.
-Today is ${today.thai} (ISO ${today.iso}, Thailand time). Weeks start on Monday.
+Today's date is given with each question (Thailand time). Weeks start on Monday.
 
 DATA THAT EXISTS: customer chats, AI-classified problem issues per chat (category + priority), chat sentiment, customer registrations (count/name/registration time only), knowledge-base SOPs per category.
 DATA THAT DOES NOT EXIST (put in unsupported_topics, never route to a tool for it):
@@ -177,9 +176,12 @@ function sanitizePlan(raw) {
  * @returns {Promise<{ reply_mode: string, calls: any[], unsupported_topics: string[], focus: string, clarify_question: string }>}
  */
 export async function routeQuery({ query, categories, history }) {
-  const { content } = await ollamaChat([
+  const today = todayContext();
+  const { content, promptTokens, durationMs, loadMs } = await ollamaChat([
+    // The system prompt stays identical between questions, so Ollama can reuse its cached evaluation
     { role: 'system', content: buildSystemPrompt(categories) },
-    { role: 'user', content: `RECENT CONVERSATION:\n${buildHistoryText(history)}\n\nQUESTION: ${query}` }
-  ], { format: PLAN_SCHEMA, temperature: 0, maxTokens: 500, timeoutMs: 90000 });
-  return sanitizePlan(parseJsonObject(content));
+    { role: 'user', content: `TODAY: ${today.thai} (ISO ${today.iso})\n\nRECENT CONVERSATION:\n${buildHistoryText(history)}\n\nQUESTION: ${query}` }
+  ], { format: PLAN_SCHEMA, temperature: 0, maxTokens: 500 });
+  console.log(`🧭 [Router] ${promptTokens ?? '?'} prompt tokens, ${durationMs ?? '?'} ms (model load ${loadMs ?? 0} ms)`);
+  return { ...sanitizePlan(parseJsonObject(content)), timing: { prompt_tokens: promptTokens, duration_ms: durationMs, load_ms: loadMs } };
 }
