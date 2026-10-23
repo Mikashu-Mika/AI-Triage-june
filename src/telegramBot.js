@@ -697,12 +697,18 @@ export function startTelegramPolling() {
       });
 
       if (res && res.ok && Array.isArray(res.result)) {
+        // Handle updates without awaiting: an answer can take minutes on a CPU-only machine, and new messages
+        // must still get their progress reply. LLM work itself is serialized by the agent queue.
         for (const update of res.result) {
           lastUpdateId = update.update_id;
           if (update.message) {
-            await handleTelegramMessage(update.message);
+            handleTelegramMessage(update.message).catch(err => {
+              console.error('Error in Telegram Message Handler:', err.message);
+            });
           } else if (update.callback_query) {
-            await handleTelegramCallbackQuery(update.callback_query);
+            handleTelegramCallbackQuery(update.callback_query).catch(err => {
+              console.error('Error in Telegram Callback Query Handler:', err.message);
+            });
           }
         }
       }

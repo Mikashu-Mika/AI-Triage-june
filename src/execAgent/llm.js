@@ -6,6 +6,10 @@ dotenv.config();
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 export const AGENT_MODEL = process.env.MODEL_AGENT || process.env.MODEL_LLM || 'qwen2.5:14b';
 const NUM_CTX = parseInt(process.env.OLLAMA_NUM_CTX || '8192', 10);
+// Keep the model in memory between questions (Ollama unloads it after 5 minutes by default, and reloading a 14B model is slow)
+export const KEEP_ALIVE = process.env.OLLAMA_KEEP_ALIVE || '60m';
+// Max wait for one LLM call of the executive assistant (CPU-only machines need a generous limit)
+export const AGENT_TIMEOUT_MS = parseInt(process.env.AGENT_LLM_TIMEOUT_MS || '900000', 10); // 15 minutes
 
 /**
  * Call Ollama /api/chat (non-streaming).
@@ -13,12 +17,13 @@ const NUM_CTX = parseInt(process.env.OLLAMA_NUM_CTX || '8192', 10);
  * @param {{ format?: object, temperature?: number, maxTokens?: number, timeoutMs?: number }} [options]
  * @returns {Promise<{ content: string, promptTokens: number|null, outputTokens: number|null }>}
  */
-export function ollamaChat(messages, { format, temperature = 0, maxTokens = 800, timeoutMs = 120000 } = {}) {
+export function ollamaChat(messages, { format, temperature = 0, maxTokens = 800, timeoutMs = AGENT_TIMEOUT_MS } = {}) {
   const url = new URL('/api/chat', OLLAMA_URL);
   const body = JSON.stringify({
     model: AGENT_MODEL,
     messages,
     stream: false,
+    keep_alive: KEEP_ALIVE,
     ...(format ? { format } : {}),
     options: { temperature, num_ctx: NUM_CTX, num_predict: maxTokens }
   });
@@ -44,6 +49,8 @@ export function ollamaChat(messages, { format, temperature = 0, maxTokens = 800,
           const data = JSON.parse(raw);
           resolve({
             content: (data.message?.content || '').trim(),
+            durationMs: data.total_duration ? Math.round(data.total_duration / 1e6) : null,
+            loadMs: data.load_duration ? Math.round(data.load_duration / 1e6) : null,
             promptTokens: data.prompt_eval_count ?? null,
             outputTokens: data.eval_count ?? null
           });
@@ -57,6 +64,20 @@ export function ollamaChat(messages, { format, temperature = 0, maxTokens = 800,
     req.write(body);
     req.end();
   });
+}
+
+/**
+ * Load the model into memory ahead of the first question (called on server start).
+ * Never throws: a failed warm-up only means the first question is slower.
+ */
+export async function warmUpModel() {
+  const started = Date.now();
+  try {
+    await ollamaChat([{ role: 'user', content: 'ok' }], { maxTokens: 1, timeoutMs: 600000 });
+    console.log(`🔥 [Ollama] Model ${AGENT_MODEL} loaded and kept alive for ${KEEP_ALIVE} (${Math.round((Date.now() - started) / 1000)}s)`);
+  } catch (err) {
+    console.warn(`⚠️ [Ollama] Warm-up failed (${err.message}); the first question may be slow.`);
+  }
 }
 
 /** Parse a JSON object out of an LLM reply (tolerates code fences / surrounding text) */

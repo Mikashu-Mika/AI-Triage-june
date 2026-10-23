@@ -251,6 +251,7 @@ category_id, sub_category (Thai), intent (refund|withdraw|deposit|register|verif
         { role: 'user', content: `Analyze this conversation:\n${conversation}${clausesBlock}` }
       ],
       stream: false,
+      keep_alive: process.env.OLLAMA_KEEP_ALIVE || '60m',
       format: dynamicJsonSchema,
       options: {
         num_ctx: OLLAMA_NUM_CTX,
