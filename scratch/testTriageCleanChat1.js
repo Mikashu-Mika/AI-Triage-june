@@ -5,7 +5,7 @@ import { generateTriage, getEmbedding } from '../src/ollama.js';
 dotenv.config();
 
 async function testSingleTriage() {
-  console.log('=== ทดสอบรัน AI Triage ด้วย Qwen 2.5 (14B) + BGE-M3 บน chat-clean-001 ===\n');
+  console.log('=== ทดสอบรัน Sift AI ด้วย Qwen 2.5 (14B) + BGE-M3 บน chat-clean-001 ===\n');
 
   const { data: chat, error: fetchErr } = await supabase
     .from('chats')
@@ -36,7 +36,7 @@ async function testSingleTriage() {
   const embedDuration = ((Date.now() - embedStart) / 1000).toFixed(1);
   console.log(`✅ BGE-M3 สร้างเวกเตอร์ ${embedding.length} มิติ เสร็จสิ้นใน ${embedDuration} วินาที!`);
 
-  console.log('\n4. บันทึกผลลัพธ์ AI Triage กลับลง Supabase...');
+  console.log('\n4. บันทึกผลลัพธ์ Sift AI กลับลง Supabase...');
   const { error: updateErr } = await supabase
     .from('chats')
     .update({

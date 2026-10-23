@@ -11,7 +11,7 @@ import path from 'path';
  */
 export async function generateExcelReport(title = 'รายงานปัญหา', items = [], periodLabel = 'ปัจจุบัน') {
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'Mikashu AI Triage Bot';
+  workbook.creator = 'Mikashu Sift AI Bot';
   workbook.created = new Date();
 
   const worksheet = workbook.addWorksheet('รายงานสรุปปัญหา');

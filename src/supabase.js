@@ -33,11 +33,20 @@ export async function getCategories(companyId) {
     throw new Error(`Failed to fetch categories: ${error.message}`);
   }
 
-  // Fallback: If company filtering returned 0 categories, fetch all categories
+  // Fallback: If the company has no categories yet, use the template company's set
+  // (the same source initializeCompanyCategories clones from), never other tenants' mixed categories
   let list = data;
   if ((!list || list.length === 0) && companyId) {
-    const { data: allData } = await supabase.from('categories').select('*');
-    list = allData || [];
+    const { data: templateCompany } = await supabase
+      .from('companies')
+      .select('id')
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (templateCompany && templateCompany.id !== companyId) {
+      const { data: templateData } = await supabase.from('categories').select('*').eq('company_id', templateCompany.id);
+      list = templateData || [];
+    }
   }
   list = list || [];
 
@@ -153,13 +162,17 @@ export async function updateTriageResult(id, {
  * @param {number[]} embedding - The vector embedding of the query.
  * @param {number} threshold - Match similarity threshold.
  * @param {number} limit - Maximum number of results.
+ * @param {string} [companyId] - Only return chats of this company.
  * @returns {Promise<any[]>}
  */
-export async function findSimilarChats(embedding, threshold = 0.7, limit = 5) {
+export async function findSimilarChats(embedding, threshold = 0.7, limit = 5, companyId = null) {
+  if (!embedding) return [];
+
+  // match_chats searches across all companies, so over-fetch and keep only this company's chats
   const { data, error } = await supabase.rpc('match_chats', {
     query_embedding: embedding,
     match_threshold: threshold,
-    match_count: limit
+    match_count: companyId ? limit * 10 : limit
   });
 
   if (error) {
@@ -167,7 +180,84 @@ export async function findSimilarChats(embedding, threshold = 0.7, limit = 5) {
     return [];
   }
 
-  return data || [];
+  const matches = data || [];
+  if (!companyId || matches.length === 0) return matches.slice(0, limit);
+
+  const { data: owned, error: ownErr } = await supabase
+    .from('chats')
+    .select('id')
+    .eq('company_id', companyId)
+    .in('id', matches.map(m => m.id));
+  if (ownErr) {
+    console.error('Error scoping similar chats to company:', ownErr.message);
+    return [];
+  }
+
+  const ownedIds = new Set((owned || []).map(c => c.id));
+  return matches.filter(m => ownedIds.has(m.id)).slice(0, limit);
+}
+
+/**
+ * Fetch every row of a query, page by page (PostgREST returns at most 1000 rows per request).
+ * @param {() => any} buildQuery - Returns a fresh Supabase query builder (without range).
+ * @param {number} [pageSize]
+ * @returns {Promise<{ data: any[]|null, error: any }>}
+ */
+export async function fetchAllRows(buildQuery, pageSize = 1000) {
+  const rows = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await buildQuery().range(from, from + pageSize - 1);
+    if (error) return { data: null, error };
+    rows.push(...(data || []));
+    if (!data || data.length < pageSize) break;
+  }
+  return { data: rows, error: null };
+}
+
+/**
+ * Fetch customers that belong to a company.
+ * Legacy customers have no company_id, so they are attributed through the company's chats.
+ * @param {string} [companyId] - The ID of the company (all customers if omitted).
+ * @returns {Promise<{ data: any[], error: any }>}
+ */
+export async function getCompanyCustomers(companyId) {
+  if (!companyId) {
+    return await fetchAllRows(() => supabase.from('customers').select('*').order('created_at', { ascending: false }));
+  }
+
+  const { data: owned, error: ownedErr } = await fetchAllRows(() => supabase
+    .from('customers')
+    .select('*')
+    .eq('company_id', companyId)
+    .order('id'));
+  if (ownedErr) return { data: null, error: ownedErr };
+
+  const { data: companyChats, error: chatErr } = await fetchAllRows(() => supabase
+    .from('chats')
+    .select('customer_id')
+    .eq('is_test', false)
+    .eq('company_id', companyId)
+    .not('customer_id', 'is', null)
+    .order('id'));
+  if (chatErr) return { data: null, error: chatErr };
+
+  const ownedIds = new Set((owned || []).map(c => c.id));
+  const legacyIds = [...new Set((companyChats || []).map(c => c.customer_id))].filter(id => !ownedIds.has(id));
+
+  let legacy = [];
+  for (let i = 0; i < legacyIds.length; i += 200) {
+    const { data, error } = await supabase
+      .from('customers')
+      .select('*')
+      .is('company_id', null)
+      .in('id', legacyIds.slice(i, i + 200));
+    if (error) return { data: null, error };
+    legacy.push(...(data || []));
+  }
+
+  const merged = [...(owned || []), ...legacy]
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  return { data: merged, error: null };
 }
 
 /**
@@ -231,12 +321,14 @@ export async function insertChat(chat) {
 }
 
 /**
- * Fetch all training examples for few-shot learning, filtered by company.
+ * Fetch triage training examples for few-shot learning, filtered by company.
+ * (training_examples also stores other task types, e.g. 'admin_backoffice' executive queries,
+ * which must never be injected into the triage prompt)
  * @param {string} [companyId] - The ID of the company.
  * @returns {Promise<any[]>}
  */
 export async function getTrainingExamples(companyId) {
-  let query = supabase.from('training_examples').select('*');
+  let query = supabase.from('training_examples').select('*').eq('task_type', 'triage');
   if (companyId) {
     query = query.eq('company_id', companyId);
   }
@@ -254,7 +346,7 @@ export async function getTrainingExamples(companyId) {
 /**
  * Save multi-issue breakdown records to the new chat_issues table.
  * @param {string} chatId - The ID of the chat.
- * @param {any[]} issues - Array of issues detected by AI triage.
+ * @param {any[]} issues - Array of issues detected by Sift AI.
  */
 export async function saveChatIssues(chatId, issues) {
   // Safeguard: Do NOT delete existing issues if no new issues to insert
@@ -305,7 +397,9 @@ export async function updateChatIssues(issues) {
         category_id: issue.category_id,
         priority: issue.priority,
         summary: issue.summary,
-        recommended_reply: issue.recommended_reply || ''
+        recommended_reply: issue.recommended_reply || '',
+        // Human-audited issues are protected from AI re-classification
+        is_human_verified: true
       })
       .eq('id', issue.id);
 
@@ -338,7 +432,7 @@ export async function authenticateCompany(clientId, clientSecret) {
 }
 
 /**
- * Copy categories from the first company (Mika Co.) to a new company (Copy-on-Registration).
+ * Copy categories and the SOP knowledge base from the first company (Mika Co.) to a new company (Copy-on-Registration).
  * @param {string} newCompanyId
  */
 export async function initializeCompanyCategories(newCompanyId) {
@@ -390,6 +484,23 @@ export async function initializeCompanyCategories(newCompanyId) {
     if (insErr) {
       throw new Error('Failed to clone default categories: ' + insErr.message);
     }
+  }
+
+  // 3. Clone the template company's SOP knowledge base (each company owns its own copy)
+  const { data: sops, error: sopErr } = await supabase
+    .from('knowledge_base')
+    .select('category_key, title, content, status, source')
+    .eq('company_id', firstCompany.id)
+    .neq('status', 'archived');
+  if (sopErr) {
+    console.warn('⚠️ Could not read template knowledge base:', sopErr.message);
+    return;
+  }
+  if (sops && sops.length > 0) {
+    const { error: kbErr } = await supabase
+      .from('knowledge_base')
+      .insert(sops.map(sop => ({ ...sop, company_id: newCompanyId })));
+    if (kbErr) console.warn('⚠️ Failed to clone knowledge base:', kbErr.message);
   }
 }
 

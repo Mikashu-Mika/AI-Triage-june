@@ -30,7 +30,7 @@ async function run() {
     console.log('✅ Ingest API Response:', JSON.stringify(result, null, 2));
 
     // Wait 15 seconds for background triage
-    console.log('- Waiting 15 seconds for background AI Triage...');
+    console.log('- Waiting 15 seconds for background Sift AI...');
     await new Promise(resolve => setTimeout(resolve, 15000));
 
     // Query database

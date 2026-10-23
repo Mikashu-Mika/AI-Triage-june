@@ -7,9 +7,6 @@ import { generateExcelReport } from './excelService.js';
 import { 
   getCachedCategories, 
   getCategoryDisplayName, 
-  findCategoryKeysByName,
-  findThaiMonthInText, 
-  findAllThaiMonthsInText, 
   getDynamicMonthMeta, 
   getDefaultCompanyId, 
   getPeriodThaiText 
@@ -600,112 +597,12 @@ export async function handleTelegramMessage(message) {
     }
   }
 
-  // Send immediate progress acknowledgment if it is a text-typed summary/drilldown query and not coming from callback
+  // Send immediate progress acknowledgment (the AI router decides what the question is about)
   if (!message.skipProgress) {
-    const lower = text.toLowerCase();
-    const { curMonthName, lastMonthName } = getDynamicMonthMeta();
-    const matchedMonth = findThaiMonthInText(lower);
-    const mentionedMonths = findAllThaiMonthsInText(lower);
-    const isMonthlyBreakdown = lower.includes('แต่ละเดือน') || 
-                               lower.includes('ทุกเดือน') || 
-                               lower.includes('รายเดือน') || 
-                               lower.includes('แยกตามเดือน') || 
-                               lower.includes('แต่ละ เดือน') || 
-                               mentionedMonths.length > 1;
-    let textProgressMsg = '';
-
-    const isChatIssueQuery = lower.includes('ปัญหา') || 
-                             lower.includes('เคส') || 
-                             lower.includes('ขัดข้อง') || 
-                             lower.includes('เออเร่อ') || 
-                             lower.includes('error') || 
-                             lower.includes('เรื่องอะไร') || 
-                             lower.includes('แชท') || 
-                             lower.includes('แชต');
-
-    const isCustomerQuery = !isChatIssueQuery && (lower.includes('ลูกค้า') || lower.includes('สมัคร') || lower.includes('สมาชิก') || lower.includes('ผู้ใช้') || lower.includes('ยูส') || lower.includes('ใครบ้าง') || lower.includes('มีใคร'));
-
-    const isAdminResponseTimeQuery = (
-      lower.includes('ตอบช้าสุด') ||
-      lower.includes('ตอบช้ากี่นาที') ||
-      lower.includes('ช้าสุดกี่นาที') ||
-      lower.includes('ตอบกี่นาที') ||
-      lower.includes('ตอบแชทช้า') ||
-      lower.includes('ตอบแชตช้า') ||
-      lower.includes('แอดมินตอบช้า') ||
-      lower.includes('แอดมินตอบกี่นาที') ||
-      lower.includes('ความเร็วในการตอบ') ||
-      lower.includes('response time') ||
-      (lower.includes('แอดมิน') && lower.includes('ตอบ') && (lower.includes('ช้า') || lower.includes('กี่นาที') || lower.includes('นาที')))
-    );
-
-    if (isAdminResponseTimeQuery) {
-      textProgressMsg = '⏳ **กำลังตรวจสอบสถิติเวลาและความเร็วในการตอบแชตของแอดมินให้ค่ะ...**\nรบกวนรอสักครู่นะคะ ⏱️✨';
-    } else if (isCustomerQuery) {
-      if (lower.includes('ทักซ้ำ') || lower.includes('แจ้งเรื่องเดิม') || lower.includes('ทักเรื่องเดิม') || (lower.includes('เรื่องเดิม') && (lower.includes('ซ้ำ') || lower.includes('อีกไหม')))) {
-        textProgressMsg = '⏳ **กำลังตรวจสอบประวัติการทักแชตซ้ำเรื่องเดิมของลูกค้าให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🔄✨';
-      } else if (lower.includes('ลูกค้าเก่า') && (lower.includes('เปอร์เซ็นต์') || lower.includes('เปอร์เซนต์') || lower.includes('%') || lower.includes('สัดส่วน') || lower.includes('กี่เปอร์'))) {
-        textProgressMsg = '⏳ **กำลังวิเคราะห์สัดส่วนเปอร์เซ็นต์แชตจากลูกค้าเก่าให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👥✨';
-      } else if (isMonthlyBreakdown) {
-        textProgressMsg = '⏳ **กำลังสืบค้นและรวบรวมข้อมูลสมาชิกใหม่แยกตามแต่ละเดือนให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 📊✨';
-      } else if (lower.includes('ใครบ้าง') || lower.includes('มีใคร') || lower.includes('รายชื่อ')) {
-        textProgressMsg = '⏳ **กำลังดึงรายชื่อลูกค้าให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨';
-      } else if (lower.includes('เดือนที่แล้ว') || lower.includes('เดือนก่อน')) {
-        textProgressMsg = `⏳ **กำลังสืบค้นและรวบรวมข้อมูลลูกค้าประจำเดือน${lastMonthName} ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨`;
-      } else if (matchedMonth) {
-        textProgressMsg = `⏳ **กำลังสืบค้นและรวบรวมข้อมูลลูกค้าประจำเดือน${matchedMonth.full} ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨`;
-      } else if (lower.includes('เดือนนี้') || lower.includes(curMonthName)) {
-        textProgressMsg = `⏳ **กำลังสืบค้นและรวบรวมข้อมูลลูกค้าประจำเดือน${curMonthName} ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨`;
-      } else if (lower.includes('เมื่อวาน')) {
-        textProgressMsg = '⏳ **กำลังสืบค้นและรวบรวมข้อมูลลูกค้าเมื่อวาน ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨';
-      } else if (lower.includes('วันนี้')) {
-        textProgressMsg = '⏳ **กำลังสืบค้นและรวบรวมข้อมูลลูกค้าประจำวันนี้ ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨';
-      } else if (lower.includes('ทั้งหมด') || lower.includes('รวม') || lower.includes('ที่มี')) {
-        textProgressMsg = '⏳ **กำลังสืบค้นจำนวนลูกค้าทั้งหมดในระบบให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨';
-      } else {
-        textProgressMsg = '⏳ **กำลังสืบค้นและรวบรวมข้อมูลลูกค้าให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 👤✨';
-      }
-    } else {
-      if (lower.includes('สมัคร')) {
-        textProgressMsg = '⏳ **กำลังสืบค้นและรวบรวมข้อมูลปัญหาการสมัครสมาชิกให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🔍✨';
-      } else if (lower.includes('หมวดที่ 1') || lower.includes('หมวด 1')) {
-        textProgressMsg = '⏳ **กำลังสกัดและรวบรวมรายละเอียดแชตหมวดที่ 1 ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🔍✨';
-      } else if (lower.includes('หมวดที่ 2') || lower.includes('หมวด 2')) {
-        textProgressMsg = '⏳ **กำลังสกัดและรวบรวมรายละเอียดแชตหมวดที่ 2 ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🔍✨';
-      } else if (lower.includes('วันไหน') && (lower.includes('เยอะสุด') || lower.includes('มากที่สุด') || lower.includes('หนักสุด') || lower.includes('สูงสุด'))) {
-        textProgressMsg = '⏳ **กำลังวิเคราะห์สถิติวันที่มีปัญหาพุ่งสูงที่สุดให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 📅✨';
-      } else if (lower.includes('ไหม') || lower.includes('หมายถึง') || lower.includes('มีใคร') || lower.includes('มีเคส')) {
-        textProgressMsg = '⏳ **กำลังสืบค้นและตรวจสอบรายละเอียดปัญหาให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🔍✨';
-      } else if (isMonthlyBreakdown) {
-        textProgressMsg = '⏳ **กำลังรวบรวมและสรุปข้อมูลปัญหาแยกตามแต่ละเดือนให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 📊✨';
-      } else if (lower.includes('เดือนที่แล้ว') || lower.includes('เดือนก่อน')) {
-        textProgressMsg = `⏳ **กำลังรวบรวมและสรุปข้อมูลปัญหาประจำเดือน${lastMonthName} ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 📊✨`;
-      } else if (matchedMonth) {
-        textProgressMsg = `⏳ **กำลังรวบรวมและสรุปข้อมูลปัญหาประจำเดือน${matchedMonth.full} ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 📊✨`;
-      } else if (lower.includes('เดือนนี้') || lower.includes(curMonthName)) {
-        textProgressMsg = `⏳ **กำลังรวบรวมและสรุปข้อมูลปัญหาประจำเดือน${curMonthName} ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 📊✨`;
-      } else if (lower.includes('วันนี้') || lower.includes('ประจำวัน')) {
-        textProgressMsg = '⏳ **กำลังรวบรวมและสรุปข้อมูลปัญหาประจำวันนี้ให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 📅✨';
-      } else if (lower.includes('หนาแน่น') || lower.includes('ช่วงเวลา')) {
-        textProgressMsg = '⏳ **กำลังวิเคราะห์สถิติช่วงเวลาหนาแน่นของปัญหาให้ค่ะ...**\nรบกวนรอสักครู่นะคะ ⏰✨';
-      } else if (lower.includes('สรุปปัญหา') || lower.includes('สรุปแชท') || lower.includes('สรุปเคส')) {
-        textProgressMsg = '⏳ **กำลังประมวลผลข้อมูลสรุปปัญหาแชทให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🤖✨';
-      } else if (isChatIssueQuery) {
-        textProgressMsg = '⏳ **กำลังสืบค้นและตรวจสอบรายละเอียดปัญหาแชตให้ค่ะ...**\nรบกวนรอสักครู่นะคะ 🔍✨';
-      }
-    }
-
-    if (isExec) {
-      if (!textProgressMsg) {
-        textProgressMsg = '👑⚡ **ผู้บริหารสอบถาม**: กำลังดึงข้อมูลและประมวลผลให้เป็นอันดับแรกค่ะ...\nรบกวนรอสักครู่นะคะ ✨';
-      } else {
-        textProgressMsg = '👑⚡ **ผู้บริหารสอบถาม**: ' + textProgressMsg.replace(/^⏳ \*\*/, '**');
-      }
-    }
-
-    if (textProgressMsg) {
-      await sendMessage(chatId, textProgressMsg);
-    }
+    const progressMsg = isExec
+      ? '👑⚡ *ผู้บริหารสอบถาม*: กำลังวิเคราะห์คำถามและดึงข้อมูลให้เป็นอันดับแรกค่ะ รบกวนรอสักครู่นะคะ ✨'
+      : '⏳ กำลังวิเคราะห์คำถามและดึงข้อมูลให้ค่ะ รบกวนรอสักครู่นะคะ ✨';
+    await sendMessage(chatId, progressMsg);
   }
 
   // Send initial typing indicator

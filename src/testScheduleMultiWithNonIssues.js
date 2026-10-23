@@ -295,7 +295,7 @@ const multiPayloads = [
 
 async function run() {
   console.log('================================================================');
-  console.log('🧪 Scheduled Multi-Issue AI Triage Suite (With Embedded Non-Issues)');
+  console.log('🧪 Scheduled Multi-Issue Sift AI Suite (With Embedded Non-Issues)');
   console.log('================================================================');
   console.log('- Total Rounds: 10');
   console.log('- Chats per Round: 3 (Spaced 1 minute apart)');

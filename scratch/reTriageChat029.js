@@ -2,7 +2,7 @@ import { processSingleChat } from '../src/triageService.js';
 import { supabase } from '../src/supabase.js';
 
 async function main() {
-  console.log('🔄 Re-running AI Triage Analysis for Chat: round-dense-241014-029 ...');
+  console.log('🔄 Re-running Sift AI Analysis for Chat: round-dense-241014-029 ...');
   
   try {
     await processSingleChat('round-dense-241014-029');

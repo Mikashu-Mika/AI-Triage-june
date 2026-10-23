@@ -188,7 +188,7 @@ async function runStreamPipeline() {
     }
     console.log(`✅ บันทึกสถานะ Pending ลง Supabase เรียบร้อย`);
 
-    // Run AI Triage through Ollama (Qwen 2.5 14B + BGE-M3)
+    // Run Sift AI through Ollama (Qwen 2.5 14B + BGE-M3)
     console.log(`🤖 กำลังให้ Ollama (Qwen 2.5 14B) วิเคราะห์และจัดหมวดหมู่อย่างละเอียด...`);
     const triageStart = Date.now();
     try {

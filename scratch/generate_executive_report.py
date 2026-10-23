@@ -11,7 +11,7 @@ class ExecutiveReportPDF(FPDF):
         self.set_xy(10, 5)
         self.set_font('Tahoma', 'B', 14)
         self.set_text_color(255, 255, 255)
-        self.cell(120, 8, 'รายงานสรุปผลผู้บริหาร: ระบบวิเคราะห์แชตลูกค้า AI Triage', align='L')
+        self.cell(120, 8, 'รายงานสรุปผลผู้บริหาร: ระบบวิเคราะห์แชตลูกค้า Sift AI', align='L')
         
         self.set_font('Tahoma', '', 9)
         self.set_text_color(226, 232, 240) # Slate 200
@@ -22,7 +22,7 @@ class ExecutiveReportPDF(FPDF):
         self.set_y(-15)
         self.set_font('Tahoma', '', 8)
         self.set_text_color(148, 163, 184) # Slate 400
-        self.cell(100, 10, 'รายงานสรุปผลการคัดกรอง 157 เคสทดสอบระบบ AI Triage (ลับเฉพาะผู้บริหาร)', align='L')
+        self.cell(100, 10, 'รายงานสรุปผลการคัดกรอง 157 เคสทดสอบระบบ Sift AI (ลับเฉพาะผู้บริหาร)', align='L')
         self.cell(90, 10, f'หน้า {self.page_no()} / {{nb}}', align='R')
 
 def generate_pdf():
@@ -92,7 +92,7 @@ def generate_pdf():
     pdf.set_font('Tahoma', '', 8.5)
     pdf.set_text_color(51, 65, 85)
     summary_text = (
-        "โครงการพัฒนาระบบ AI Triage Intelligence Platform ได้ทำการทดสอบประมวลผลข้อมูลบทสนทนาจริงสะสมรวมทั้งสิ้น 157 เคส "
+        "โครงการพัฒนาระบบ Sift AI Intelligence Platform ได้ทำการทดสอบประมวลผลข้อมูลบทสนทนาจริงสะสมรวมทั้งสิ้น 157 เคส "
         "ครอบคลุมทั้งเคสบทสนทนาดี่ยว และเคสซับซ้อนที่มีปัญหาย่อย 4-6 เรื่องในบทสนทนาเดียว ผลการดำเนินงานปรากฏว่าระบบสามารถประมวลผลสำเร็จ "
         "ครบถ้วน 100% (157/157 เคส) โดยไม่มีรายการค้างเป็ดเหลือง/ส้ม (Pending Stuck) หรือรายการข้อผิดพลาด (Failed) เหลืออยู่แม้แต่รายการเดียว\n\n"
         "ด้วยสถาปัตยกรรมคิวจัดระเบียบเดี่ยว (Strict Sequential Queueing System) ช่วยป้องกันปัญหา CPU Timeout ได้สมบูรณ์ 100% "
@@ -204,7 +204,7 @@ def generate_pdf():
     pdf.set_font('Tahoma', '', 8.5)
     pdf.set_text_color(51, 65, 85)
     routing_desc = (
-        "จุดเด่นสำคัญของระบบ AI Triage คือความสามารถในการอ่านบทสนทนายาวที่มีหลายปัญหาย่อย แล้วทำการแตกประเด็นออกเป็นตั๋วย่อย (Sub-Issues) "
+        "จุดเด่นสำคัญของระบบ Sift AI คือความสามารถในการอ่านบทสนทนายาวที่มีหลายปัญหาย่อย แล้วทำการแตกประเด็นออกเป็นตั๋วย่อย (Sub-Issues) "
         "พร้อมบันทึกลงตาราง chat_issues เพื่อกระจายงานไปยังแผนกที่ถูกต้องโดยอัตโนมัติ โดยจากการทดสอบ 157 เคส ได้ทำการสกัดประเด็นย่อยรวม 373 เรื่อง ดังนี้:"
     )
     pdf.multi_cell(0, 4.5, routing_desc)
@@ -254,7 +254,7 @@ def generate_pdf():
     pdf.set_font('Tahoma', '', 8.5)
     pdf.set_text_color(51, 65, 85)
     proposal_intro = (
-        "เพื่อให้ระบบ AI Triage สามารถส่งมอบมูลค่าทางธุรกิจสูงสุด (Maximum Business Value) และช่วยให้ทีมงานพนักงานสามารถปฏิบัติงานได้อย่างไร้รอยต่อ "
+        "เพื่อให้ระบบ Sift AI สามารถส่งมอบมูลค่าทางธุรกิจสูงสุด (Maximum Business Value) และช่วยให้ทีมงานพนักงานสามารถปฏิบัติงานได้อย่างไร้รอยต่อ "
         "ครูขอเสนอแผนอัปเกรดฟีเจอร์สำคัญ 5 ประการสำหรับหน้า Back Office (BO) ดังต่อไปนี้:"
     )
     pdf.multi_cell(0, 4.5, proposal_intro)
