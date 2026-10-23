@@ -56,7 +56,9 @@ const PLAN_SCHEMA = {
               sort: { type: 'string', enum: SORTS },
               limit: { type: 'integer' },
               category: { type: 'string' }
-            }
+            },
+            // Forcing an explicit period stops the model from silently omitting the time frame
+            required: ['period']
           }
         },
         required: ['tool', 'args']
@@ -119,14 +121,24 @@ SIMILAR SOLVED EXAMPLES are given with each question: verified plans for similar
 function buildHistoryText(history) {
   if (!history || history.length === 0) return '(no previous turns)';
   return history.map((h, i) => {
+    if (h.audit_status === 'ERROR') return `Turn ${i + 1}\nQ: ${h.user_query}\n(this question failed and was not answered)`;
     const calls = (h.slots?.calls || []).map(c => `${c.tool}${JSON.stringify(c.args)}`).join('; ') || '-';
     const ids = (h.slots?.result_chat_ids || []).slice(0, 30).join(', ') || '-';
     return `Turn ${i + 1}\nQ: ${h.user_query}\nPlan: ${calls}\nChat ids shown: ${ids}\nAnswer (excerpt): ${(h.reply || '').replace(/\s+/g, ' ').slice(0, 300)}`;
   }).join('\n\n');
 }
 
-/** Keep only well-formed calls and values (the LLM output is untrusted) */
-function sanitizePlan(raw) {
+const TOOLS_WITH_CATEGORY_LIST = ['get_issue_stats', 'list_chats', 'compare_periods'];
+const TOOLS_WITH_SINGLE_CATEGORY = ['get_category_info', 'get_resolution_advice'];
+
+/**
+ * Keep only well-formed calls and values (the LLM output is untrusted).
+ * Missing periods are inherited from the previous turn's plan, never silently defaulted when context exists.
+ * @param {object} raw - Parsed LLM output
+ * @param {any[]} [previousCalls] - Calls of the previous successful turn
+ */
+export function sanitizePlan(raw, previousCalls = []) {
+  const previousPeriod = previousCalls.find(c => c.args?.period)?.args.period || null;
   const mode = ['data', 'chitchat', 'clarify'].includes(raw?.reply_mode) ? raw.reply_mode : 'data';
   const calls = (Array.isArray(raw?.calls) ? raw.calls : [])
     .filter(c => c && TOOL_NAMES.includes(c.tool))
@@ -145,7 +157,21 @@ function sanitizePlan(raw) {
       if (SORTS.includes(a.sort)) args.sort = a.sort;
       if (Number.isInteger(a.limit)) args.limit = a.limit;
       if (typeof a.category === 'string' && a.category.trim()) args.category = a.category.trim();
-      if (!args.period && c.tool !== 'get_category_info') args.period = { type: 'last_n_days', n: 7 };
+
+      // Single-category tools read "category": accept a one-item "categories" for them.
+      // A stray "category" on list tools is dropped, not promoted into a filter the question never asked for.
+      if (TOOLS_WITH_SINGLE_CATEGORY.includes(c.tool) && !args.category && args.categories?.length) args.category = args.categories[0];
+      if (TOOLS_WITH_CATEGORY_LIST.includes(c.tool)) delete args.category;
+
+      if (!args.period && c.tool !== 'get_category_info') {
+        args.period = previousPeriod || { type: 'last_n_days', n: 7 };
+        args.period_inherited = !!previousPeriod;
+      }
+      // A comparison that names only one period compares it with the period discussed in the previous turn
+      if (c.tool === 'compare_periods' && !args.period_b && previousPeriod &&
+          JSON.stringify(previousPeriod) !== JSON.stringify(args.period)) {
+        args.period_b = previousPeriod;
+      }
       return { tool: c.tool, args };
     });
   const unsupported = (Array.isArray(raw?.unsupported_topics) ? raw.unsupported_topics : []).filter(t => UNSUPPORTED_TOPICS.includes(t));
@@ -186,7 +212,8 @@ export async function routeQuery({ query, companyId, categories, history }) {
     const { content, promptTokens, outputTokens, durationMs, loadMs, truncated } = await ollamaChat(messages, options);
     console.log(`🧭 [Router] attempt ${i + 1}: ${promptTokens ?? '?'} prompt + ${outputTokens ?? '?'} output tokens, ${durationMs ?? '?'} ms (model load ${loadMs ?? 0} ms)`);
     try {
-      const plan = sanitizePlan(parseJsonObject(content));
+      const previousCalls = [...(history || [])].reverse().find(h => h.slots?.calls?.length)?.slots.calls || [];
+      const plan = sanitizePlan(parseJsonObject(content), previousCalls);
       return {
         ...plan,
         examples_used: examples.map(e => ({ question: e.question, similarity: Math.round(e.similarity * 1000) / 1000 })),
