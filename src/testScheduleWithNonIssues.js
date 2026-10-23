@@ -205,7 +205,7 @@ const testPayloads = [
 
 async function run() {
   console.log('================================================================');
-  console.log('🧪 Scheduled Multi-Round AI Triage Testing Suite (With Non-Issues)');
+  console.log('🧪 Scheduled Multi-Round Sift AI Testing Suite (With Non-Issues)');
   console.log('================================================================');
   console.log('- Total Rounds: 10');
   console.log('- Chats per Round: 3 (Spaced 1 minute apart)');

@@ -121,8 +121,8 @@ async function runStreamPipeline() {
     }
     console.log(`✅ บันทึกสถานะ Pending ลง Supabase เรียบร้อย`);
 
-    // Run AI Triage through Ollama (Qwen 2.5 14B + BGE-M3 Dynamic Vector Matching)
-    console.log(`🤖 กำลังประมวลผลด้วย AI Triage (Qwen 2.5 14B + BGE-M3 Vector Embedding)...`);
+    // Run Sift AI through Ollama (Qwen 2.5 14B + BGE-M3 Dynamic Vector Matching)
+    console.log(`🤖 กำลังประมวลผลด้วย Sift AI (Qwen 2.5 14B + BGE-M3 Vector Embedding)...`);
     const triageStart = Date.now();
     try {
       await processSingleChat(item.id);

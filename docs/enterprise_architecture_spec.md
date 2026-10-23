@@ -1,6 +1,6 @@
-# 🏛️ AI Triage & Analytics Platform - Enterprise Technical Architecture Specification
+# 🏛️ Sift AI & Analytics Platform - Enterprise Technical Architecture Specification
 
-เอกสารสรุปแผนภาพและสถาปัตยกรรมระบบ **AI Triage & Analytics System** ฉบับสมบูรณ์สำหรับ **Senior Developer / Lead Architect** ครอบคลุมการทำงานของ Subsystem ทั้ง 6 บล็อกหลัก โครงสร้างไฟล์ อัลกอริทึม และการรับมือ Edge Cases
+เอกสารสรุปแผนภาพและสถาปัตยกรรมระบบ **Sift AI & Analytics System** ฉบับสมบูรณ์สำหรับ **Senior Developer / Lead Architect** ครอบคลุมการทำงานของ Subsystem ทั้ง 6 บล็อกหลัก โครงสร้างไฟล์ อัลกอริทึม และการรับมือ Edge Cases
 
 ---
 

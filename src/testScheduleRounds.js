@@ -4,7 +4,7 @@ import { payloads } from './test50Payloads.js';
 
 async function run() {
   console.log('================================================================');
-  console.log('🧪 Scheduled Multi-Round AI Triage Testing Suite');
+  console.log('🧪 Scheduled Multi-Round Sift AI Testing Suite');
   console.log('================================================================');
   console.log('- Total Rounds: 10');
   console.log('- Chats per Round: 3 (Spaced 1 minute apart)');

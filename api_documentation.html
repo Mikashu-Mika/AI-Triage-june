@@ -341,7 +341,7 @@
   <!-- Sidebar -->
   <aside>
     <div class="sidebar-header">
-      <h1>AI Triage API</h1>
+      <h1>Sift AI API</h1>
       <p>Customer Intelligence Platform</p>
     </div>
     <ul class="nav-list">
@@ -385,7 +385,7 @@
   <main>
     <section id="overview" class="header-section">
       <h2>API Documentation</h2>
-      <p>เอกสารประกอบการเรียกใช้บริการ (Endpoints) ของระบบวิเคราะห์และสรุปแชตลูกค้าอัตโนมัติ (AI Triage System) สำหรับเชื่อมโยงร่วมกับหน้าจอระบบควบคุมส่วนกลาง (Back Office Dashboard) หรือระบบคิวรีข้อมูลอื่นๆ</p>
+      <p>เอกสารประกอบการเรียกใช้บริการ (Endpoints) ของระบบวิเคราะห์และสรุปแชตลูกค้าอัตโนมัติ (Sift AI System) สำหรับเชื่อมโยงร่วมกับหน้าจอระบบควบคุมส่วนกลาง (Back Office Dashboard) หรือระบบคิวรีข้อมูลอื่นๆ</p>
     </section>
 
     <div class="base-url-card">
@@ -739,7 +739,7 @@
               <button class="copy-btn" onclick="copyCode(this)">คัดลอก</button>
             </div>
             <pre><code>{
-  <span class="j-key">"message"</span>: <span class="j-string">"Chat ingested successfully and queued for real-time AI Triage"</span>,
+  <span class="j-key">"message"</span>: <span class="j-string">"Chat ingested successfully and queued for real-time Sift AI"</span>,
   <span class="j-key">"data"</span>: {
     <span class="j-key">"id"</span>: <span class="j-string">"chat-004"</span>,
     <span class="j-key">"customer_id"</span>: <span class="j-string">"cust-001"</span>,
@@ -796,18 +796,6 @@
                 <td class="param-opt">Optional</td>
                 <td>ID ของผู้ใช้หลังบ้านที่กดตรวจทาน (อ้างอิง `users.id`)</td>
               </tr>
-              <tr>
-                <td class="param-name">is_like</td>
-                <td class="param-type">boolean</td>
-                <td class="param-opt">Optional</td>
-                <td>ความพึงพอใจการทำงานของ AI: `true` (ถูกใจ), `false` (ไม่ถูกใจ)</td>
-              </tr>
-              <tr>
-                <td class="param-name">comment</td>
-                <td class="param-type">string</td>
-                <td class="param-opt">Optional</td>
-                <td>คำติชมผลงานของ AI เพิ่มเติมโดยเจ้าหน้าที่</td>
-              </tr>
             </tbody>
           </table>
         </div>
@@ -823,9 +811,7 @@
   <span class="j-key">"chat_id"</span>: <span class="j-string">"chat-004"</span>,
   <span class="j-key">"is_correct"</span>: <span class="j-bool">false</span>,
   <span class="j-key">"corrected_category_id"</span>: <span class="j-string">"promo_bonus"</span>,
-  <span class="j-key">"liked_by"</span>: <span class="j-string">"ea764a96-2153-46b2-9359-96792894165a"</span>,
-  <span class="j-key">"is_like"</span>: <span class="j-bool">false</span>,
-  <span class="j-key">"comment"</span>: <span class="j-string">"จริงๆ แล้วลูกค้าถามเรื่องโปรโมชั่นสะสมเทิร์นโอเวอร์ ไม่ใช่ปัญหาเรื่องโอนเงิน"</span>
+  <span class="j-key">"liked_by"</span>: <span class="j-string">"ea764a96-2153-46b2-9359-96792894165a"</span>
 }</code></pre>
           </div>
         </div>

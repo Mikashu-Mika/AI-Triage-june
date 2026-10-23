@@ -81,18 +81,19 @@ async function scanAndEnqueuePendingChats(isStartup = false) {
       .from('chats')
       .select('id, status, embedding, summary, category_id, chat_issues(id, recommended_reply)')
       .or('status.eq.pending,embedding.is.null')
-      .neq('status', 'quota_exceeded')
+      // failed / quota_exceeded chats must not be retried automatically (avoids endless re-triage loops)
+      .not('status', 'in', '(quota_exceeded,failed)')
       .order('created_at', { ascending: false })
       .limit(50);
 
     if (err1) throw err1;
 
-    // Fast-path: If a chat already has summary, category_id, and AI sentence-level chat_issues (empty sub-issue recommended_reply),
+    // Fast-path: If a chat already has summary, category_id, and chat_issues (AI or human-audited),
     // it only needs embedding and status='completed' (fast path: <1s instead of 60s LLM re-triage)
     const trulyUnprocessed = [];
     for (const chat of (orphaned || [])) {
-      const hasValidAiIssues = Array.isArray(chat.chat_issues) && chat.chat_issues.length > 0 && chat.chat_issues.every(i => !i.recommended_reply);
-      if (chat.summary && chat.category_id && hasValidAiIssues) {
+      const hasIssues = Array.isArray(chat.chat_issues) && chat.chat_issues.length > 0;
+      if (chat.summary && chat.category_id && hasIssues) {
         if (!chat.embedding) {
           getEmbedding(chat.summary).then(emb => {
             supabase.from('chats').update({ status: 'completed', embedding: emb }).eq('id', chat.id).then();
@@ -107,11 +108,12 @@ async function scanAndEnqueuePendingChats(isStartup = false) {
       }
     }
 
-    // Also check recent chats that have 0 issues in chat_issues, no summary, or mock non-empty sub-issue recommended_reply
+    // Also check recent chats that have 0 issues in chat_issues or no summary
+    // (human-audited issues carry a recommended_reply and must never be re-triaged/overwritten)
     const { data: allRecent, error: err2 } = await supabase
       .from('chats')
-      .select('id, summary, chat_issues(id, recommended_reply)')
-      .neq('status', 'quota_exceeded')
+      .select('id, summary, chat_issues(id)')
+      .not('status', 'in', '(quota_exceeded,failed)')
       .order('created_at', { ascending: false })
       .limit(30);
 
@@ -120,8 +122,7 @@ async function scanAndEnqueuePendingChats(isStartup = false) {
     const missingIssues = (allRecent || []).filter(c => (
       !c.summary ||
       !c.chat_issues ||
-      c.chat_issues.length === 0 ||
-      c.chat_issues.some(i => i.recommended_reply && i.recommended_reply !== '')
+      c.chat_issues.length === 0
     ));
     const toEnqueue = new Set([
       ...trulyUnprocessed,
@@ -163,7 +164,7 @@ function initRealtimeListener() {
         (payload) => {
           const newChat = payload.new;
           if (newChat && newChat.id) {
-            console.log(`⚡ [Realtime] New chat inserted (${newChat.id}). Auto-enqueueing for AI Triage...`);
+            console.log(`⚡ [Realtime] New chat inserted (${newChat.id}). Auto-enqueueing for Sift AI classification...`);
             enqueueTriage(newChat.id);
           }
         }
@@ -173,7 +174,9 @@ function initRealtimeListener() {
         { event: 'UPDATE', schema: 'public', table: 'chats' },
         (payload) => {
           const updated = payload.new;
-          if (updated && updated.id && (updated.status === 'pending' || !updated.embedding)) {
+          // Only re-enqueue chats explicitly set back to pending; status updates written by triage itself
+          // (failed / quota_exceeded / completed without embedding) would otherwise loop forever
+          if (updated && updated.id && updated.status === 'pending') {
             if (updated.id !== currentProcessingChatId && !triageQueue.includes(updated.id)) {
               console.log(`⚡ [Realtime] Chat ${updated.id} status is pending/incomplete. Auto-enqueueing...`);
               enqueueTriage(updated.id);
@@ -225,7 +228,12 @@ async function authCompany(req, res, next) {
   }
 }
 
-const ADMIN_API_KEY = process.env.ADMIN_API_KEY || 'sift-admin-secret-2026';
+// Admin key must come from the environment (never a hard-coded default, since the repo is public)
+const ADMIN_API_KEY = process.env.ADMIN_API_KEY;
+if (!ADMIN_API_KEY || ADMIN_API_KEY.length < 32) {
+  console.error('[Startup] ADMIN_API_KEY is missing or too short (min 32 chars). Set it in .env, e.g. `openssl rand -hex 32`.');
+  process.exit(1);
+}
 
 // Middleware: Authenticate admin using X-Admin-Key or user credentials (system_admin / super_admin)
 async function authAdminOrKey(req, res, next) {
@@ -299,10 +307,25 @@ async function authCompanyOrAdmin(req, res, next) {
   return res.status(401).json({ error: 'Unauthorized: Missing company credentials or Admin key.' });
 }
 
+/**
+ * Resolve a caller-supplied category ID (e.g. 'login_issue' or '<company>:login_issue')
+ * to the company's own prefixed category ID. Returns null when the company has no such category.
+ * @param {string} rawId
+ * @param {string} companyId
+ * @returns {Promise<string|null>}
+ */
+async function resolveCompanyCategoryId(rawId, companyId) {
+  if (!rawId || !companyId) return null;
+  const key = String(rawId).split(':').pop().trim().toLowerCase();
+  const categories = await getCategories(companyId);
+  const match = categories.find(c => c.company_id === companyId && c.id.split(':').pop().toLowerCase() === key);
+  return match ? match.id : null;
+}
+
 // Setup MCP Server instance
 const mcpServer = new Server(
   {
-    name: 'ai-triage-mcp-server',
+    name: 'sift-ai-mcp-server',
     version: '1.0.0'
   },
   {
@@ -368,15 +391,27 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
     
     if (name === 'save_triage_result') {
       const { id, category_id, priority, summary, detected_issues } = args;
+      const { data: chatRec } = await supabase.from('chats').select('company_id').eq('id', id).maybeSingle();
+      if (!chatRec) throw new Error(`Chat ${id} not found`);
+      const resolvedCategoryId = await resolveCompanyCategoryId(category_id, chatRec.company_id);
+      if (!resolvedCategoryId) throw new Error(`Unknown category_id for this chat's company: ${category_id}`);
+
       const embedding = await getEmbedding(summary);
       const updated = await updateTriageResult(id, {
-        category_id,
+        category_id: resolvedCategoryId,
         priority,
         summary,
         embedding
       });
       if (detected_issues && Array.isArray(detected_issues) && detected_issues.length > 0) {
-        await saveChatIssues(id, detected_issues);
+        const resolvedIssues = [];
+        for (const issue of detected_issues) {
+          resolvedIssues.push({
+            ...issue,
+            category_id: (await resolveCompanyCategoryId(issue.category_id, chatRec.company_id)) || resolvedCategoryId
+          });
+        }
+        await saveChatIssues(id, resolvedIssues);
       }
       return {
         content: [{ type: 'text', text: JSON.stringify({ message: 'บันทึกผลสำเร็จ', data: updated }, null, 2) }]
@@ -531,8 +566,22 @@ app.post('/api/triage/save', authCompanyOrAdmin, async (req, res) => {
     return res.status(400).json({ error: 'Missing parameters: id, category_id, priority, summary' });
   }
   try {
+    // Enforce company boundary and resolve the category within the chat's company
+    const { data: chatRec, error: chatLookupErr } = await supabase.from('chats').select('company_id').eq('id', id).maybeSingle();
+    if (chatLookupErr) throw chatLookupErr;
+    if (!chatRec) {
+      return res.status(404).json({ error: `Chat ${id} not found.` });
+    }
+    if (!req.isAdmin && chatRec.company_id !== req.company?.id) {
+      return res.status(403).json({ error: 'Forbidden: Cannot save triage result on another company\'s chat.' });
+    }
+    const resolvedCategoryId = await resolveCompanyCategoryId(category_id, chatRec.company_id);
+    if (!resolvedCategoryId) {
+      return res.status(400).json({ error: `Unknown category_id for this chat's company: ${category_id}` });
+    }
+
     const embedding = await getEmbedding(summary);
-    const updated = await updateTriageResult(id, { category_id, priority, summary, embedding });
+    const updated = await updateTriageResult(id, { category_id: resolvedCategoryId, priority, summary, embedding });
     res.json({ message: 'Success', data: updated });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -554,42 +603,76 @@ app.post('/api/chats/ingest', authCompany, enforceCompanyQuota, async (req, res)
 
     // 0. Ensure customer_id exists in 'customers' table to prevent foreign key constraint error!
     if (customer_id) {
-      const { data: custCheck } = await supabase.from('customers').select('id').eq('id', customer_id).single();
+      const { data: custCheck } = await supabase.from('customers').select('id').eq('id', customer_id).maybeSingle();
       if (!custCheck) {
         await supabase.from('customers').insert({
           id: customer_id,
           name: `Guest Customer (${customer_id})`,
           phone: null,
-          email: null
+          email: null,
+          company_id: req.company.id
         });
       }
     }
 
-    // 1. Upsert chat session as pending, referencing the authenticated company
-    const { data, error } = await supabase
+    // 1. Save chat session as pending, enforcing company boundary
+    // (chat id is a global primary key, so another company's chat must never be overwritten)
+    const chatRecord = {
+      customer_id,
+      conversation: finalConversation,
+      status: 'pending'
+    };
+    const conflictResponse = () => res.status(409).json({
+      error: `Conflict: Chat ID ${id} is already used by another company. Please use a different chat ID.`
+    });
+
+    const { data: existingChat, error: lookupErr } = await supabase
       .from('chats')
-      .upsert({ 
-        id, 
-        customer_id, 
-        conversation: finalConversation, 
-        status: 'pending',
-        company_id: req.company.id
-      })
-      .select()
-      .single();
-    
+      .select('company_id, conversation')
+      .eq('id', id)
+      .maybeSingle();
+    if (lookupErr) throw lookupErr;
+
+    let data, error;
+    if (existingChat) {
+      if (existingChat.company_id !== req.company.id) {
+        return conflictResponse();
+      }
+      // A changed conversation invalidates earlier human verification, so the AI may re-classify it
+      if (existingChat.conversation !== finalConversation) {
+        await supabase.from('chat_issues').update({ is_human_verified: false }).eq('chat_id', id);
+      }
+      ({ data, error } = await supabase
+        .from('chats')
+        .update(chatRecord)
+        .eq('id', id)
+        .eq('company_id', req.company.id)
+        .select()
+        .single());
+    } else {
+      ({ data, error } = await supabase
+        .from('chats')
+        .insert({ id, ...chatRecord, company_id: req.company.id })
+        .select()
+        .single());
+      // Another request inserted the same id between lookup and insert
+      if (error?.code === '23505') {
+        return conflictResponse();
+      }
+    }
+
     if (error) throw error;
     
     // 2. Enqueue the triage in the background to process sequentially!
     enqueueTriage(id);
 
-    res.json({ message: 'Chat ingested successfully and queued for real-time AI Triage', data });
+    res.json({ message: 'Chat ingested successfully and queued for real-time Sift AI classification', data });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// REST API: Trigger on-demand AI Triage for a single chat (Dynamic Real-time Triage) - Protected
+// REST API: Trigger on-demand Sift AI classification for a single chat (Dynamic Real-time Triage) - Protected
 app.post('/api/chats/:id/triage', authCompanyOrAdmin, async (req, res) => {
   const { id } = req.params;
   if (!id) {
@@ -643,25 +726,68 @@ app.post('/api/chats/:id/triage', authCompanyOrAdmin, async (req, res) => {
 
 // REST API: Submit human audit/override feedback (Human-in-the-Loop Seam) - Authenticated
 app.post('/api/chats/feedback', authCompany, async (req, res) => {
-  const { chat_id, is_correct, corrected_category_id, liked_by, comment, is_like, issues } = req.body;
+  const { chat_id, is_correct, corrected_category_id, liked_by, issues } = req.body;
   if (!chat_id || is_correct === undefined) {
     return res.status(400).json({ error: 'Missing parameters: chat_id, is_correct' });
   }
 
   try {
-    let finalCategoryId = corrected_category_id;
+    // 0. Enforce company boundary: chat (and any issues overridden) must belong to the authenticated company
+    const { data: chatRec, error: chatLookupErr } = await supabase
+      .from('chats')
+      .select('company_id')
+      .eq('id', chat_id)
+      .maybeSingle();
+    if (chatLookupErr) throw chatLookupErr;
+    if (!chatRec) {
+      return res.status(404).json({ error: `Chat ${chat_id} not found.` });
+    }
+    if (chatRec.company_id !== req.company.id) {
+      return res.status(403).json({ error: 'Forbidden: Cannot submit feedback on another company\'s chat.' });
+    }
+
+    if (issues && issues.length > 0) {
+      const issueIds = issues.map(issue => issue.id);
+      const { data: ownedIssues, error: issueLookupErr } = await supabase
+        .from('chat_issues')
+        .select('id')
+        .eq('chat_id', chat_id)
+        .in('id', issueIds);
+      if (issueLookupErr) throw issueLookupErr;
+      if (issueIds.some(issueId => !ownedIssues.some(owned => String(owned.id) === String(issueId)))) {
+        return res.status(400).json({ error: 'Invalid issues: every issue id must belong to the given chat_id.' });
+      }
+    }
+
+    // Resolve caller-supplied category IDs to the company's own category IDs
+    let correctedCategoryId = null;
+    if (corrected_category_id) {
+      correctedCategoryId = await resolveCompanyCategoryId(corrected_category_id, req.company.id);
+      if (!correctedCategoryId) {
+        return res.status(400).json({ error: `Unknown corrected_category_id: ${corrected_category_id}` });
+      }
+    }
+    const resolvedIssues = [];
+    for (const issue of (issues || [])) {
+      const resolvedId = issue.category_id ? await resolveCompanyCategoryId(issue.category_id, req.company.id) : null;
+      if (issue.category_id && !resolvedId) {
+        return res.status(400).json({ error: `Unknown category_id in issues: ${issue.category_id}` });
+      }
+      resolvedIssues.push({ ...issue, category_id: resolvedId || undefined });
+    }
+    let finalCategoryId = correctedCategoryId;
     let finalPriority = null;
 
     // 1. Handle multi-issue overrides if provided
-    if (issues && issues.length > 0) {
-      await updateChatIssues(issues);
+    if (resolvedIssues.length > 0) {
+      await updateChatIssues(resolvedIssues);
 
       // Determine highest priority issue to sync with the primary chats table
       const priorityWeight = { urgent: 4, high: 3, medium: 2, low: 1 };
-      let highestIssue = issues[0];
+      let highestIssue = resolvedIssues[0];
       let maxWeight = priorityWeight[highestIssue.priority?.toLowerCase()] || 0;
 
-      for (const issue of issues) {
+      for (const issue of resolvedIssues) {
         const weight = priorityWeight[issue.priority?.toLowerCase()] || 0;
         if (weight > maxWeight) {
           maxWeight = weight;
@@ -669,7 +795,7 @@ app.post('/api/chats/feedback', authCompany, async (req, res) => {
         }
       }
 
-      finalCategoryId = highestIssue.category_id;
+      finalCategoryId = highestIssue.category_id || finalCategoryId;
       finalPriority = highestIssue.priority;
     }
 
@@ -685,16 +811,11 @@ app.post('/api/chats/feedback', authCompany, async (req, res) => {
     await supabase
       .from('chats')
       .update(updateData)
-      .eq('id', chat_id);
+      .eq('id', chat_id)
+      .eq('company_id', req.company.id);
 
-    // 2. Log audit task and audit result in Supabase
-    const { data: userRecord } = await supabase
-      .from('users')
-      .select('company_id')
-      .eq('id', liked_by || '')
-      .maybeSingle();
-      
-    const companyId = userRecord?.company_id || null;
+    // 2. Log audit task and audit result in Supabase (attributed to the authenticated company)
+    const companyId = req.company.id;
 
     const { data: auditTask, error: taskErr } = await supabase
       .from('audit_tasks')
@@ -710,33 +831,17 @@ app.post('/api/chats/feedback', authCompany, async (req, res) => {
     if (taskErr) throw taskErr;
 
     if (auditTask) {
-      const { data: auditResult, error: resErr } = await supabase
+      const { error: resErr } = await supabase
         .from('audit_results')
         .insert({
           task_id: auditTask.id,
           chat_id,
-          category_id: corrected_category_id || null,
+          category_id: correctedCategoryId,
           is_correct,
           summary: is_correct ? 'AI คัดแยกถูกต้อง' : 'ปรับเปลี่ยนหมวดหมู่โดยแอดมิน'
-        })
-        .select()
-        .single();
+        });
 
       if (resErr) throw resErr;
-
-      // 3. Log user like/dislike feedback
-      if (auditResult && is_like !== undefined) {
-        const { error: likeErr } = await supabase
-          .from('like_results')
-          .insert({
-            result_id: auditResult.id,
-            liked_by: liked_by || null,
-            is_like,
-            comment: comment || ''
-          });
-        
-        if (likeErr) throw likeErr;
-      }
     }
 
     res.json({ message: 'Feedback logged successfully' });
@@ -1386,7 +1491,7 @@ app.delete('/api/customers/:id', authCompanyOrAdmin, async (req, res) => {
 // Start Express Server
 app.listen(PORT, () => {
   console.log(`==================================================`);
-  console.log(`  AI Triage MCP Server & API is running on port ${PORT}`);
+  console.log(`  Sift AI MCP Server & API is running on port ${PORT}`);
   console.log(`  MCP SSE Endpoint: http://localhost:${PORT}/sse`);
   console.log(`  Health Check:     http://localhost:${PORT}/health`);
   console.log(`==================================================`);

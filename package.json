@@ -1,7 +1,7 @@
 {
-  "name": "ai-triage-mcp",
+  "name": "sift-ai-mcp",
   "version": "1.0.0",
-  "description": "AI Triage MCP Server & API running local models with Supabase integration",
+  "description": "Sift AI MCP Server & API running local models with Supabase integration",
   "main": "src/index.js",
   "type": "module",
   "scripts": {
@@ -10,7 +10,10 @@
     "test-conn": "node src/testConnection.js",
     "seed": "node src/seedChats.js",
     "test-pipeline": "node src/runTest.js",
-    "seed-enterprise": "node src/seedEnterprise.js"
+    "seed-enterprise": "node src/seedEnterprise.js",
+    "eval:triage": "node scripts/evalTriage.js",
+    "eval:agent": "node scripts/evalAgentRouter.js",
+    "eval:agent:baseline": "node scripts/evalAgentRouter.js --baseline"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.1",

@@ -1023,7 +1023,7 @@
         method: 'PUT',
         headers: { 
           'Content-Type': 'application/json',
-          'X-Admin-Key': 'sift-admin-secret-2026'
+          'X-Admin-Key': getAdminKey()
         },
         body: JSON.stringify({
           customer_type: selectedCustomerType,
@@ -1035,6 +1035,10 @@
       });
 
       if (!res.ok) {
+        // Wrong admin key: forget it so the next save asks again
+        if (res.status === 401 || res.status === 403) {
+          try { sessionStorage.removeItem('siftAdminKey'); } catch (e) {}
+        }
         const errData = await res.json();
         throw new Error(errData.error || 'บันทึกไม่สำเร็จ');
       }
@@ -1048,6 +1052,17 @@
       saveBtn.disabled = false;
       saveBtn.textContent = '💾 บันทึกการเปลี่ยนแปลง';
     }
+  }
+
+  // Admin key is entered by the admin at runtime and kept only for this browser tab
+  function getAdminKey() {
+    let key = null;
+    try { key = sessionStorage.getItem('siftAdminKey'); } catch (e) {}
+    if (!key) {
+      key = (prompt('กรุณากรอก Admin API Key เพื่อบันทึกการเปลี่ยนแปลง') || '').trim();
+      try { if (key) sessionStorage.setItem('siftAdminKey', key); } catch (e) {}
+    }
+    return key;
   }
 
   function showToast(msg) {

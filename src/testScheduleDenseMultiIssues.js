@@ -383,7 +383,7 @@ const densePayloads = [
 
 async function run() {
   console.log('================================================================');
-  console.log('🧪 Scheduled Dense Multi-Issue AI Triage Testing Suite');
+  console.log('🧪 Scheduled Dense Multi-Issue Sift AI Testing Suite');
   console.log('================================================================');
   console.log('- Total Rounds: 10');
   console.log('- Chats per Round: 3 (Spaced 1 minute apart)');

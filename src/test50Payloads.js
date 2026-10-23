@@ -552,7 +552,7 @@ const payloads = [
 
 async function run() {
   console.log('================================================================');
-  console.log('🧪 Multi-Issue AI Triage Batch Testing Suite');
+  console.log('🧪 Multi-Issue Sift AI Batch Testing Suite');
   console.log('================================================================');
 
   // Check command line arguments
@@ -661,7 +661,7 @@ async function run() {
     }
 
     // Poll Supabase until this specific chat is completed
-    console.log(`  - Waiting for background AI Triage...`);
+    console.log(`  - Waiting for background Sift AI...`);
     const pollStartTime = Date.now();
     let isCompleted = false;
 

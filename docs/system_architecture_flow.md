@@ -1,10 +1,10 @@
-# 🏗️ AI Triage & Analytics Bot - System Architecture & Workflow Specification
+# 🏗️ Sift AI & Analytics Bot - System Architecture & Workflow Specification
 
-เอกสารสรุปแผนภาพและโครงสร้างการทำงานของระบบ **AI Triage & Analytics Telegram Bot** ฉบับละเอียดสำหรับ **Senior Developer / Technical Lead**
+เอกสารสรุปแผนภาพและโครงสร้างการทำงานของระบบ **Sift AI & Analytics Telegram Bot** ฉบับละเอียดสำหรับ **Senior Developer / Technical Lead**
 
 ---
 
-![AI Triage System Architecture Flow](file:///C:/Users/USER/.gemini/antigravity/brain/02a73e8c-a208-483f-9533-792943e241a8/system_workflow_diagram_1787806549509.jpg)
+![Sift AI System Architecture Flow](file:///C:/Users/USER/.gemini/antigravity/brain/02a73e8c-a208-483f-9533-792943e241a8/system_workflow_diagram_1787806549509.jpg)
 
 ---
 
