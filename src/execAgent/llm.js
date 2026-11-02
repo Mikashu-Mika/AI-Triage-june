@@ -17,7 +17,41 @@ export const AGENT_TIMEOUT_MS = parseInt(process.env.AGENT_LLM_TIMEOUT_MS || '90
  * @param {{ format?: object, temperature?: number, maxTokens?: number, timeoutMs?: number }} [options]
  * @returns {Promise<{ content: string, promptTokens: number|null, outputTokens: number|null }>}
  */
-export function ollamaChat(messages, { format, temperature = 0, maxTokens = 800, timeoutMs = AGENT_TIMEOUT_MS } = {}) {
+export async function ollamaChat(messages, { format, temperature = 0, maxTokens = 800, timeoutMs = AGENT_TIMEOUT_MS } = {}) {
+  const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN;
+  if (CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN) {
+    const started = Date.now();
+    const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${AGENT_MODEL}`;
+    const res = await fetch(cfUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        messages,
+        max_tokens: maxTokens,
+        temperature
+      }),
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(`Cloudflare AI HTTP ${res.status}: ${errText.slice(0, 200)}`);
+    }
+    const data = await res.json();
+    const rawResp = data.result?.response;
+    const content = typeof rawResp === 'object' ? JSON.stringify(rawResp) : (rawResp || '');
+    return {
+      content: content.trim(),
+      truncated: false,
+      durationMs: Date.now() - started,
+      loadMs: 0,
+      promptTokens: data.result?.usage?.prompt_tokens ?? null,
+      outputTokens: data.result?.usage?.completion_tokens ?? null
+    };
+  }
   const url = new URL('/api/chat', OLLAMA_URL);
   const body = JSON.stringify({
     model: AGENT_MODEL,

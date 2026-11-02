@@ -109,8 +109,12 @@ function postRequest(urlStr, data, timeoutMs = 900000) {
     req.end();
   });
 }
-const MODEL_LLM = process.env.MODEL_LLM || 'qwen2.5:14b';
-const MODEL_EMBEDDING = process.env.MODEL_EMBEDDING || 'bge-m3';
+const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID;
+const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN;
+const IS_CLOUDFLARE = Boolean(CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN);
+
+const MODEL_LLM = process.env.MODEL_LLM || (IS_CLOUDFLARE ? '@cf/qwen/qwen2.5-coder-32b-instruct' : 'qwen2.5:14b');
+const MODEL_EMBEDDING = process.env.MODEL_EMBEDDING || (IS_CLOUDFLARE ? '@cf/baai/bge-m3' : 'bge-m3');
 const OLLAMA_NUM_CTX = parseInt(process.env.OLLAMA_NUM_CTX || '8192', 10);
 
 /**
@@ -244,37 +248,77 @@ category_id, sub_category (Thai), intent (refund|withdraw|deposit|register|verif
   };
 
   try {
-    const response = await postRequest(`${OLLAMA_URL}/api/chat`, {
-      model: MODEL_LLM,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: `Analyze this conversation:\n${conversation}${clausesBlock}` }
-      ],
-      stream: false,
-      keep_alive: process.env.OLLAMA_KEEP_ALIVE || '60m',
-      format: dynamicJsonSchema,
-      options: {
-        num_ctx: OLLAMA_NUM_CTX,
-        temperature: 0.1
+    let result;
+    let promptTokens = null;
+    let outputTokens = null;
+    let contextOverflow = false;
+
+    if (IS_CLOUDFLARE) {
+      const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${MODEL_LLM}`;
+      const response = await fetch(cfUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: `Analyze this conversation:\n${conversation}${clausesBlock}` }
+          ],
+          max_tokens: 2048,
+          temperature: 0.1
+        })
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Cloudflare AI error (${response.status}): ${errText}`);
       }
-    }, 900000);
 
-    if (!response.ok) {
-      throw new Error(`Ollama API error: ${response.statusText}`);
+      const data = await response.json();
+      const rawContent = data.result?.response;
+      if (typeof rawContent === 'object' && rawContent !== null) {
+        result = rawContent;
+      } else {
+        result = repairAndParseJSON(typeof rawContent === 'string' ? rawContent : JSON.stringify(data.result));
+      }
+
+      promptTokens = data.result?.usage?.prompt_tokens ?? null;
+      outputTokens = data.result?.usage?.completion_tokens ?? null;
+    } else {
+      const response = await postRequest(`${OLLAMA_URL}/api/chat`, {
+        model: MODEL_LLM,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `Analyze this conversation:\n${conversation}${clausesBlock}` }
+        ],
+        stream: false,
+        keep_alive: process.env.OLLAMA_KEEP_ALIVE || '60m',
+        format: dynamicJsonSchema,
+        options: {
+          num_ctx: OLLAMA_NUM_CTX,
+          temperature: 0.1
+        }
+      }, 900000);
+
+      if (!response.ok) {
+        throw new Error(`Ollama API error: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      const content = data.message?.content?.trim();
+
+      // Ollama silently truncates the prompt when it exceeds num_ctx: surface it so it can be tuned
+      promptTokens = data.prompt_eval_count ?? null;
+      outputTokens = data.eval_count ?? null;
+      contextOverflow = promptTokens !== null && outputTokens !== null && promptTokens + outputTokens >= OLLAMA_NUM_CTX - 16;
+      if (contextOverflow) {
+        console.warn(`⚠️ [Ollama] Context window nearly/fully used (${promptTokens} prompt + ${outputTokens} output >= num_ctx ${OLLAMA_NUM_CTX}). Increase OLLAMA_NUM_CTX.`);
+      }
+      
+      result = repairAndParseJSON(content);
     }
-
-    const data = await response.json();
-    const content = data.message?.content?.trim();
-
-    // Ollama silently truncates the prompt when it exceeds num_ctx: surface it so it can be tuned
-    const promptTokens = data.prompt_eval_count ?? null;
-    const outputTokens = data.eval_count ?? null;
-    const contextOverflow = promptTokens !== null && outputTokens !== null && promptTokens + outputTokens >= OLLAMA_NUM_CTX - 16;
-    if (contextOverflow) {
-      console.warn(`⚠️ [Ollama] Context window nearly/fully used (${promptTokens} prompt + ${outputTokens} output >= num_ctx ${OLLAMA_NUM_CTX}). Increase OLLAMA_NUM_CTX.`);
-    }
-    
-    const result = repairAndParseJSON(content);
     
     // Dynamically match category_id against availableCategories (supporting direct ID, clean key suffix, and name match)
     let category_id = result.category_id;
@@ -374,6 +418,32 @@ category_id, sub_category (Thai), intent (refund|withdraw|deposit|register|verif
  */
 export async function getEmbedding(text) {
   try {
+    if (IS_CLOUDFLARE) {
+      const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${MODEL_EMBEDDING}`;
+      const response = await fetch(cfUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          text: [text]
+        })
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`Cloudflare Embedding error (${response.status}): ${errText}`);
+      }
+
+      const data = await response.json();
+      if (!data.result || !data.result.data || !data.result.data[0]) {
+        throw new Error('Cloudflare response did not contain embedding vector');
+      }
+
+      return data.result.data[0];
+    }
+
     const response = await fetch(`${OLLAMA_URL}/api/embeddings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
