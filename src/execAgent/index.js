@@ -45,7 +45,7 @@ function collectChatIds(results) {
  * @param {{ query: string, companyId: string, chatId?: string }} input
  * @returns {Promise<{ reply: string, toolUsed: string, rawData: any, excelExport: any, slots: object, auditStatus: string }>}
  */
-export async function runExecAgent({ query, companyId, chatId }) {
+export async function runExecAgent({ query, companyId, chatId, history: explicitHistory }) {
   if (PERSONAL_DATA_PATTERN.test(query)) {
     return {
       reply: unsupportedText(['personal_data']).replace(/^- /, '🔒 '),
@@ -58,7 +58,7 @@ export async function runExecAgent({ query, companyId, chatId }) {
   }
 
   const categories = await loadCategoryContext(companyId);
-  const history = await loadHistory(chatId);
+  const history = explicitHistory || await loadHistory(chatId);
 
   let plan;
   try {

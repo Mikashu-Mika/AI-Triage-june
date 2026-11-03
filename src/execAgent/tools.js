@@ -115,6 +115,7 @@ export async function getIssueStats(ctx, args) {
   const { keys, unknown } = resolveCategoryKeys(args.categories, ctx.categories);
   const priorities = (args.priorities || []).filter(p => PRIORITY_RANK[p]);
   const groupBy = ['category', 'priority', 'day', 'hour'].includes(args.group_by) ? args.group_by : 'category';
+  const limit = Math.max(1, parseInt(args.limit, 10) || 15);
   const chats = await fetchChatsInPeriod(ctx.companyId, period);
 
   const allProblems = chats.flatMap(c => (c.chat_issues || []).filter(isProblem));
@@ -157,7 +158,7 @@ export async function getIssueStats(ctx, args) {
     matched_chats: matchedChats,
     matched_problem_issues: matchedIssues,
     pct_of_all_problems: allProblems.length ? Math.round((matchedIssues / allProblems.length) * 1000) / 10 : 0,
-    groups: groupList.slice(0, 15),
+    groups: groupList.slice(0, limit),
     // Exact numbers for "the rest" so the writer never has to invent them
     remaining_groups_after_top5: groupList.length > 5 ? {
       groups: groupList.length - 5,
