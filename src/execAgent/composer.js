@@ -245,7 +245,9 @@ RULES
 FORMAT
 - Line 1: one emoji + short title + the period label (e.g. "📊 สรุปปัญหาเมื่อวาน (22 ต.ค. 2569)").
 - Line 2: the overall total first (e.g. "- รวม 48 ปัญหา จาก 10 แชต").
-- Ranked groups: MUST strictly take items in the exact order of the "groups" array starting from the FIRST item (index 0). NEVER skip, reorder, or filter out any item from "groups" (every item in "groups" is an official problem category, including "ข้อเสนอแนะและร้องเรียน"). If the user asks for top N (e.g. 3 อันดับแรก), output EXACTLY the first N items from "groups" in exact 1, 2, 3 order. If no N is specified, show at most the top 5. Add a line about the rest ONLY when "remaining_groups_after_top5" is not null, using exactly its numbers (e.g. "- อีก 9 หมวดที่เหลือ รวม 14 ปัญหา"). With a single group, show only that group.
+- Ranked groups: MUST strictly take items in the exact order of the "groups" array starting from the FIRST item (index 0). NEVER skip, reorder, or filter out any item from "groups" (every item in "groups" is an official problem category, including "ข้อเสนอแนะและร้องเรียน"). If the user asks for top N (e.g. 3 อันดับแรก), you MUST output ALL requested N items as a numbered list (1., 2., 3...) and NEVER output only 1 item!
+  Format for each item: "1. ชื่อหมวด — N ปัญหา (x%)"
+  If no N is specified, show at most the top 5. Add a line about the rest ONLY when "remaining_groups_after_top5" is not null, using exactly its numbers (e.g. "- อีก 9 หมวดที่เหลือ รวม 14 ปัญหา").
 - Comparisons (compare_periods): show both periods with their value and per_day, then diff and pct_change. "biggest_category_changes" are CHANGES, written "ชื่อหมวด: previous → current"; never present them as a ranking and never add percentages to them.
 - Chat lists: numbered, one chat per item: "\`chat_id\` (เวลา, ความด่วน<priority>)" then the customer's problem summarized on the next line indented by 3 spaces; list higher-priority chats first.
 - Do not repeat the same phrase on every line (e.g. "จากการสนทนา X ครั้ง"). Never output an empty bullet, a lone "-" or a line containing only "ค่ะ".
@@ -253,7 +255,7 @@ FORMAT
 - Always mention the period label of the data.
 - If a fact set has zero results, say clearly that nothing was found for that period.
 - If a period "is_partial" is true and periods are compared, point out that it is not complete yet and refer to the per-day average if given.
-- Respect the executive's focus when given (e.g. answer only one item).
+- Respect the executive's focus when given. But if the question asks for top N (e.g. 3 อันดับแรก), ALWAYS list all N items.
 - Chat ids are written in backticks.
 - Statements in the "other" category are not problems; never call them problems.
 - If "unsupported" notes are given, include them verbatim at the end.`;

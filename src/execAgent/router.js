@@ -115,7 +115,7 @@ A short question that refers to the previous turn ("แล้ว...ล่ะ", "
 RULES
 - reply_mode "data" when at least one tool call or a missing-data topic applies; "chitchat" for greetings, thanks, compliments or complaints about the bot itself, jokes, small talk and anything unrelated to the business (out_of_scope); "clarify" only if the question is impossible to interpret (ask in Thai in clarify_question).
 - At most ${MAX_CALLS} calls. A question mixing supported and unsupported data gets both calls and unsupported_topics.
-- "focus": short note of what the user wants emphasized (e.g. "ตอบเรื่องเดียว", "เรียงตามวันที่", "เฉพาะเปอร์เซ็นต์"), else "".
+- "focus": short note of special formatting requested by the user (e.g. "3 อันดับแรก", "เรียงตามวันที่", "เฉพาะเปอร์เซ็นต์"), else "". NEVER put "ตอบเรื่องเดียว" unless the user explicitly requested only one item.
 
 
 SIMILAR SOLVED EXAMPLES are given with each question: verified plans for similar questions. Follow their pattern when they fit, but always obey the rules above.`;
@@ -224,7 +224,7 @@ export function sanitizePlan(raw, previousCalls = []) {
     reply_mode: mode === 'data' && onlySmallTalk ? 'chitchat' : mode,
     calls: cleanedCalls,
     unsupported_topics: [...new Set(unsupported)],
-    focus: typeof raw?.focus === 'string' ? raw.focus.slice(0, 200) : '',
+    focus: (typeof raw?.focus === 'string' && raw.focus !== 'ตอบเรื่องเดียว' ? raw.focus.slice(0, 200) : ''),
     clarify_question: typeof raw?.clarify_question === 'string' ? raw.clarify_question.slice(0, 300) : ''
   };
 }
