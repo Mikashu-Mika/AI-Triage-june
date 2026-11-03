@@ -31,7 +31,16 @@ const METRIC_UNIT = { issues: 'ปัญหา', chats: 'แชต', new_custome
 const signed = n => (n > 0 ? `+${n}` : `${n}`);
 const clip = (text, max) => (text && text.length > max ? `${text.slice(0, max)}…` : text || '-');
 
-function formatIssueStats(f) {
+function formatIssueStats(f, query = '') {
+  const isRemainingQuery = /(ที่เหลือ|หมวดที่เหลือ|อีก \d+ หมวด)/i.test(query);
+  if (isRemainingQuery && f.remaining_groups_after_top5?.list) {
+    const lines = [`📊 รายละเอียด ${f.remaining_groups_after_top5.groups} หมวดที่เหลือ (${f.period.label})`, `- รวม ${f.remaining_groups_after_top5.issues} ปัญหา`, ''];
+    f.remaining_groups_after_top5.list.forEach((g, i) => {
+      lines.push(`${i + 6}. ${g.group} — ${g.issues} ปัญหา (${g.pct_of_matched_issues}%)`);
+    });
+    lines.push('', '💡 พิมพ์ชื่อหมวดเพื่อดูรายการแชตได้ค่ะ');
+    return lines.join('\n').trim();
+  }
   const cats = f.filters.categories;
   // Category names that already start with "ปัญหา" read naturally without "ปัญหาหมวด"
   const subject = cats.length === 1 && cats[0].startsWith('ปัญหา') ? cats[0] : `ปัญหาหมวด${cats.join(' / ')}`;
@@ -256,6 +265,7 @@ FORMAT
 - If a fact set has zero results, say clearly that nothing was found for that period.
 - If a period "is_partial" is true and periods are compared, point out that it is not complete yet and refer to the per-day average if given.
 - Respect the executive's focus when given. But if the question asks for top N (e.g. 3 อันดับแรก), ALWAYS list all N items.
+- If the question asks about remaining groups (e.g. "หมวดที่เหลือมีอะไรบ้าง", "อีก 13 หมวดมีอะไร"): You MUST list all items from "remaining_groups_after_top5.list" (or items from rank 6 onwards in "groups") with their issue counts and percentages (e.g. "6. ชื่อหมวด — N ปัญหา (x%)", "7. ..."). NEVER say "ไม่พบข้อมูล"!
 - Chat ids are written in backticks.
 - Statements in the "other" category are not problems; never call them problems.
 - If "unsupported" notes are given, include them verbatim at the end.`;
@@ -275,7 +285,7 @@ FOR RESOLUTION ADVICE (get_resolution_advice facts):
  * @returns {Promise<{ reply: string, mode: 'llm'|'deterministic' }>}
  */
 export async function composeAnswer({ query, focus, results, unsupportedTopics }) {
-  const deterministic = formatDeterministic(results, unsupportedTopics);
+  const deterministic = formatDeterministic(results, unsupportedTopics, query);
   const facts = compactFacts(results);
   const needsAdvice = results.some(r => r.tool === 'get_resolution_advice' && !r.error);
 

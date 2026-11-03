@@ -16,6 +16,7 @@ const GROUP_BY = ['category', 'priority', 'day', 'hour'];
 const METRICS = ['issues', 'chats', 'new_customers', 'total', 'new', 'new_list', 'returning_ratio', 'new_by_month', 'repeat_customers'];
 const SORTS = ['newest', 'oldest', 'priority'];
 const MAX_CALLS = 3;
+const EXPLICIT_TIME_PATTERN = /(วันนี้|เมื่อวาน|เดือนนี้|เดือนหน้า|สัปดาห์นี้|สัปดาห์ที่แล้ว|เดือนที่แล้ว|ช่วงนี้|มกราคม|กุมภาพันธ์|มีนาคม|เมษายน|พฤษภาคม|มิถุนายน|กรกฎาคม|สิงหาคม|กันยายน|ตุลาคม|พฤศจิกายน|ธันวาคม|\d{1,2}\s*(ม\.ค\.|ก\.พ\.|มี\.ค\.|เม\.ย\.|พ\.ค\.|มิ\.ย\.|ก\.ค\.|ส\.ค\.|ก\.ย\.|ต\.ค\.|พ\.ย\.|ธ\.ค\.)|\d{4}|\d{2}\/\d{2})/i;
 
 const periodSchema = {
   type: 'object',
@@ -140,7 +141,7 @@ const TOOLS_WITH_SINGLE_CATEGORY = ['get_category_info', 'get_resolution_advice'
  * @param {object} raw - Parsed LLM output
  * @param {any[]} [previousCalls] - Calls of the previous successful turn
  */
-export function sanitizePlan(raw, previousCalls = []) {
+export function sanitizePlan(raw, previousCalls = [], userQuery = '') {
   const previousPeriod = previousCalls.find(c => c.args?.period)?.args.period || null;
   const continues = raw?.continues_previous === true && previousCalls.length > 0;
   // Filters of the previous turn that a follow-up keeps unless it sets its own
@@ -184,9 +185,22 @@ export function sanitizePlan(raw, previousCalls = []) {
         if (TOOLS_WITH_SINGLE_CATEGORY.includes(c.tool) && !args.category && previousCategory) args.category = previousCategory;
         args.continues_previous = true;
       }
-      if (!args.period && c.tool !== 'get_category_info') {
+      const hasExplicitTime = EXPLICIT_TIME_PATTERN.test(userQuery);
+      if (!hasExplicitTime && previousPeriod) {
+        if (!args.period || args.period.type === 'last_n_days') {
+          args.period = previousPeriod;
+          args.period_inherited = true;
+        }
+      } else if (!args.period && c.tool !== 'get_category_info') {
         args.period = previousPeriod || { type: 'last_n_days', n: 7 };
         args.period_inherited = !!previousPeriod;
+      }
+      const isRemainingQuery = /(ที่เหลือ|หมวดที่เหลือ|อีก \d+ หมวด|อันดับที่เหลือ)/i.test(userQuery);
+      if (isRemainingQuery) {
+        if (previousPeriod) args.period = previousPeriod;
+        c.tool = 'get_issue_stats';
+        delete args.categories;
+        args.limit = 30;
       }
       // Fix follow-up comparison: If comparing with a prior period and previousPeriod exists from previous turn,
       // the baseline period A should be the previousPeriod (e.g. October), not defaulted to current month!
@@ -256,7 +270,7 @@ export async function routeQuery({ query, companyId, categories, history }) {
     console.log(`🧭 [Router] attempt ${i + 1}: ${promptTokens ?? '?'} prompt + ${outputTokens ?? '?'} output tokens, ${durationMs ?? '?'} ms (model load ${loadMs ?? 0} ms)`);
     try {
       const previousCalls = [...(history || [])].reverse().find(h => h.slots?.calls?.length)?.slots.calls || [];
-      const plan = sanitizePlan(parseJsonObject(content), previousCalls);
+      const plan = sanitizePlan(parseJsonObject(content), previousCalls, query);
       return {
         ...plan,
         examples_used: examples.map(e => ({ question: e.question, similarity: Math.round(e.similarity * 1000) / 1000 })),

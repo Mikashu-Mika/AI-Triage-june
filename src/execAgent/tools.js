@@ -115,7 +115,6 @@ export async function getIssueStats(ctx, args) {
   const { keys, unknown } = resolveCategoryKeys(args.categories, ctx.categories);
   const priorities = (args.priorities || []).filter(p => PRIORITY_RANK[p]);
   const groupBy = ['category', 'priority', 'day', 'hour'].includes(args.group_by) ? args.group_by : 'category';
-  const limit = Math.max(1, parseInt(args.limit, 10) || 15);
   const chats = await fetchChatsInPeriod(ctx.companyId, period);
 
   const allProblems = chats.flatMap(c => (c.chat_issues || []).filter(isProblem));
@@ -147,6 +146,7 @@ export async function getIssueStats(ctx, args) {
   const groupList = [...groups.entries()]
     .map(([g, v]) => ({ group: label(g), issues: v.issues, chats: v.chats, pct_of_matched_issues: matchedIssues ? Math.round((v.issues / matchedIssues) * 1000) / 10 : 0 }))
     .sort((a, b) => b.issues - a.issues);
+  const limit = args.limit ? Math.max(1, parseInt(args.limit, 10)) : groupList.length;
 
   return {
     tool: 'get_issue_stats',
@@ -163,6 +163,7 @@ export async function getIssueStats(ctx, args) {
     remaining_groups_after_top5: groupList.length > 5 ? {
       groups: groupList.length - 5,
       issues: groupList.slice(5).reduce((sum, g) => sum + g.issues, 0),
+      list: groupList.slice(5).map(g => ({ group: g.group, issues: g.issues, pct_of_matched_issues: g.pct_of_matched_issues })),
       min_issues_per_group: Math.min(...groupList.slice(5).map(g => g.issues)),
       max_issues_per_group: Math.max(...groupList.slice(5).map(g => g.issues))
     } : null,
