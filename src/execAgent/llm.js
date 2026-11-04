@@ -21,42 +21,47 @@ export async function ollamaChat(messages, { format, temperature = 0, maxTokens 
   const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID;
   const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN;
   if (CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN) {
-    const started = Date.now();
-    const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${AGENT_MODEL}`;
-    const res = await fetch(cfUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        messages,
-        max_tokens: maxTokens,
-        temperature
-      }),
-      signal: AbortSignal.timeout(timeoutMs)
-    });
-    if (!res.ok) {
-      const errText = await res.text();
-      throw new Error(`Cloudflare AI HTTP ${res.status}: ${errText.slice(0, 200)}`);
+    try {
+      const started = Date.now();
+      const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${AGENT_MODEL}`;
+      const res = await fetch(cfUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          messages,
+          max_tokens: maxTokens,
+          temperature
+        }),
+        signal: AbortSignal.timeout(timeoutMs)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const rawResp = data.result?.response;
+        const content = typeof rawResp === 'object' ? JSON.stringify(rawResp) : (rawResp || '');
+        const outputTokens = data.result?.usage?.completion_tokens ?? null;
+        const truncated = (outputTokens !== null && outputTokens >= maxTokens);
+        return {
+          content: content.trim(),
+          truncated,
+          durationMs: Date.now() - started,
+          loadMs: 0,
+          promptTokens: data.result?.usage?.prompt_tokens ?? null,
+          outputTokens
+        };
+      } else {
+        const errText = await res.text();
+        console.warn(`⚠️ [Cloudflare AI] HTTP ${res.status} (${errText.slice(0, 80)}...), falling back to local Ollama...`);
+      }
+    } catch (cfErr) {
+      console.warn(`⚠️ [Cloudflare AI] Exception (${cfErr.message}), falling back to local Ollama...`);
     }
-    const data = await res.json();
-    const rawResp = data.result?.response;
-    const content = typeof rawResp === 'object' ? JSON.stringify(rawResp) : (rawResp || '');
-    const outputTokens = data.result?.usage?.completion_tokens ?? null;
-    const truncated = (outputTokens !== null && outputTokens >= maxTokens);
-    return {
-      content: content.trim(),
-      truncated,
-      durationMs: Date.now() - started,
-      loadMs: 0,
-      promptTokens: data.result?.usage?.prompt_tokens ?? null,
-      outputTokens
-    };
   }
   const url = new URL('/api/chat', OLLAMA_URL);
   const body = JSON.stringify({
-    model: AGENT_MODEL,
+    model: AGENT_MODEL.startsWith('@cf/') ? 'qwen2.5:14b' : AGENT_MODEL,
     messages,
     stream: false,
     keep_alive: KEEP_ALIVE,

@@ -419,36 +419,36 @@ category_id, sub_category (Thai), intent (refund|withdraw|deposit|register|verif
 export async function getEmbedding(text) {
   try {
     if (IS_CLOUDFLARE) {
-      const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${MODEL_EMBEDDING}`;
-      const response = await fetch(cfUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          text: [text]
-        })
-      });
+      try {
+        const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${MODEL_EMBEDDING}`;
+        const response = await fetch(cfUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            text: [text]
+          })
+        });
 
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`Cloudflare Embedding error (${response.status}): ${errText}`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.result && data.result.data && data.result.data[0]) {
+            return data.result.data[0];
+          }
+        }
+        console.warn('⚠️ [Cloudflare Embedding] Unavailable, falling back to local Ollama bge-m3...');
+      } catch (e) {
+        console.warn('⚠️ [Cloudflare Embedding] Error, falling back to local Ollama bge-m3...');
       }
-
-      const data = await response.json();
-      if (!data.result || !data.result.data || !data.result.data[0]) {
-        throw new Error('Cloudflare response did not contain embedding vector');
-      }
-
-      return data.result.data[0];
     }
 
     const response = await fetch(`${OLLAMA_URL}/api/embeddings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: MODEL_EMBEDDING,
+        model: MODEL_EMBEDDING.startsWith('@cf/') ? 'bge-m3:latest' : MODEL_EMBEDDING,
         prompt: text,
         keep_alive: process.env.OLLAMA_KEEP_ALIVE || '60m'
       })
