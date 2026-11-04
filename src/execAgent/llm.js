@@ -43,13 +43,15 @@ export async function ollamaChat(messages, { format, temperature = 0, maxTokens 
     const data = await res.json();
     const rawResp = data.result?.response;
     const content = typeof rawResp === 'object' ? JSON.stringify(rawResp) : (rawResp || '');
+    const outputTokens = data.result?.usage?.completion_tokens ?? null;
+    const truncated = (outputTokens !== null && outputTokens >= maxTokens);
     return {
       content: content.trim(),
-      truncated: false,
+      truncated,
       durationMs: Date.now() - started,
       loadMs: 0,
       promptTokens: data.result?.usage?.prompt_tokens ?? null,
-      outputTokens: data.result?.usage?.completion_tokens ?? null
+      outputTokens
     };
   }
   const url = new URL('/api/chat', OLLAMA_URL);

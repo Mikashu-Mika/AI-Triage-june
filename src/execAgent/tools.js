@@ -26,22 +26,84 @@ export async function loadCategoryContext(companyId) {
   return byKey;
 }
 
-/** Map router-provided category keys/names to known keys; unknown ones are reported back */
+/** Map router-provided category keys/names to known keys; picks closest match or reports unknown */
 function resolveCategoryKeys(requested, categoryContext) {
   const keys = [];
   const unknown = [];
+  const categories = Array.from(categoryContext.values());
+
   for (const raw of requested || []) {
     const q = String(raw).trim().toLowerCase();
     if (!q) continue;
+
+    // 1. Direct key match
     const key = keyOf(q);
     if (categoryContext.has(key)) {
       keys.push(key);
       continue;
     }
-    const byName = [...categoryContext.values()].find(c => c.name.toLowerCase() === q || c.name.toLowerCase().includes(q));
-    if (byName) keys.push(byName.key);
-    else unknown.push(raw);
+
+    // Normalized query: remove common prefix words like "หมวด", "ปัญหา", "เรื่อง", "ด้าน"
+    const cleanQ = q.replace(/^(หมวด|เรื่อง|ปัญหาหมวด|ปัญหา|ด้าน)/g, '').trim();
+
+    let bestScore = 0;
+    let bestKey = null;
+
+    for (const c of categories) {
+      const cName = c.name.toLowerCase();
+      const cClean = cName.replace(/^(ปัญหา|เรื่อง)/g, '').trim();
+      let score = 0;
+
+      // Exact match with full name or cleaned name
+      if (cName === q || cClean === q || cName === cleanQ || cClean === cleanQ) {
+        score = 1000;
+      }
+      // Category name starts with query or query starts with category name
+      else if (cName.startsWith(cleanQ) || (cleanQ.length >= 3 && cleanQ.startsWith(cClean))) {
+        score = 800 + Math.min(cleanQ.length, cName.length);
+      }
+      // Substring match in name
+      else if (cName.includes(cleanQ) || (cleanQ.length >= 3 && cleanQ.includes(cClean))) {
+        score = 600 + Math.min(cleanQ.length, cName.length);
+      }
+      // Segment / token match (split by '/' or space)
+      else {
+        const segments = cName.split(/[\s/]+/);
+        let segmentMatch = 0;
+        for (const seg of segments) {
+          const sClean = seg.replace(/^(ปัญหา|เรื่อง)/g, '').trim();
+          if (sClean.length >= 2 && (cleanQ.includes(sClean) || sClean.includes(cleanQ))) {
+            segmentMatch += sClean.length * 10;
+          }
+        }
+        if (segmentMatch > 0) {
+          score = 400 + segmentMatch;
+        }
+      }
+
+      // Check description keywords
+      if (c.description) {
+        const desc = c.description.toLowerCase();
+        if (desc.includes(cleanQ) || (cleanQ.length >= 3 && desc.includes(q))) {
+          const descScore = 550 + Math.min(cleanQ.length, 20);
+          if (descScore > score) score = descScore;
+        }
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestKey = c.key;
+      }
+    }
+
+    const minThreshold = cleanQ.length <= 2 ? 600 : 450;
+    if (bestScore >= minThreshold && bestKey) {
+      keys.push(bestKey);
+    } else {
+      unknown.push(raw);
+    }
   }
+
   return { keys: [...new Set(keys)], unknown };
 }
 
@@ -118,6 +180,24 @@ export async function getIssueStats(ctx, args) {
   const chats = await fetchChatsInPeriod(ctx.companyId, period);
 
   const allProblems = chats.flatMap(c => (c.chat_issues || []).filter(isProblem));
+
+  // If user asked for specific category(ies), but NONE was found: return clear not_found
+  if (Array.isArray(args.categories) && args.categories.length > 0 && keys.length === 0) {
+    return {
+      tool: 'get_issue_stats',
+      period: periodFacts(period),
+      filters: { categories: [], priorities: priorities.map(p => PRIORITY_TH[p]), unknown_categories: unknown },
+      not_found: true,
+      message: `ไม่พบหมวด "${unknown.join(', ')}" ในระบบ`,
+      total_chats_in_period: chats.length,
+      total_problem_issues_in_period: allProblems.length,
+      matched_chats: 0,
+      matched_problem_issues: 0,
+      pct_of_all_problems: 0,
+      groups: [],
+      available_categories: [...ctx.categories.values()].filter(c => c.key !== 'other').map(c => c.name)
+    };
+  }
   const groups = new Map();
   let matchedIssues = 0;
   let matchedChats = 0;
@@ -182,6 +262,22 @@ export async function listChats(ctx, args) {
   let period = resolvePeriod(args.period);
   let chats;
 
+  // If user asked for specific category(ies), but NONE was found: return clear not_found
+  if (Array.isArray(args.categories) && args.categories.length > 0 && keys.length === 0) {
+    return {
+      tool: 'list_chats',
+      period: periodFacts(period),
+      filters: { categories: [], priorities: priorities.map(p => PRIORITY_TH[p]), query: text || null, unknown_categories: unknown },
+      not_found: true,
+      message: `ไม่พบหมวด "${unknown.join(', ')}" ในระบบ`,
+      sort: args.sort || 'newest',
+      total_matched_chats: 0,
+      shown: 0,
+      items: [],
+      available_categories: [...ctx.categories.values()].filter(c => c.key !== 'other').map(c => c.name)
+    };
+  }
+
   if (Array.isArray(args.chat_ids) && args.chat_ids.length > 0) {
     const { data, error } = await supabase
       .from('chats')
@@ -243,6 +339,23 @@ export async function comparePeriods(ctx, args) {
   const periodA = resolvePeriod(args.period);
   const periodB = args.period_b ? resolvePeriod(args.period_b) : previousPeriod(periodA);
   const { keys, unknown } = resolveCategoryKeys(args.categories, ctx.categories);
+
+  if (Array.isArray(args.categories) && args.categories.length > 0 && keys.length === 0) {
+    return {
+      tool: 'compare_periods',
+      metric,
+      period_a: periodFacts(periodA),
+      period_b: periodFacts(periodB),
+      filters: { categories: [], unknown_categories: unknown },
+      not_found: true,
+      message: `ไม่พบหมวด "${unknown.join(', ')}" ในระบบ`,
+      current: 0,
+      previous: 0,
+      diff: 0,
+      pct_change: 0,
+      available_categories: [...ctx.categories.values()].filter(c => c.key !== 'other').map(c => c.name)
+    };
+  }
 
   const measure = async period => {
     if (metric === 'new_customers') {
@@ -397,9 +510,23 @@ export async function getSentiment(ctx, args) {
   const counts = {};
   for (const c of chats) counts[c.sentiment || 'ไม่ระบุ'] = (counts[c.sentiment || 'ไม่ระบุ'] || 0) + 1;
   // Stored sentiment is free text from the LLM; bucket it into a polarity for a stable overview
-  const polarityOf = s => /ชม|พอใจ(?!ไม่)|ประทับใจ|ขอบคุณ/.test(s || '') && !/ไม่พอใจ/.test(s || '') ? 'บวก'
-    : /โกรธ|ไม่พอใจ|หงุดหงิด|รำคาญ|ผิดหวัง|กังวล|ตกใจ|ไม่ประทับใจ/.test(s || '') ? 'ลบ'
-    : 'กลาง';
+  const polarityOf = s => {
+    const text = (s || '').trim();
+    if (!text) return 'กลาง';
+    // 1. Check negative words first (โกรธ, ไม่พอใจ, หงุดหงิด, รำคาญ, ผิดหวัง ฯลฯ)
+    if (/โกรธ|ไม่พอใจ|หงุดหงิด|รำคาญ|ผิดหวัง|กังวล|กลัว|ตกใจ|ไม่ประทับใจ/i.test(text)) {
+      return 'ลบ';
+    }
+    // 2. Check positive words: 'ชม' must not match 'ชม.' (ชั่วโมง) or 'ไม่ชม'
+    if (/ไม่ชม/.test(text)) return 'กลาง';
+    if (/ชื่นชม|ชมเชย|คำชม|น่าชม|ประทับใจ|ขอบคุณ|พอใจ/i.test(text)) {
+      return 'บวก';
+    }
+    if (/ชม(?![.])/i.test(text) && !/ชม[.]/.test(text) && !/ชั่วโมง/.test(text)) {
+      return 'บวก';
+    }
+    return 'กลาง';
+  };
   const polarity = { บวก: 0, กลาง: 0, ลบ: 0 };
   chats.forEach(c => { polarity[polarityOf(c.sentiment)]++; });
   const negative = chats.filter(c => polarityOf(c.sentiment) === 'ลบ');
@@ -441,8 +568,10 @@ export async function getCategoryInfo(ctx, args) {
   if (keys.length === 0) {
     return {
       tool: 'get_category_info',
+      not_found: true,
+      message: `ไม่พบหมวด "${args.category || unknown.join(', ')}" ในระบบ`,
       unknown_categories: unknown,
-      available_categories: [...ctx.categories.values()].map(c => ({ name: c.name, description: c.description }))
+      available_categories: [...ctx.categories.values()].filter(c => c.key !== 'other').map(c => ({ name: c.name, description: c.description }))
     };
   }
   const cat = ctx.categories.get(keys[0]);
@@ -457,6 +586,20 @@ export async function getResolutionAdvice(ctx, args) {
   const period = resolvePeriod(args.period || { type: 'last_n_days', n: 30 });
   const chats = await fetchChatsInPeriod(ctx.companyId, period);
   let { keys, unknown } = resolveCategoryKeys([args.category].filter(Boolean), ctx.categories);
+
+  // Category requested but not found
+  if (args.category && keys.length === 0) {
+    return {
+      tool: 'get_resolution_advice',
+      period: periodFacts(period),
+      not_found: true,
+      message: `ไม่พบหมวด "${args.category}" ในระบบ`,
+      unknown_categories: unknown,
+      category: null,
+      sop: null,
+      available_categories: [...ctx.categories.values()].filter(c => c.key !== 'other').map(c => ({ name: c.name, description: c.description }))
+    };
+  }
 
   // No category given: advise on the most frequent problem of the period
   if (keys.length === 0) {

@@ -32,6 +32,14 @@ const signed = n => (n > 0 ? `+${n}` : `${n}`);
 const clip = (text, max) => (text && text.length > max ? `${text.slice(0, max)}…` : text || '-');
 
 function formatIssueStats(f, query = '') {
+  if (f.not_found) {
+    const unk = f.filters?.unknown_categories?.join(', ') || 'ที่ระบุ';
+    const lines = [`📊 ไม่พบหมวด "${unk}" ในระบบค่ะ`];
+    if (f.available_categories?.length) {
+      lines.push(`💡 หมวดหมู่ที่มีในระบบ: ${f.available_categories.slice(0, 8).join(', ')}`);
+    }
+    return lines.join('\n');
+  }
   const isRemainingQuery = /(ที่เหลือ|หมวดที่เหลือ|อีก \d+ หมวด)/i.test(query);
   if (isRemainingQuery && f.remaining_groups_after_top5?.list) {
     const lines = [`📊 รายละเอียด ${f.remaining_groups_after_top5.groups} หมวดที่เหลือ (${f.period.label})`, `- รวม ${f.remaining_groups_after_top5.issues} ปัญหา`, ''];
@@ -68,6 +76,14 @@ function formatIssueStats(f, query = '') {
 }
 
 function formatChatList(f) {
+  if (f.not_found) {
+    const unk = f.filters?.unknown_categories?.join(', ') || 'ที่ระบุ';
+    const lines = [`📋 ไม่พบหมวด "${unk}" ในระบบค่ะ`];
+    if (f.available_categories?.length) {
+      lines.push(`💡 หมวดหมู่ที่มีในระบบ: ${f.available_categories.slice(0, 8).join(', ')}`);
+    }
+    return lines.join('\n');
+  }
   const isSearch = f.tool === 'search_chats';
   const total = isSearch ? f.total_matches : f.total_matched_chats;
   const cats = f.filters?.categories || [];
@@ -94,6 +110,14 @@ function formatChatList(f) {
 }
 
 function formatCompare(f) {
+  if (f.not_found) {
+    const unk = f.filters?.unknown_categories?.join(', ') || 'ที่ระบุ';
+    const lines = [`📊 ไม่พบหมวด "${unk}" ในระบบค่ะ`];
+    if (f.available_categories?.length) {
+      lines.push(`💡 หมวดหมู่ที่มีในระบบ: ${f.available_categories.slice(0, 8).join(', ')}`);
+    }
+    return lines.join('\n');
+  }
   const unit = METRIC_UNIT[f.metric] || '';
   const cats = f.filters?.categories?.length ? ` หมวด${f.filters.categories.join(' / ')}` : '';
   const lines = [`📅 เปรียบเทียบ${f.metric_th}${cats}`];
@@ -144,7 +168,11 @@ function formatSentiment(f) {
 }
 
 function formatCategoryInfo(f) {
-  if (!f.category) return `ไม่พบหมวดที่ถามค่ะ\n- หมวดที่มีในระบบ: ${(f.available_categories || []).map(c => c.name).join(', ')}`;
+  if (f.not_found || !f.category) {
+    const unk = f.unknown_category || f.unknown_categories?.join(', ') || 'ที่ถาม';
+    const known = (f.available_categories || f.known_categories || []).map(c => c.name || c);
+    return `📖 ไม่พบหมวด "${unk}" ในระบบค่ะ\n💡 หมวดหมู่ที่มีในระบบ: ${known.slice(0, 8).join(', ')}`;
+  }
   const lines = [`📖 หมวด${f.category.name}`];
   if (f.category.description) lines.push(`- ครอบคลุม: ${f.category.description}`);
   if (f.sop) lines.push('', `📘 คู่มือ (${f.sop.status})`, f.sop.content);
@@ -153,6 +181,11 @@ function formatCategoryInfo(f) {
 }
 
 function formatAdvice(f) {
+  if (f.not_found || !f.category) {
+    const unk = f.unknown_category || f.unknown_categories?.join(', ') || 'ที่ถาม';
+    const known = (f.available_categories || f.known_categories || []).map(c => c.name || c);
+    return `🛠️ ไม่พบหมวด "${unk}" ในระบบค่ะ\n💡 หมวดหมู่ที่มีในระบบ: ${known.slice(0, 8).join(', ')}`;
+  }
   if (f.no_problems_found) return `🛠️ แนวทางแก้ปัญหา ${f.period.label}\n- ไม่พบปัญหาในช่วงนี้ จึงยังไม่มีเรื่องที่ต้องแก้ค่ะ`;
   const lines = [`🛠️ แนวทางแก้ "${f.category.name}" ${f.period.label}`, '', '📌 สิ่งที่เกิดขึ้น'];
   lines.push(`- ${f.issues_in_period} ปัญหา จาก ${f.chats_in_period} แชต (${f.previous_period.label}: ${f.previous_period.issues} ปัญหา)`);
@@ -263,6 +296,7 @@ FORMAT
 - You may end with ONE short line: an observation grounded in the facts (📌) or a follow-up suggestion (💡). The last sentence ends with ค่ะ/นะคะ.
 - Always mention the period label of the data.
 - If a fact set has zero results, say clearly that nothing was found for that period.
+- If the facts show "not_found: true" or report unknown_categories, you MUST clearly state that the requested category was not found in the system (e.g. "ไม่พบหมวด \"...\" ในระบบค่ะ"). DO NOT report totals or problems from all categories!
 - If a period "is_partial" is true and periods are compared, point out that it is not complete yet and refer to the per-day average if given.
 - Respect the executive's focus when given. But if the question asks for top N (e.g. 3 อันดับแรก), ALWAYS list all N items.
 - If the question asks about remaining groups (e.g. "หมวดที่เหลือมีอะไรบ้าง", "อีก 13 หมวดมีอะไร"): You MUST list all items from "remaining_groups_after_top5.list" (or items from rank 6 onwards in "groups") with their issue counts and percentages (e.g. "6. ชื่อหมวด — N ปัญหา (x%)", "7. ..."). NEVER say "ไม่พบข้อมูล"!

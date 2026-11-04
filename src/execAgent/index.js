@@ -7,17 +7,20 @@ import { TOOL_HANDLERS, loadCategoryContext } from './tools.js';
 import { composeAnswer, composeChitchat, unsupportedText } from './composer.js';
 
 const HISTORY_TURNS = 3;
+const HISTORY_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes threshold for continuous context
 
 // Deterministic backstop for requests of personal contact data (the router also detects these)
 const PERSONAL_DATA_PATTERN = /(เบอร์โทร|เบอร์ลูกค้า|ขอเบอร์|เบอร์มือถือ|อีเมลลูกค้า|ขออีเมล|อีเมล์ลูกค้า|รหัสผ่านลูกค้า|password ลูกค้า|ขอรหัสผ่าน)/i;
 
-/** Last turns of this Telegram chat, for follow-up questions */
+/** Last turns of this Telegram chat, for follow-up questions (within 30 minutes) */
 async function loadHistory(chatId) {
   if (!chatId) return [];
+  const since = new Date(Date.now() - HISTORY_MAX_AGE_MS).toISOString();
   const { data, error } = await supabase
     .from('agent_audit_logs')
     .select('user_query, slots, reply, audit_status, created_at')
     .eq('chat_id', String(chatId))
+    .gte('created_at', since)
     .order('created_at', { ascending: false })
     .limit(HISTORY_TURNS);
   if (error) {
@@ -58,7 +61,8 @@ export async function runExecAgent({ query, companyId, chatId, history: explicit
   }
 
   const categories = await loadCategoryContext(companyId);
-  const history = explicitHistory || await loadHistory(chatId);
+  const rawHistory = explicitHistory || await loadHistory(chatId);
+  const history = (rawHistory || []).filter(h => !h.created_at || (Date.now() - new Date(h.created_at).getTime()) <= HISTORY_MAX_AGE_MS);
 
   let plan;
   try {

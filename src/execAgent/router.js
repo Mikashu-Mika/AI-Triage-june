@@ -143,7 +143,8 @@ const TOOLS_WITH_SINGLE_CATEGORY = ['get_category_info', 'get_resolution_advice'
  */
 export function sanitizePlan(raw, previousCalls = [], userQuery = '') {
   const previousPeriod = previousCalls.find(c => c.args?.period)?.args.period || null;
-  const continues = raw?.continues_previous === true && previousCalls.length > 0;
+  const isFollowUpPattern = /(ที่เหลือ|หมวดที่เหลือ|อีก \d+ หมวด|อันดับที่เหลือ|แล้ว|แล้วมี|แล้วเคส|ข้อ \d+|เคสนั้น|รายการนี้|แชตไหนบ้าง|เทียบกับ)/i.test(userQuery);
+  const continues = (raw?.continues_previous === true || isFollowUpPattern) && previousCalls.length > 0;
   // Filters of the previous turn that a follow-up keeps unless it sets its own
   const previousFilters = {};
   for (const key of ['categories', 'priorities', 'query']) {
@@ -186,14 +187,13 @@ export function sanitizePlan(raw, previousCalls = [], userQuery = '') {
         args.continues_previous = true;
       }
       const hasExplicitTime = EXPLICIT_TIME_PATTERN.test(userQuery);
-      if (!hasExplicitTime && previousPeriod) {
+      if (continues && !hasExplicitTime && previousPeriod) {
         if (!args.period || args.period.type === 'last_n_days') {
           args.period = previousPeriod;
           args.period_inherited = true;
         }
       } else if (!args.period && c.tool !== 'get_category_info') {
-        args.period = previousPeriod || { type: 'last_n_days', n: 7 };
-        args.period_inherited = !!previousPeriod;
+        args.period = { type: 'last_n_days', n: 7 };
       }
       const isRemainingQuery = /(ที่เหลือ|หมวดที่เหลือ|อีก \d+ หมวด|อันดับที่เหลือ)/i.test(userQuery);
       if (isRemainingQuery) {
