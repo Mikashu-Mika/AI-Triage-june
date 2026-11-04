@@ -1,3 +1,4 @@
+import { isJaikaConfigured, jaikaEmbedding } from './jaika.js';
 import dotenv from 'dotenv';
 import http from 'http';
 dotenv.config();
@@ -418,6 +419,14 @@ category_id, sub_category (Thai), intent (refund|withdraw|deposit|register|verif
  */
 export async function getEmbedding(text) {
   try {
+    if (isJaikaConfigured()) {
+      try {
+        return await jaikaEmbedding(text);
+      } catch (jaikaErr) {
+        console.warn(`⚠️ [AI Jaika Embedding] Error (${jaikaErr.message}), falling back...`);
+      }
+    }
+
     if (IS_CLOUDFLARE) {
       try {
         const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${MODEL_EMBEDDING}`;

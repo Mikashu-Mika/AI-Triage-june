@@ -1,3 +1,4 @@
+import { isJaikaConfigured, jaikaChat } from '../jaika.js';
 import http from 'http';
 import https from 'https';
 import dotenv from 'dotenv';
@@ -18,6 +19,14 @@ export const AGENT_TIMEOUT_MS = parseInt(process.env.AGENT_LLM_TIMEOUT_MS || '90
  * @returns {Promise<{ content: string, promptTokens: number|null, outputTokens: number|null }>}
  */
 export async function ollamaChat(messages, { format, temperature = 0, maxTokens = 800, timeoutMs = AGENT_TIMEOUT_MS } = {}) {
+  if (isJaikaConfigured()) {
+    try {
+      return await jaikaChat(messages, { format, temperature, maxTokens, timeoutMs });
+    } catch (jaikaErr) {
+      console.warn(`⚠️ [AI Jaika] Error (${jaikaErr.message}), falling back to alternative provider...`);
+    }
+  }
+
   const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID;
   const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN;
   if (CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN) {
