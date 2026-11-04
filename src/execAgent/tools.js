@@ -46,6 +46,11 @@ function resolveCategoryKeys(requested, categoryContext) {
     // Normalized query: remove common prefix words like "หมวด", "ปัญหา", "เรื่อง", "ด้าน"
     const cleanQ = q.replace(/^(หมวด|เรื่อง|ปัญหาหมวด|ปัญหา|ด้าน)/g, '').trim();
 
+    // Meta-words referring to remaining groups, not actual category names
+    if (/^(ที่เหลือ|หมวดที่เหลือ|อื่นๆที่เหลือ|เหลือ|อีก \d+ หมวด|อีก \d+ หมวดที่เหลือ)$/i.test(cleanQ)) {
+      continue;
+    }
+
     let bestScore = 0;
     let bestKey = null;
 
