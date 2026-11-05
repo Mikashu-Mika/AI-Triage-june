@@ -9,16 +9,21 @@ export const JAIKA_MODEL_CHAT = process.env.JAIKA_MODEL_CHAT || 'qwen2.5-14b';
 export const JAIKA_MODEL_FAST = process.env.JAIKA_MODEL_FAST || 'qwen2.5-3b';
 export const JAIKA_MODEL_EMBEDDING = process.env.JAIKA_MODEL_EMBEDDING || 'bge-m3';
 
+export const getJaikaBaseUrl = () => process.env.JAIKA_BASE_URL || JAIKA_BASE_URL;
+export const getJaikaApiKey = () => process.env.JAIKA_API_KEY || JAIKA_API_KEY;
+
 /**
  * Check if AI Jaika has been configured with a valid URL and API key.
  * If the URL still has placeholder '<company-domain>', it returns false.
  */
 export const isJaikaConfigured = () => {
+  const url = getJaikaBaseUrl();
+  const key = getJaikaApiKey();
   return !!(
-    JAIKA_BASE_URL &&
-    JAIKA_API_KEY &&
-    !JAIKA_BASE_URL.includes('<company-domain>') &&
-    JAIKA_API_KEY.startsWith('sk-jaika-')
+    url &&
+    key &&
+    !url.includes('<company-domain>') &&
+    key.startsWith('sk-jaika-')
   );
 };
 
@@ -28,8 +33,8 @@ export function getJaikaClient() {
   if (!isJaikaConfigured()) return null;
   if (!jaikaClient) {
     jaikaClient = new OpenAI({
-      baseURL: JAIKA_BASE_URL,
-      apiKey: JAIKA_API_KEY
+      baseURL: getJaikaBaseUrl(),
+      apiKey: getJaikaApiKey()
     });
   }
   return jaikaClient;

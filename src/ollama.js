@@ -1,4 +1,4 @@
-import { isJaikaConfigured, jaikaEmbedding } from './jaika.js';
+import { isJaikaConfigured, jaikaEmbedding, jaikaChat } from './jaika.js';
 import dotenv from 'dotenv';
 import http from 'http';
 dotenv.config();
@@ -254,7 +254,26 @@ category_id, sub_category (Thai), intent (refund|withdraw|deposit|register|verif
     let outputTokens = null;
     let contextOverflow = false;
 
-    if (IS_CLOUDFLARE) {
+    if (isJaikaConfigured()) {
+      try {
+        const jaikaRes = await jaikaChat([
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `Analyze this conversation:\n${conversation}${clausesBlock}` }
+        ], {
+          model: process.env.JAIKA_MODEL_CHAT || 'qwen2.5-14b',
+          format: { type: 'json_object' },
+          maxTokens: 2048,
+          temperature: 0.1
+        });
+        result = repairAndParseJSON(jaikaRes.content);
+        promptTokens = jaikaRes.promptTokens;
+        outputTokens = jaikaRes.outputTokens;
+      } catch (jaikaErr) {
+        console.warn(`⚠️ [AI Jaika Triage] Error (${jaikaErr.message}), falling back...`);
+      }
+    }
+
+    if (!result && IS_CLOUDFLARE) {
       const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${MODEL_LLM}`;
       const response = await fetch(cfUrl, {
         method: 'POST',
@@ -287,7 +306,7 @@ category_id, sub_category (Thai), intent (refund|withdraw|deposit|register|verif
 
       promptTokens = data.result?.usage?.prompt_tokens ?? null;
       outputTokens = data.result?.usage?.completion_tokens ?? null;
-    } else {
+    } else if (!result) {
       const response = await postRequest(`${OLLAMA_URL}/api/chat`, {
         model: MODEL_LLM,
         messages: [
@@ -399,7 +418,7 @@ category_id, sub_category (Thai), intent (refund|withdraw|deposit|register|verif
       ai_recommendation: sanitizeChinese(result.ai_recommendation || 'แนะนำตรวจสอบปัญหาระบบทั่วไป'),
       detected_issues: sanitizedIssues,
       _meta: {
-        model: MODEL_LLM,
+        model: isJaikaConfigured() ? (process.env.JAIKA_MODEL_CHAT || 'qwen2.5-14b') : MODEL_LLM,
         num_ctx: OLLAMA_NUM_CTX,
         prompt_tokens: promptTokens,
         output_tokens: outputTokens,
