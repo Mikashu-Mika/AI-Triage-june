@@ -218,9 +218,86 @@ export function formatDeterministic(results, unsupportedTopics = []) {
 // ---------------------------------------------------------------------------
 const numbersIn = text => (String(text).match(/\d+(?:[.,]\d+)*/g) || []).map(n => n.replace(/,/g, ''));
 
+function buildGroundingMaps(facts) {
+  const categoryMap = new Map();
+  const periodMap = new Map();
+
+  function addNumberToMap(map, key, num) {
+    if (!key || num === undefined || num === null) return;
+    const cleanKey = String(key).trim();
+    if (!cleanKey) return;
+    if (!map.has(cleanKey)) map.set(cleanKey, new Set());
+    const s = String(num);
+    map.get(cleanKey).add(s);
+    if (s.includes('.')) {
+      map.get(cleanKey).add(String(parseFloat(s)));
+      map.get(cleanKey).add(String(Math.round(parseFloat(s))));
+    } else {
+      map.get(cleanKey).add(`${s}.0`);
+    }
+  }
+
+  const list = Array.isArray(facts) ? facts : [facts];
+  for (const r of list) {
+    if (!r) continue;
+    // 1. Category groups
+    if (Array.isArray(r.groups)) {
+      for (const g of r.groups) {
+        if (g.group) {
+          addNumberToMap(categoryMap, g.group, g.issues);
+          addNumberToMap(categoryMap, g.group, g.chats);
+          addNumberToMap(categoryMap, g.group, g.pct_of_matched_issues);
+        }
+      }
+    }
+    // 2. remaining_groups_after_top5?.list
+    if (Array.isArray(r.remaining_groups_after_top5?.list)) {
+      for (const g of r.remaining_groups_after_top5.list) {
+        if (g.group) {
+          addNumberToMap(categoryMap, g.group, g.issues);
+          addNumberToMap(categoryMap, g.group, g.pct_of_matched_issues);
+        }
+      }
+    }
+    // 3. biggest_category_changes
+    if (Array.isArray(r.biggest_category_changes)) {
+      for (const c of r.biggest_category_changes) {
+        if (c.category) {
+          addNumberToMap(categoryMap, c.category, c.current);
+          addNumberToMap(categoryMap, c.category, c.previous);
+          addNumberToMap(categoryMap, c.category, c.diff);
+          addNumberToMap(categoryMap, c.category, Math.abs(c.diff));
+        }
+      }
+    }
+    // 4. categories list
+    if (Array.isArray(r.categories)) {
+      for (const c of r.categories) {
+        const name = c.category || c.name || c.group;
+        if (name) {
+          addNumberToMap(categoryMap, name, c.count || c.issues || c.value);
+        }
+      }
+    }
+
+    // 5. Periods (period_a & period_b in compare_periods)
+    if (r.period_a?.label) {
+      addNumberToMap(periodMap, r.period_a.label, r.period_a.value);
+      addNumberToMap(periodMap, r.period_a.label, r.period_a.per_day);
+    }
+    if (r.period_b?.label) {
+      addNumberToMap(periodMap, r.period_b.label, r.period_b.value);
+      addNumberToMap(periodMap, r.period_b.label, r.period_b.per_day);
+    }
+  }
+
+  return { categoryMap, periodMap };
+}
+
 /**
  * Every number in the reply must appear in the facts or the question
  * (small integers are allowed for list numbering).
+ * Also strictly validates that numbers on category/period lines match the respective ground truth facts.
  */
 export function numbersAreGrounded(reply, facts, query) {
   const allowed = new Set([...numbersIn(JSON.stringify(facts)), ...numbersIn(query)]);
@@ -230,7 +307,74 @@ export function numbersAreGrounded(reply, facts, query) {
   }
   // List numbering ("1. ", "2) ") is not data; every other number, small ones included, must come from the facts
   const withoutListMarkers = String(reply).replace(/^\s*\d{1,2}[.)]\s/gm, '');
-  return numbersIn(withoutListMarkers).every(n => allowed.has(n) || allowed.has(String(parseFloat(n))));
+  const globalOk = numbersIn(withoutListMarkers).every(n => allowed.has(n) || allowed.has(String(parseFloat(n))));
+  if (!globalOk) return false;
+
+  // 2. Line-by-line Category and Period Grounding Check
+  const { categoryMap, periodMap } = buildGroundingMaps(facts);
+  const knownCategories = [...categoryMap.keys()].sort((a, b) => b.length - a.length);
+  const knownPeriods = [...periodMap.keys()].sort((a, b) => b.length - a.length);
+  const queryNumbers = new Set(numbersIn(query));
+  
+  // Year / standard calendar number filter
+  const isPeriodNumber = n => {
+    const val = parseInt(n, 10);
+    return (val >= 2560 && val <= 2580) || (val >= 2020 && val <= 2040);
+  };
+
+  const lines = String(reply).split('\n');
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    // Strip list numbering (e.g. "1. ", "2) ") and clock times (e.g. "14:00-14:59 น.", "10:30 น.")
+    const cleanLine = line
+      .replace(/^\s*\d{1,2}[.)]\s/, '')
+      .replace(/\b\d{1,2}:\d{2}(?:\s*-\s*\d{1,2}:\d{2})?\s*(?:น\.)?/g, '');
+    const lineNums = numbersIn(cleanLine);
+    if (lineNums.length === 0) continue;
+
+    // A. Check Category Grounding on this line
+    const matchedCats = knownCategories.filter(cat => cleanLine.includes(cat));
+    if (matchedCats.length > 0) {
+      for (const num of lineNums) {
+        const parsedNum = num.includes('.') ? String(parseFloat(num)) : num;
+        const belongsToCat = matchedCats.some(cat => {
+          const catNums = categoryMap.get(cat);
+          return catNums.has(num) || catNums.has(parsedNum);
+        });
+
+        if (!belongsToCat) {
+          if (queryNumbers.has(num) || queryNumbers.has(parsedNum) || isPeriodNumber(num)) {
+            continue;
+          }
+          console.warn(`⚠️ [Composer Grounding] Category mismatch on line: "${line}" (number: ${num})`);
+          return false;
+        }
+      }
+    }
+
+    // B. Check Period Grounding on this line
+    const matchedPeriods = knownPeriods.filter(p => cleanLine.includes(p));
+    if (matchedPeriods.length > 0) {
+      for (const num of lineNums) {
+        const parsedNum = num.includes('.') ? String(parseFloat(num)) : num;
+        const belongsToPeriod = matchedPeriods.some(p => {
+          const pNums = periodMap.get(p);
+          return pNums.has(num) || pNums.has(parsedNum);
+        });
+
+        if (!belongsToPeriod) {
+          if (queryNumbers.has(num) || queryNumbers.has(parsedNum) || isPeriodNumber(num)) {
+            continue;
+          }
+          console.warn(`⚠️ [Composer Grounding] Period mismatch on line: "${line}" (number: ${num})`);
+          return false;
+        }
+      }
+    }
+  }
+
+  return true;
 }
 
 /** Drop fields the writer never uses (excel rows, internal notes, empty filters) */

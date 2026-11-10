@@ -163,10 +163,13 @@ function exportRows(chats, issueSelector, categoryContext) {
       rows.push({
         chat_id: chat.id,
         created_at: chat.created_at,
+        customer_id: chat.customer_id || '-',
+        sentiment: chat.sentiment || 'neutral',
+        chat_summary: chat.summary || '',
         category_id: keyOf(iss.category_id),
         category_name: categoryName(keyOf(iss.category_id), categoryContext),
-        summary: iss.summary,
-        priority: iss.priority
+        summary: iss.summary || chat.summary || '-',
+        priority: iss.priority || chat.priority || 'medium'
       });
       if (rows.length >= EXPORT_LIMIT) return rows;
     }
