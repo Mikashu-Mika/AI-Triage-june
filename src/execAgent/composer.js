@@ -429,7 +429,7 @@ RULES
 - Thai only, polite, concise and scannable. No tables, no JSON, no tool names, no markdown bold (**).
 - Use ONLY the facts provided. Copy numbers exactly; never calculate, estimate or invent any number, date, time or chat id.
 FORMAT
-- Line 1: one emoji + short title + the period label (e.g. "📊 สรุปปัญหาเมื่อวาน (22 ต.ค. 2569)").
+- Line 1: one emoji + short title + EXACT period.label from facts (e.g. if period.label is "วันนี้ (10 พ.ย. 2569)" write "📊 สรุปปัญหาวันนี้ (10 พ.ย. 2569)"; if period.label is "เมื่อวาน (9 พ.ย. 2569)" write "📊 สรุปปัญหาเมื่อวาน (9 พ.ย. 2569)"). You MUST strictly use the exact period.label from the JSON facts. NEVER write "เมื่อวาน" when the data is for "วันนี้"!
 - Line 2: the overall total first (e.g. "- รวม 48 ปัญหา จาก 10 แชต").
 - Ranked groups: MUST strictly take items in the exact order of the "groups" array starting from the FIRST item (index 0). NEVER skip, reorder, or filter out any item from "groups" (every item in "groups" is an official problem category, including "ข้อเสนอแนะและร้องเรียน"). If the user asks for top N (e.g. 3 อันดับแรก), you MUST output ALL requested N items as a numbered list (1., 2., 3...) and NEVER output only 1 item!
   Format for each item: "1. ชื่อหมวด — N ปัญหา (x%)"
@@ -438,7 +438,7 @@ FORMAT
 - Chat lists: numbered, one chat per item: "\`chat_id\` (เวลา, ความด่วน<priority>)" then the customer's problem summarized on the next line indented by 3 spaces; list higher-priority chats first.
 - Do not repeat the same phrase on every line (e.g. "จากการสนทนา X ครั้ง"). Never output an empty bullet, a lone "-" or a line containing only "ค่ะ".
 - You may end with ONE short line: an observation grounded in the facts (📌) or a follow-up suggestion (💡). The last sentence ends with ค่ะ/นะคะ.
-- Always mention the period label of the data.
+- Always mention the period label of the data. Strictly use the exact period.label given in the facts; never mismatch "วันนี้" and "เมื่อวาน".
 - If a fact set has zero results, say clearly that nothing was found for that period.
 - If the facts show "not_found: true" or report unknown_categories, you MUST clearly state that the requested category was not found in the system (e.g. "ไม่พบหมวด \"...\" ในระบบค่ะ"). DO NOT report totals or problems from all categories!
 - If a period "is_partial" is true and periods are compared, point out that it is not complete yet and refer to the per-day average if given.
@@ -486,7 +486,18 @@ export async function composeAnswer({ query, focus, results, unsupportedTopics }
       console.warn('⚠️ [Composer] LLM reply contains numbers not present in the facts; using deterministic format.');
       return { reply: deterministic, mode: 'deterministic' };
     }
-    return { reply, mode: 'llm' };
+    // Safeguard: Ensure Line 1 period matches facts period (prevent LLM few-shot hallucination of 'เมื่อวาน' vs 'วันนี้')
+    let finalReply = reply;
+    const primaryPeriodLabel = results[0]?.period?.label || results[0]?.period_a?.label;
+    if (primaryPeriodLabel && typeof finalReply === 'string') {
+      const firstLine = finalReply.split('\n')[0] || '';
+      if (primaryPeriodLabel.includes('วันนี้') && firstLine.includes('เมื่อวาน')) {
+        finalReply = finalReply.replace(/^(.*)เมื่อวาน(.*)$/m, (m, p1, p2) => `${p1}วันนี้${p2}`);
+      } else if (primaryPeriodLabel.includes('เมื่อวาน') && firstLine.includes('วันนี้')) {
+        finalReply = finalReply.replace(/^(.*)วันนี้(.*)$/m, (m, p1, p2) => `${p1}เมื่อวาน${p2}`);
+      }
+    }
+    return { reply: finalReply, mode: 'llm' };
   } catch (err) {
     console.warn('⚠️ [Composer] LLM composition failed, using deterministic format:', err.message);
     return { reply: deterministic, mode: 'deterministic' };
