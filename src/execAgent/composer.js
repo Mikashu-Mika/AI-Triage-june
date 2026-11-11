@@ -31,7 +31,24 @@ const METRIC_UNIT = { issues: 'ปัญหา', chats: 'แชต', new_custome
 const signed = n => (n > 0 ? `+${n}` : `${n}`);
 const clip = (text, max) => (text && text.length > max ? `${text.slice(0, max)}…` : text || '-');
 
-function formatIssueStats(f) {
+function formatIssueStats(f, query = '') {
+  if (f.not_found) {
+    const unk = f.filters?.unknown_categories?.join(', ') || 'ที่ระบุ';
+    const lines = [`📊 ไม่พบหมวด "${unk}" ในระบบค่ะ`];
+    if (f.available_categories?.length) {
+      lines.push(`💡 หมวดหมู่ที่มีในระบบ: ${f.available_categories.slice(0, 8).join(', ')}`);
+    }
+    return lines.join('\n');
+  }
+  const isRemainingQuery = /(ที่เหลือ|หมวดที่เหลือ|อีก \d+ หมวด)/i.test(query);
+  if (isRemainingQuery && f.remaining_groups_after_top5?.list) {
+    const lines = [`📊 รายละเอียด ${f.remaining_groups_after_top5.groups} หมวดที่เหลือ (${f.period.label})`, `- รวม ${f.remaining_groups_after_top5.issues} ปัญหา`, ''];
+    f.remaining_groups_after_top5.list.forEach((g, i) => {
+      lines.push(`${i + 6}. ${g.group} — ${g.issues} ปัญหา (${g.pct_of_matched_issues}%)`);
+    });
+    lines.push('', '💡 พิมพ์ชื่อหมวดเพื่อดูรายการแชตได้ค่ะ');
+    return lines.join('\n').trim();
+  }
   const cats = f.filters.categories;
   // Category names that already start with "ปัญหา" read naturally without "ปัญหาหมวด"
   const subject = cats.length === 1 && cats[0].startsWith('ปัญหา') ? cats[0] : `ปัญหาหมวด${cats.join(' / ')}`;
@@ -59,6 +76,14 @@ function formatIssueStats(f) {
 }
 
 function formatChatList(f) {
+  if (f.not_found) {
+    const unk = f.filters?.unknown_categories?.join(', ') || 'ที่ระบุ';
+    const lines = [`📋 ไม่พบหมวด "${unk}" ในระบบค่ะ`];
+    if (f.available_categories?.length) {
+      lines.push(`💡 หมวดหมู่ที่มีในระบบ: ${f.available_categories.slice(0, 8).join(', ')}`);
+    }
+    return lines.join('\n');
+  }
   const isSearch = f.tool === 'search_chats';
   const total = isSearch ? f.total_matches : f.total_matched_chats;
   const cats = f.filters?.categories || [];
@@ -85,6 +110,14 @@ function formatChatList(f) {
 }
 
 function formatCompare(f) {
+  if (f.not_found) {
+    const unk = f.filters?.unknown_categories?.join(', ') || 'ที่ระบุ';
+    const lines = [`📊 ไม่พบหมวด "${unk}" ในระบบค่ะ`];
+    if (f.available_categories?.length) {
+      lines.push(`💡 หมวดหมู่ที่มีในระบบ: ${f.available_categories.slice(0, 8).join(', ')}`);
+    }
+    return lines.join('\n');
+  }
   const unit = METRIC_UNIT[f.metric] || '';
   const cats = f.filters?.categories?.length ? ` หมวด${f.filters.categories.join(' / ')}` : '';
   const lines = [`📅 เปรียบเทียบ${f.metric_th}${cats}`];
@@ -135,7 +168,11 @@ function formatSentiment(f) {
 }
 
 function formatCategoryInfo(f) {
-  if (!f.category) return `ไม่พบหมวดที่ถามค่ะ\n- หมวดที่มีในระบบ: ${(f.available_categories || []).map(c => c.name).join(', ')}`;
+  if (f.not_found || !f.category) {
+    const unk = f.unknown_category || f.unknown_categories?.join(', ') || 'ที่ถาม';
+    const known = (f.available_categories || f.known_categories || []).map(c => c.name || c);
+    return `📖 ไม่พบหมวด "${unk}" ในระบบค่ะ\n💡 หมวดหมู่ที่มีในระบบ: ${known.slice(0, 8).join(', ')}`;
+  }
   const lines = [`📖 หมวด${f.category.name}`];
   if (f.category.description) lines.push(`- ครอบคลุม: ${f.category.description}`);
   if (f.sop) lines.push('', `📘 คู่มือ (${f.sop.status})`, f.sop.content);
@@ -144,6 +181,11 @@ function formatCategoryInfo(f) {
 }
 
 function formatAdvice(f) {
+  if (f.not_found || !f.category) {
+    const unk = f.unknown_category || f.unknown_categories?.join(', ') || 'ที่ถาม';
+    const known = (f.available_categories || f.known_categories || []).map(c => c.name || c);
+    return `🛠️ ไม่พบหมวด "${unk}" ในระบบค่ะ\n💡 หมวดหมู่ที่มีในระบบ: ${known.slice(0, 8).join(', ')}`;
+  }
   if (f.no_problems_found) return `🛠️ แนวทางแก้ปัญหา ${f.period.label}\n- ไม่พบปัญหาในช่วงนี้ จึงยังไม่มีเรื่องที่ต้องแก้ค่ะ`;
   const lines = [`🛠️ แนวทางแก้ "${f.category.name}" ${f.period.label}`, '', '📌 สิ่งที่เกิดขึ้น'];
   lines.push(`- ${f.issues_in_period} ปัญหา จาก ${f.chats_in_period} แชต (${f.previous_period.label}: ${f.previous_period.issues} ปัญหา)`);
@@ -176,9 +218,86 @@ export function formatDeterministic(results, unsupportedTopics = []) {
 // ---------------------------------------------------------------------------
 const numbersIn = text => (String(text).match(/\d+(?:[.,]\d+)*/g) || []).map(n => n.replace(/,/g, ''));
 
+function buildGroundingMaps(facts) {
+  const categoryMap = new Map();
+  const periodMap = new Map();
+
+  function addNumberToMap(map, key, num) {
+    if (!key || num === undefined || num === null) return;
+    const cleanKey = String(key).trim();
+    if (!cleanKey) return;
+    if (!map.has(cleanKey)) map.set(cleanKey, new Set());
+    const s = String(num);
+    map.get(cleanKey).add(s);
+    if (s.includes('.')) {
+      map.get(cleanKey).add(String(parseFloat(s)));
+      map.get(cleanKey).add(String(Math.round(parseFloat(s))));
+    } else {
+      map.get(cleanKey).add(`${s}.0`);
+    }
+  }
+
+  const list = Array.isArray(facts) ? facts : [facts];
+  for (const r of list) {
+    if (!r) continue;
+    // 1. Category groups
+    if (Array.isArray(r.groups)) {
+      for (const g of r.groups) {
+        if (g.group) {
+          addNumberToMap(categoryMap, g.group, g.issues);
+          addNumberToMap(categoryMap, g.group, g.chats);
+          addNumberToMap(categoryMap, g.group, g.pct_of_matched_issues);
+        }
+      }
+    }
+    // 2. remaining_groups_after_top5?.list
+    if (Array.isArray(r.remaining_groups_after_top5?.list)) {
+      for (const g of r.remaining_groups_after_top5.list) {
+        if (g.group) {
+          addNumberToMap(categoryMap, g.group, g.issues);
+          addNumberToMap(categoryMap, g.group, g.pct_of_matched_issues);
+        }
+      }
+    }
+    // 3. biggest_category_changes
+    if (Array.isArray(r.biggest_category_changes)) {
+      for (const c of r.biggest_category_changes) {
+        if (c.category) {
+          addNumberToMap(categoryMap, c.category, c.current);
+          addNumberToMap(categoryMap, c.category, c.previous);
+          addNumberToMap(categoryMap, c.category, c.diff);
+          addNumberToMap(categoryMap, c.category, Math.abs(c.diff));
+        }
+      }
+    }
+    // 4. categories list
+    if (Array.isArray(r.categories)) {
+      for (const c of r.categories) {
+        const name = c.category || c.name || c.group;
+        if (name) {
+          addNumberToMap(categoryMap, name, c.count || c.issues || c.value);
+        }
+      }
+    }
+
+    // 5. Periods (period_a & period_b in compare_periods)
+    if (r.period_a?.label) {
+      addNumberToMap(periodMap, r.period_a.label, r.period_a.value);
+      addNumberToMap(periodMap, r.period_a.label, r.period_a.per_day);
+    }
+    if (r.period_b?.label) {
+      addNumberToMap(periodMap, r.period_b.label, r.period_b.value);
+      addNumberToMap(periodMap, r.period_b.label, r.period_b.per_day);
+    }
+  }
+
+  return { categoryMap, periodMap };
+}
+
 /**
  * Every number in the reply must appear in the facts or the question
  * (small integers are allowed for list numbering).
+ * Also strictly validates that numbers on category/period lines match the respective ground truth facts.
  */
 export function numbersAreGrounded(reply, facts, query) {
   const allowed = new Set([...numbersIn(JSON.stringify(facts)), ...numbersIn(query)]);
@@ -188,7 +307,74 @@ export function numbersAreGrounded(reply, facts, query) {
   }
   // List numbering ("1. ", "2) ") is not data; every other number, small ones included, must come from the facts
   const withoutListMarkers = String(reply).replace(/^\s*\d{1,2}[.)]\s/gm, '');
-  return numbersIn(withoutListMarkers).every(n => allowed.has(n) || allowed.has(String(parseFloat(n))));
+  const globalOk = numbersIn(withoutListMarkers).every(n => allowed.has(n) || allowed.has(String(parseFloat(n))));
+  if (!globalOk) return false;
+
+  // 2. Line-by-line Category and Period Grounding Check
+  const { categoryMap, periodMap } = buildGroundingMaps(facts);
+  const knownCategories = [...categoryMap.keys()].sort((a, b) => b.length - a.length);
+  const knownPeriods = [...periodMap.keys()].sort((a, b) => b.length - a.length);
+  const queryNumbers = new Set(numbersIn(query));
+  
+  // Year / standard calendar number filter
+  const isPeriodNumber = n => {
+    const val = parseInt(n, 10);
+    return (val >= 2560 && val <= 2580) || (val >= 2020 && val <= 2040);
+  };
+
+  const lines = String(reply).split('\n');
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    // Strip list numbering (e.g. "1. ", "2) ") and clock times (e.g. "14:00-14:59 น.", "10:30 น.")
+    const cleanLine = line
+      .replace(/^\s*\d{1,2}[.)]\s/, '')
+      .replace(/\b\d{1,2}:\d{2}(?:\s*-\s*\d{1,2}:\d{2})?\s*(?:น\.)?/g, '');
+    const lineNums = numbersIn(cleanLine);
+    if (lineNums.length === 0) continue;
+
+    // A. Check Category Grounding on this line
+    const matchedCats = knownCategories.filter(cat => cleanLine.includes(cat));
+    if (matchedCats.length > 0) {
+      for (const num of lineNums) {
+        const parsedNum = num.includes('.') ? String(parseFloat(num)) : num;
+        const belongsToCat = matchedCats.some(cat => {
+          const catNums = categoryMap.get(cat);
+          return catNums.has(num) || catNums.has(parsedNum);
+        });
+
+        if (!belongsToCat) {
+          if (queryNumbers.has(num) || queryNumbers.has(parsedNum) || isPeriodNumber(num)) {
+            continue;
+          }
+          console.warn(`⚠️ [Composer Grounding] Category mismatch on line: "${line}" (number: ${num})`);
+          return false;
+        }
+      }
+    }
+
+    // B. Check Period Grounding on this line
+    const matchedPeriods = knownPeriods.filter(p => cleanLine.includes(p));
+    if (matchedPeriods.length > 0) {
+      for (const num of lineNums) {
+        const parsedNum = num.includes('.') ? String(parseFloat(num)) : num;
+        const belongsToPeriod = matchedPeriods.some(p => {
+          const pNums = periodMap.get(p);
+          return pNums.has(num) || pNums.has(parsedNum);
+        });
+
+        if (!belongsToPeriod) {
+          if (queryNumbers.has(num) || queryNumbers.has(parsedNum) || isPeriodNumber(num)) {
+            continue;
+          }
+          console.warn(`⚠️ [Composer Grounding] Period mismatch on line: "${line}" (number: ${num})`);
+          return false;
+        }
+      }
+    }
+  }
+
+  return true;
 }
 
 /** Drop fields the writer never uses (excel rows, internal notes, empty filters) */
@@ -243,17 +429,21 @@ RULES
 - Thai only, polite, concise and scannable. No tables, no JSON, no tool names, no markdown bold (**).
 - Use ONLY the facts provided. Copy numbers exactly; never calculate, estimate or invent any number, date, time or chat id.
 FORMAT
-- Line 1: one emoji + short title + the period label (e.g. "📊 สรุปปัญหาเมื่อวาน (22 ต.ค. 2569)").
+- Line 1: one emoji + short title + EXACT period.label from facts (e.g. if period.label is "วันนี้ (10 พ.ย. 2569)" write "📊 สรุปปัญหาวันนี้ (10 พ.ย. 2569)"; if period.label is "เมื่อวาน (9 พ.ย. 2569)" write "📊 สรุปปัญหาเมื่อวาน (9 พ.ย. 2569)"). You MUST strictly use the exact period.label from the JSON facts. NEVER write "เมื่อวาน" when the data is for "วันนี้"!
 - Line 2: the overall total first (e.g. "- รวม 48 ปัญหา จาก 10 แชต").
-- Ranked groups: show at most the top 5 as a numbered list "ชื่อ — N ปัญหา (x%)" using the group's own pct value. Add a line about the rest ONLY when "remaining_groups_after_top5" is not null, using exactly its numbers (e.g. "- อีก 9 หมวดที่เหลือ รวม 14 ปัญหา"). With a single group, show only that group.
+- Ranked groups: MUST strictly take items in the exact order of the "groups" array starting from the FIRST item (index 0). NEVER skip, reorder, or filter out any item from "groups" (every item in "groups" is an official problem category, including "ข้อเสนอแนะและร้องเรียน"). If the user asks for top N (e.g. 3 อันดับแรก), you MUST output ALL requested N items as a numbered list (1., 2., 3...) and NEVER output only 1 item!
+  Format for each item: "1. ชื่อหมวด — N ปัญหา (x%)"
+  If no N is specified, show at most the top 5. Add a line about the rest ONLY when "remaining_groups_after_top5" is not null, using exactly its numbers (e.g. "- อีก 9 หมวดที่เหลือ รวม 14 ปัญหา").
 - Comparisons (compare_periods): show both periods with their value and per_day, then diff and pct_change. "biggest_category_changes" are CHANGES, written "ชื่อหมวด: previous → current"; never present them as a ranking and never add percentages to them.
 - Chat lists: numbered, one chat per item: "\`chat_id\` (เวลา, ความด่วน<priority>)" then the customer's problem summarized on the next line indented by 3 spaces; list higher-priority chats first.
 - Do not repeat the same phrase on every line (e.g. "จากการสนทนา X ครั้ง"). Never output an empty bullet, a lone "-" or a line containing only "ค่ะ".
 - You may end with ONE short line: an observation grounded in the facts (📌) or a follow-up suggestion (💡). The last sentence ends with ค่ะ/นะคะ.
-- Always mention the period label of the data.
+- Always mention the period label of the data. Strictly use the exact period.label given in the facts; never mismatch "วันนี้" and "เมื่อวาน".
 - If a fact set has zero results, say clearly that nothing was found for that period.
+- If the facts show "not_found: true" or report unknown_categories, you MUST clearly state that the requested category was not found in the system (e.g. "ไม่พบหมวด \"...\" ในระบบค่ะ"). DO NOT report totals or problems from all categories!
 - If a period "is_partial" is true and periods are compared, point out that it is not complete yet and refer to the per-day average if given.
-- Respect the executive's focus when given (e.g. answer only one item).
+- Respect the executive's focus when given. But if the question asks for top N (e.g. 3 อันดับแรก), ALWAYS list all N items.
+- If the question asks about remaining groups (e.g. "หมวดที่เหลือมีอะไรบ้าง", "อีก 13 หมวดมีอะไร"): You MUST list all items from "remaining_groups_after_top5.list" (or items from rank 6 onwards in "groups") with their issue counts and percentages (e.g. "6. ชื่อหมวด — N ปัญหา (x%)", "7. ..."). NEVER say "ไม่พบข้อมูล"!
 - Chat ids are written in backticks.
 - Statements in the "other" category are not problems; never call them problems.
 - If "unsupported" notes are given, include them verbatim at the end.`;
@@ -273,7 +463,7 @@ FOR RESOLUTION ADVICE (get_resolution_advice facts):
  * @returns {Promise<{ reply: string, mode: 'llm'|'deterministic' }>}
  */
 export async function composeAnswer({ query, focus, results, unsupportedTopics }) {
-  const deterministic = formatDeterministic(results, unsupportedTopics);
+  const deterministic = formatDeterministic(results, unsupportedTopics, query);
   const facts = compactFacts(results);
   const needsAdvice = results.some(r => r.tool === 'get_resolution_advice' && !r.error);
 
@@ -296,7 +486,18 @@ export async function composeAnswer({ query, focus, results, unsupportedTopics }
       console.warn('⚠️ [Composer] LLM reply contains numbers not present in the facts; using deterministic format.');
       return { reply: deterministic, mode: 'deterministic' };
     }
-    return { reply, mode: 'llm' };
+    // Safeguard: Ensure Line 1 period matches facts period (prevent LLM few-shot hallucination of 'เมื่อวาน' vs 'วันนี้')
+    let finalReply = reply;
+    const primaryPeriodLabel = results[0]?.period?.label || results[0]?.period_a?.label;
+    if (primaryPeriodLabel && typeof finalReply === 'string') {
+      const firstLine = finalReply.split('\n')[0] || '';
+      if (primaryPeriodLabel.includes('วันนี้') && firstLine.includes('เมื่อวาน')) {
+        finalReply = finalReply.replace(/^(.*)เมื่อวาน(.*)$/m, (m, p1, p2) => `${p1}วันนี้${p2}`);
+      } else if (primaryPeriodLabel.includes('เมื่อวาน') && firstLine.includes('วันนี้')) {
+        finalReply = finalReply.replace(/^(.*)วันนี้(.*)$/m, (m, p1, p2) => `${p1}เมื่อวาน${p2}`);
+      }
+    }
+    return { reply: finalReply, mode: 'llm' };
   } catch (err) {
     console.warn('⚠️ [Composer] LLM composition failed, using deterministic format:', err.message);
     return { reply: deterministic, mode: 'deterministic' };

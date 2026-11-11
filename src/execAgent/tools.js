@@ -26,22 +26,89 @@ export async function loadCategoryContext(companyId) {
   return byKey;
 }
 
-/** Map router-provided category keys/names to known keys; unknown ones are reported back */
+/** Map router-provided category keys/names to known keys; picks closest match or reports unknown */
 function resolveCategoryKeys(requested, categoryContext) {
   const keys = [];
   const unknown = [];
+  const categories = Array.from(categoryContext.values());
+
   for (const raw of requested || []) {
     const q = String(raw).trim().toLowerCase();
     if (!q) continue;
+
+    // 1. Direct key match
     const key = keyOf(q);
     if (categoryContext.has(key)) {
       keys.push(key);
       continue;
     }
-    const byName = [...categoryContext.values()].find(c => c.name.toLowerCase() === q || c.name.toLowerCase().includes(q));
-    if (byName) keys.push(byName.key);
-    else unknown.push(raw);
+
+    // Normalized query: remove common prefix words like "หมวด", "ปัญหา", "เรื่อง", "ด้าน"
+    const cleanQ = q.replace(/^(หมวด|เรื่อง|ปัญหาหมวด|ปัญหา|ด้าน)/g, '').trim();
+
+    // Meta-words referring to remaining groups, not actual category names
+    if (/^(ที่เหลือ|หมวดที่เหลือ|อื่นๆที่เหลือ|เหลือ|อีก \d+ หมวด|อีก \d+ หมวดที่เหลือ)$/i.test(cleanQ)) {
+      continue;
+    }
+
+    let bestScore = 0;
+    let bestKey = null;
+
+    for (const c of categories) {
+      const cName = c.name.toLowerCase();
+      const cClean = cName.replace(/^(ปัญหา|เรื่อง)/g, '').trim();
+      let score = 0;
+
+      // Exact match with full name or cleaned name
+      if (cName === q || cClean === q || cName === cleanQ || cClean === cleanQ) {
+        score = 1000;
+      }
+      // Category name starts with query or query starts with category name
+      else if (cName.startsWith(cleanQ) || (cleanQ.length >= 3 && cleanQ.startsWith(cClean))) {
+        score = 800 + Math.min(cleanQ.length, cName.length);
+      }
+      // Substring match in name
+      else if (cName.includes(cleanQ) || (cleanQ.length >= 3 && cleanQ.includes(cClean))) {
+        score = 600 + Math.min(cleanQ.length, cName.length);
+      }
+      // Segment / token match (split by '/' or space)
+      else {
+        const segments = cName.split(/[\s/]+/);
+        let segmentMatch = 0;
+        for (const seg of segments) {
+          const sClean = seg.replace(/^(ปัญหา|เรื่อง)/g, '').trim();
+          if (sClean.length >= 2 && (cleanQ.includes(sClean) || sClean.includes(cleanQ))) {
+            segmentMatch += sClean.length * 10;
+          }
+        }
+        if (segmentMatch > 0) {
+          score = 400 + segmentMatch;
+        }
+      }
+
+      // Check description keywords
+      if (c.description) {
+        const desc = c.description.toLowerCase();
+        if (desc.includes(cleanQ) || (cleanQ.length >= 3 && desc.includes(q))) {
+          const descScore = 550 + Math.min(cleanQ.length, 20);
+          if (descScore > score) score = descScore;
+        }
+      }
+
+      if (score > bestScore) {
+        bestScore = score;
+        bestKey = c.key;
+      }
+    }
+
+    const minThreshold = cleanQ.length <= 2 ? 600 : 450;
+    if (bestScore >= minThreshold && bestKey) {
+      keys.push(bestKey);
+    } else {
+      unknown.push(raw);
+    }
   }
+
   return { keys: [...new Set(keys)], unknown };
 }
 
@@ -96,10 +163,13 @@ function exportRows(chats, issueSelector, categoryContext) {
       rows.push({
         chat_id: chat.id,
         created_at: chat.created_at,
+        customer_id: chat.customer_id || '-',
+        sentiment: chat.sentiment || 'neutral',
+        chat_summary: chat.summary || '',
         category_id: keyOf(iss.category_id),
         category_name: categoryName(keyOf(iss.category_id), categoryContext),
-        summary: iss.summary,
-        priority: iss.priority
+        summary: iss.summary || chat.summary || '-',
+        priority: iss.priority || chat.priority || 'medium'
       });
       if (rows.length >= EXPORT_LIMIT) return rows;
     }
@@ -118,6 +188,24 @@ export async function getIssueStats(ctx, args) {
   const chats = await fetchChatsInPeriod(ctx.companyId, period);
 
   const allProblems = chats.flatMap(c => (c.chat_issues || []).filter(isProblem));
+
+  // If user asked for specific category(ies), but NONE was found: return clear not_found
+  if (Array.isArray(args.categories) && args.categories.length > 0 && keys.length === 0) {
+    return {
+      tool: 'get_issue_stats',
+      period: periodFacts(period),
+      filters: { categories: [], priorities: priorities.map(p => PRIORITY_TH[p]), unknown_categories: unknown },
+      not_found: true,
+      message: `ไม่พบหมวด "${unknown.join(', ')}" ในระบบ`,
+      total_chats_in_period: chats.length,
+      total_problem_issues_in_period: allProblems.length,
+      matched_chats: 0,
+      matched_problem_issues: 0,
+      pct_of_all_problems: 0,
+      groups: [],
+      available_categories: [...ctx.categories.values()].filter(c => c.key !== 'other').map(c => c.name)
+    };
+  }
   const groups = new Map();
   let matchedIssues = 0;
   let matchedChats = 0;
@@ -146,6 +234,7 @@ export async function getIssueStats(ctx, args) {
   const groupList = [...groups.entries()]
     .map(([g, v]) => ({ group: label(g), issues: v.issues, chats: v.chats, pct_of_matched_issues: matchedIssues ? Math.round((v.issues / matchedIssues) * 1000) / 10 : 0 }))
     .sort((a, b) => b.issues - a.issues);
+  const limit = args.limit ? Math.max(1, parseInt(args.limit, 10)) : groupList.length;
 
   return {
     tool: 'get_issue_stats',
@@ -157,11 +246,12 @@ export async function getIssueStats(ctx, args) {
     matched_chats: matchedChats,
     matched_problem_issues: matchedIssues,
     pct_of_all_problems: allProblems.length ? Math.round((matchedIssues / allProblems.length) * 1000) / 10 : 0,
-    groups: groupList.slice(0, 15),
+    groups: groupList.slice(0, limit),
     // Exact numbers for "the rest" so the writer never has to invent them
     remaining_groups_after_top5: groupList.length > 5 ? {
       groups: groupList.length - 5,
       issues: groupList.slice(5).reduce((sum, g) => sum + g.issues, 0),
+      list: groupList.slice(5).map(g => ({ group: g.group, issues: g.issues, pct_of_matched_issues: g.pct_of_matched_issues })),
       min_issues_per_group: Math.min(...groupList.slice(5).map(g => g.issues)),
       max_issues_per_group: Math.max(...groupList.slice(5).map(g => g.issues))
     } : null,
@@ -179,6 +269,22 @@ export async function listChats(ctx, args) {
   const text = (args.query || '').trim().toLowerCase();
   let period = resolvePeriod(args.period);
   let chats;
+
+  // If user asked for specific category(ies), but NONE was found: return clear not_found
+  if (Array.isArray(args.categories) && args.categories.length > 0 && keys.length === 0) {
+    return {
+      tool: 'list_chats',
+      period: periodFacts(period),
+      filters: { categories: [], priorities: priorities.map(p => PRIORITY_TH[p]), query: text || null, unknown_categories: unknown },
+      not_found: true,
+      message: `ไม่พบหมวด "${unknown.join(', ')}" ในระบบ`,
+      sort: args.sort || 'newest',
+      total_matched_chats: 0,
+      shown: 0,
+      items: [],
+      available_categories: [...ctx.categories.values()].filter(c => c.key !== 'other').map(c => c.name)
+    };
+  }
 
   if (Array.isArray(args.chat_ids) && args.chat_ids.length > 0) {
     const { data, error } = await supabase
@@ -241,6 +347,23 @@ export async function comparePeriods(ctx, args) {
   const periodA = resolvePeriod(args.period);
   const periodB = args.period_b ? resolvePeriod(args.period_b) : previousPeriod(periodA);
   const { keys, unknown } = resolveCategoryKeys(args.categories, ctx.categories);
+
+  if (Array.isArray(args.categories) && args.categories.length > 0 && keys.length === 0) {
+    return {
+      tool: 'compare_periods',
+      metric,
+      period_a: periodFacts(periodA),
+      period_b: periodFacts(periodB),
+      filters: { categories: [], unknown_categories: unknown },
+      not_found: true,
+      message: `ไม่พบหมวด "${unknown.join(', ')}" ในระบบ`,
+      current: 0,
+      previous: 0,
+      diff: 0,
+      pct_change: 0,
+      available_categories: [...ctx.categories.values()].filter(c => c.key !== 'other').map(c => c.name)
+    };
+  }
 
   const measure = async period => {
     if (metric === 'new_customers') {
@@ -345,39 +468,193 @@ export async function getCustomerStats(ctx, args) {
 }
 
 // ---------------------------------------------------------------------------
-// 5. Topic search (keyword + semantic) — replaces one-off keyword tools
+// 5. Topic search (keyword + semantic + Thai linguistic optimization)
 // ---------------------------------------------------------------------------
+
+/**
+ * Extract and expand search terms for Thai & English queries.
+ * Handles conjunctions ("หรือ", "และ"), punctuation, slashes, particles,
+ * and strips common Thai filler words.
+ */
+function extractSearchTerms(rawQuery) {
+  if (!rawQuery) return { terms: [], isAnd: false, patterns: [] };
+
+  let text = String(rawQuery).trim().toLowerCase();
+
+  // Strip request boilerplate
+  text = text
+    .replace(/^(ค้นหาแชตที่ลูกค้าพูดถึง|ค้นหาแชทที่ลูกค้าพูดถึง|ค้นหาแชต|ค้นหาแชท|ค้นหา|ช่วยหา|หาแชต|หาแชท|หา)\s*/i, '')
+    .replace(/(ในเดือน[^\s]+|เดือน[^\s]+|ให้หน่อย|หน่อย|ครับ|ค่ะ|คะ|นะคะ|ด้วยครับ|ด้วยค่ะ)$/i, '')
+    .trim();
+
+  const isAnd = /\b(และ|ทั้ง.*และ|and)\b/i.test(text) && !/\b(หรือ|or)\b/i.test(text);
+
+  // Split by conjunctions, commas, slashes, pipes, pluses, spaces
+  const rawParts = text
+    .replace(/["'“”]/g, ' ')
+    .split(/\s*(?:หรือ|และ|or|and|\/|\||\+|,)\s*|[\s,]+/)
+    .map(t => t.trim())
+    .filter(Boolean);
+
+  const STOPWORDS = new Set([
+    'หรือ', 'และ', 'กับ', 'แต่', 'ที่', 'ซึ่ง', 'อัน', 'ว่า', 'ใน', 'บน', 'จาก',
+    'เรื่อง', 'เกี่ยวกับ', 'ลูกค้า', 'แชต', 'แชท', 'ข้อความ', 'ปัญหา', 'แจ้ง',
+    'ค้นหา', 'หา', 'ช่วย', 'ขอ', 'ดู', 'มี', 'บ้าง', 'ไหม', 'อะไร', 'กี่', 'คน',
+    'หน่อย', 'ค่ะ', 'ครับ', 'คะ', 'นะ', 'นะคะ', 'เดือน', 'วัน', 'ช่วง'
+  ]);
+
+  const terms = [];
+  for (const part of rawParts) {
+    if (STOPWORDS.has(part)) continue;
+    let cleaned = part
+      .replace(/^(เรื่อง|ปัญหา|แชต|แชท|ลูกค้าพูดถึง|พูดถึง|แจ้งเรื่อง|แจ้ง)\s*/, '')
+      .replace(/\s*(หน่อย|ครับ|ค่ะ|คะ|บ้าง|ไหม)$/, '')
+      .trim();
+
+    if (cleaned && cleaned.length >= 2 && !STOPWORDS.has(cleaned)) {
+      terms.push(cleaned);
+    }
+  }
+
+  // Generate flexible proximity regex patterns for compound Thai terms
+  const patterns = [];
+  for (const t of terms) {
+    // 1. Literal pattern
+    const escaped = t.split('').map(c => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0')).join('');
+    patterns.push({ term: t, regex: new RegExp(escaped, 'i'), weight: 1.0 });
+
+    // 2. If term contains "ไม่" (e.g. "ยอดไม่ปรับ", "เงินไม่เข้า", "สลิปไม่ตรง", "เข้าไม่ได้")
+    if (t.includes('ไม่')) {
+      const idx = t.indexOf('ไม่');
+      const prefix = t.slice(0, idx).trim();
+      const suffix = t.slice(idx).trim();
+      if (prefix.length >= 2 && suffix.length >= 2) {
+        const pEsc = prefix.split('').map(c => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0')).join('');
+        const sEsc = suffix.split('').map(c => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0')).join('');
+        patterns.push({ term: t, regex: new RegExp(pEsc + '.{0,15}?' + sEsc, 'i'), weight: 0.85 });
+      }
+    }
+
+    // 3. Synonym expansions for common financial / tech issues
+    if (t === 'เงินไม่เข้า' || t === 'ยอดไม่เข้า') {
+      patterns.push({ term: t, regex: /(เงิน|ยอด|เครดิต).{0,10}?(ไม่เข้า|ไม่ปรับ|ยังไม่เข้า|ยังไม่ปรับ)/i, weight: 0.9 });
+    } else if (t === 'ถอนเงิน') {
+      patterns.push({ term: t, regex: /(ถอนเงิน|การถอนเงิน|ทำรายการถอน|แจ้งถอน)/i, weight: 0.95 });
+    } else if (t === 'ยอดไม่ปรับ' || t === 'ไม่ปรับยอด') {
+      patterns.push({ term: t, regex: /(ยอด|เครดิต).{0,10}?(ไม่ปรับ|ยังไม่ปรับ)/i, weight: 0.9 });
+    } else if (t === 'สลิปไม่ตรง') {
+      patterns.push({ term: t, regex: /(สลิป|แนบสลิป).{0,25}?(ไม่ตรง|ไม่ปรับ|ยอดไม่เข้า|ค้าง)/i, weight: 0.85 });
+    } else if (t === 'เข้าสู่ระบบไม่ได้' || t === 'ล็อกอินไม่ได้') {
+      patterns.push({ term: t, regex: /(เข้าสู่ระบบ|ล็อกอิน|เข้าใช้งาน).{0,10}?(ไม่ได้|ไม่สำเร็จ|ไม่ผ่าน|วนกลับ)/i, weight: 0.9 });
+    }
+  }
+
+  return { terms: [...new Set(terms)], isAnd, patterns };
+}
+
+/**
+ * Score how well a chat matches search terms
+ */
+function scoreChatMatch(chat, terms, isAnd, patterns) {
+  const summaryText = (chat.summary || '').toLowerCase();
+  const convText = (chat.conversation || '').toLowerCase();
+  const issueSummaries = (chat.chat_issues || []).map(i => (i.summary || '').toLowerCase()).join(' ');
+
+  const matchedTerms = new Set();
+  let score = 0;
+
+  for (const { term, regex, weight } of patterns) {
+    let matched = false;
+
+    if (regex.test(issueSummaries)) {
+      matched = true;
+      score += 150 * weight;
+    }
+    if (regex.test(summaryText)) {
+      matched = true;
+      score += 140 * weight;
+    }
+    if (regex.test(convText)) {
+      matched = true;
+      const occurrences = (convText.match(regex) || []).length;
+      score += Math.min(occurrences, 5) * 15 * weight;
+    }
+
+    if (matched) {
+      matchedTerms.add(term);
+      score += 100 * weight;
+    }
+  }
+
+  if (isAnd && matchedTerms.size < terms.length) return null;
+  if (matchedTerms.size === 0) return null;
+
+  // Priority bonus
+  const topPri = (chat.chat_issues || []).map(i => i.priority).sort()[0] || chat.priority;
+  if (topPri === 'emergency') score += 40;
+  else if (topPri === 'high') score += 20;
+  else if (topPri === 'medium') score += 10;
+
+  return { score: Math.round(score), matchedTerms: Array.from(matchedTerms) };
+}
+
 export async function searchChats(ctx, args) {
   const period = resolvePeriod(args.period);
-  const query = (args.query || '').trim();
+  const rawQuery = (args.query || '').trim();
   const limit = Math.min(LIST_LIMIT_MAX, Math.max(1, parseInt(args.limit, 10) || 10));
-  if (!query) return { tool: 'search_chats', error: 'missing_query' };
+  if (!rawQuery) return { tool: 'search_chats', error: 'missing_query' };
+
+  const { terms, isAnd, patterns } = extractSearchTerms(rawQuery);
+  const searchTerms = terms.length > 0 ? terms : [rawQuery.toLowerCase()];
 
   const chats = await fetchChatsInPeriod(ctx.companyId, period);
-  const terms = query.toLowerCase().split(/[,\s]+/).filter(t => t.length >= 3);
-  const haystack = chat => [chat.conversation, chat.summary, ...(chat.chat_issues || []).map(i => i.summary)].join(' ').toLowerCase();
-  const keywordHits = chats.filter(chat => terms.some(t => haystack(chat).includes(t)));
 
+  // 1. Keyword search with linguistic proximity & relevance scoring
+  const scoredHits = [];
+  for (const chat of chats) {
+    const match = scoreChatMatch(chat, searchTerms, isAnd, patterns);
+    if (match) {
+      scoredHits.push({ chat, score: match.score, matchedTerms: match.matchedTerms });
+    }
+  }
+
+  // Sort keyword hits: highest score first, then newer chats
+  scoredHits.sort((a, b) => b.score - a.score || (new Date(b.chat.created_at) - new Date(a.chat.created_at)));
+
+  const keywordHitIds = new Set(scoredHits.map(h => h.chat.id));
+
+  // 2. Semantic search (pgvector embedding) for additional related chats within the exact period
   let semanticHits = [];
-  const embedding = await getEmbedding(query);
-  if (embedding) {
-    const similar = await findSimilarChats(embedding, 0.55, 50, ctx.companyId);
-    const inPeriodIds = new Map(chats.map(c => [c.id, c]));
-    semanticHits = similar
-      .filter(s => inPeriodIds.has(s.id) && !keywordHits.some(k => k.id === s.id))
-      .map(s => ({ chat: inPeriodIds.get(s.id), similarity: s.similarity }));
+  try {
+    const embedding = await getEmbedding(rawQuery);
+    if (embedding) {
+      const similar = await findSimilarChats(embedding, 0.55, 30, ctx.companyId);
+      const inPeriodIds = new Map(chats.map(c => [c.id, c]));
+      semanticHits = similar
+        .filter(s => inPeriodIds.has(s.id) && !keywordHitIds.has(s.id))
+        .map(s => ({ chat: inPeriodIds.get(s.id), similarity: s.similarity }));
+    }
+  } catch (embErr) {
+    console.warn('⚠️ [searchChats] Semantic search skipped:', embErr.message);
   }
 
   const items = [
-    ...keywordHits.map(chat => ({ ...chatItem(chat, (chat.chat_issues || []).filter(isProblem), ctx.categories), match: 'keyword' })),
-    ...semanticHits.map(({ chat, similarity }) => ({ ...chatItem(chat, (chat.chat_issues || []).filter(isProblem), ctx.categories), match: `similar ${Math.round(similarity * 100)}%` }))
+    ...scoredHits.map(({ chat, matchedTerms }) => ({
+      ...chatItem(chat, (chat.chat_issues || []).filter(isProblem), ctx.categories),
+      match: 'keyword (' + matchedTerms.join(', ') + ')'
+    })),
+    ...semanticHits.map(({ chat, similarity }) => ({
+      ...chatItem(chat, (chat.chat_issues || []).filter(isProblem), ctx.categories),
+      match: 'similar ' + Math.round(similarity * 100) + '%'
+    }))
   ];
 
   return {
     tool: 'search_chats',
     period: periodFacts(period),
-    query,
-    keyword_matches: keywordHits.length,
+    query: searchTerms.join(' / ') || rawQuery,
+    search_terms: searchTerms,
+    keyword_matches: scoredHits.length,
     semantic_matches: semanticHits.length,
     total_matches: items.length,
     shown: Math.min(limit, items.length),
@@ -395,9 +672,23 @@ export async function getSentiment(ctx, args) {
   const counts = {};
   for (const c of chats) counts[c.sentiment || 'ไม่ระบุ'] = (counts[c.sentiment || 'ไม่ระบุ'] || 0) + 1;
   // Stored sentiment is free text from the LLM; bucket it into a polarity for a stable overview
-  const polarityOf = s => /ชม|พอใจ(?!ไม่)|ประทับใจ|ขอบคุณ/.test(s || '') && !/ไม่พอใจ/.test(s || '') ? 'บวก'
-    : /โกรธ|ไม่พอใจ|หงุดหงิด|รำคาญ|ผิดหวัง|กังวล|ตกใจ|ไม่ประทับใจ/.test(s || '') ? 'ลบ'
-    : 'กลาง';
+  const polarityOf = s => {
+    const text = (s || '').trim();
+    if (!text) return 'กลาง';
+    // 1. Check negative words first (โกรธ, ไม่พอใจ, หงุดหงิด, รำคาญ, ผิดหวัง ฯลฯ)
+    if (/โกรธ|ไม่พอใจ|หงุดหงิด|รำคาญ|ผิดหวัง|กังวล|กลัว|ตกใจ|ไม่ประทับใจ/i.test(text)) {
+      return 'ลบ';
+    }
+    // 2. Check positive words: 'ชม' must not match 'ชม.' (ชั่วโมง) or 'ไม่ชม'
+    if (/ไม่ชม/.test(text)) return 'กลาง';
+    if (/ชื่นชม|ชมเชย|คำชม|น่าชม|ประทับใจ|ขอบคุณ|พอใจ/i.test(text)) {
+      return 'บวก';
+    }
+    if (/ชม(?![.])/i.test(text) && !/ชม[.]/.test(text) && !/ชั่วโมง/.test(text)) {
+      return 'บวก';
+    }
+    return 'กลาง';
+  };
   const polarity = { บวก: 0, กลาง: 0, ลบ: 0 };
   chats.forEach(c => { polarity[polarityOf(c.sentiment)]++; });
   const negative = chats.filter(c => polarityOf(c.sentiment) === 'ลบ');
@@ -439,8 +730,10 @@ export async function getCategoryInfo(ctx, args) {
   if (keys.length === 0) {
     return {
       tool: 'get_category_info',
+      not_found: true,
+      message: `ไม่พบหมวด "${args.category || unknown.join(', ')}" ในระบบ`,
       unknown_categories: unknown,
-      available_categories: [...ctx.categories.values()].map(c => ({ name: c.name, description: c.description }))
+      available_categories: [...ctx.categories.values()].filter(c => c.key !== 'other').map(c => ({ name: c.name, description: c.description }))
     };
   }
   const cat = ctx.categories.get(keys[0]);
@@ -455,6 +748,20 @@ export async function getResolutionAdvice(ctx, args) {
   const period = resolvePeriod(args.period || { type: 'last_n_days', n: 30 });
   const chats = await fetchChatsInPeriod(ctx.companyId, period);
   let { keys, unknown } = resolveCategoryKeys([args.category].filter(Boolean), ctx.categories);
+
+  // Category requested but not found
+  if (args.category && keys.length === 0) {
+    return {
+      tool: 'get_resolution_advice',
+      period: periodFacts(period),
+      not_found: true,
+      message: `ไม่พบหมวด "${args.category}" ในระบบ`,
+      unknown_categories: unknown,
+      category: null,
+      sop: null,
+      available_categories: [...ctx.categories.values()].filter(c => c.key !== 'other').map(c => ({ name: c.name, description: c.description }))
+    };
+  }
 
   // No category given: advise on the most frequent problem of the period
   if (keys.length === 0) {

@@ -1,3 +1,4 @@
+import { isJaikaConfigured, jaikaEmbedding, jaikaChat } from './jaika.js';
 import dotenv from 'dotenv';
 import http from 'http';
 dotenv.config();
@@ -253,7 +254,26 @@ category_id, sub_category (Thai), intent (refund|withdraw|deposit|register|verif
     let outputTokens = null;
     let contextOverflow = false;
 
-    if (IS_CLOUDFLARE) {
+    if (isJaikaConfigured()) {
+      try {
+        const jaikaRes = await jaikaChat([
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: `Analyze this conversation:\n${conversation}${clausesBlock}` }
+        ], {
+          model: process.env.JAIKA_MODEL_CHAT || 'qwen2.5-14b',
+          format: { type: 'json_object' },
+          maxTokens: 2048,
+          temperature: 0.1
+        });
+        result = repairAndParseJSON(jaikaRes.content);
+        promptTokens = jaikaRes.promptTokens;
+        outputTokens = jaikaRes.outputTokens;
+      } catch (jaikaErr) {
+        console.warn(`⚠️ [AI Jaika Triage] Error (${jaikaErr.message}), falling back...`);
+      }
+    }
+
+    if (!result && IS_CLOUDFLARE) {
       const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${MODEL_LLM}`;
       const response = await fetch(cfUrl, {
         method: 'POST',
@@ -286,7 +306,7 @@ category_id, sub_category (Thai), intent (refund|withdraw|deposit|register|verif
 
       promptTokens = data.result?.usage?.prompt_tokens ?? null;
       outputTokens = data.result?.usage?.completion_tokens ?? null;
-    } else {
+    } else if (!result) {
       const response = await postRequest(`${OLLAMA_URL}/api/chat`, {
         model: MODEL_LLM,
         messages: [
@@ -398,7 +418,7 @@ category_id, sub_category (Thai), intent (refund|withdraw|deposit|register|verif
       ai_recommendation: sanitizeChinese(result.ai_recommendation || 'แนะนำตรวจสอบปัญหาระบบทั่วไป'),
       detected_issues: sanitizedIssues,
       _meta: {
-        model: MODEL_LLM,
+        model: isJaikaConfigured() ? (process.env.JAIKA_MODEL_CHAT || 'qwen2.5-14b') : MODEL_LLM,
         num_ctx: OLLAMA_NUM_CTX,
         prompt_tokens: promptTokens,
         output_tokens: outputTokens,
@@ -416,39 +436,54 @@ category_id, sub_category (Thai), intent (refund|withdraw|deposit|register|verif
  * @param {string} text - The input text to embed.
  * @returns {Promise<number[]>} - 1024 dimension vector.
  */
+let jaikaEmbBackoffUntil = 0;
+let cfEmbBackoffUntil = 0;
+
 export async function getEmbedding(text) {
   try {
-    if (IS_CLOUDFLARE) {
-      const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${MODEL_EMBEDDING}`;
-      const response = await fetch(cfUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          text: [text]
-        })
-      });
-
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`Cloudflare Embedding error (${response.status}): ${errText}`);
+    if (isJaikaConfigured() && Date.now() > jaikaEmbBackoffUntil) {
+      try {
+        return await jaikaEmbedding(text);
+      } catch (jaikaErr) {
+        console.warn(`⚠️ [AI Jaika Embedding] Error (${jaikaErr.message}), backing off 10m...`);
+        jaikaEmbBackoffUntil = Date.now() + 10 * 60 * 1000;
       }
+    }
 
-      const data = await response.json();
-      if (!data.result || !data.result.data || !data.result.data[0]) {
-        throw new Error('Cloudflare response did not contain embedding vector');
+    if (IS_CLOUDFLARE && Date.now() > cfEmbBackoffUntil) {
+      try {
+        const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${MODEL_EMBEDDING}`;
+        const response = await fetch(cfUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            text: [text]
+          }),
+          signal: AbortSignal.timeout(5000)
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          if (data.result && data.result.data && data.result.data[0]) {
+            return data.result.data[0];
+          }
+        }
+        console.warn('⚠️ [Cloudflare Embedding] Unavailable, backing off 30m to local Ollama bge-m3...');
+        cfEmbBackoffUntil = Date.now() + 30 * 60 * 1000;
+      } catch (e) {
+        console.warn('⚠️ [Cloudflare Embedding] Error, backing off 10m to local Ollama bge-m3...');
+        cfEmbBackoffUntil = Date.now() + 10 * 60 * 1000;
       }
-
-      return data.result.data[0];
     }
 
     const response = await fetch(`${OLLAMA_URL}/api/embeddings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: MODEL_EMBEDDING,
+        model: MODEL_EMBEDDING.startsWith('@cf/') ? 'bge-m3:latest' : MODEL_EMBEDDING,
         prompt: text,
         keep_alive: process.env.OLLAMA_KEEP_ALIVE || '60m'
       })

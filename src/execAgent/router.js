@@ -16,6 +16,7 @@ const GROUP_BY = ['category', 'priority', 'day', 'hour'];
 const METRICS = ['issues', 'chats', 'new_customers', 'total', 'new', 'new_list', 'returning_ratio', 'new_by_month', 'repeat_customers'];
 const SORTS = ['newest', 'oldest', 'priority'];
 const MAX_CALLS = 3;
+const EXPLICIT_TIME_PATTERN = /(วันนี้|เมื่อวาน|เดือนนี้|เดือนหน้า|สัปดาห์นี้|สัปดาห์ที่แล้ว|เดือนที่แล้ว|ช่วงนี้|มกราคม|กุมภาพันธ์|มีนาคม|เมษายน|พฤษภาคม|มิถุนายน|กรกฎาคม|สิงหาคม|กันยายน|ตุลาคม|พฤศจิกายน|ธันวาคม|\d{1,2}\s*(ม\.ค\.|ก\.พ\.|มี\.ค\.|เม\.ย\.|พ\.ค\.|มิ\.ย\.|ก\.ค\.|ส\.ค\.|ก\.ย\.|ต\.ค\.|พ\.ย\.|ธ\.ค\.)|\d{4}|\d{2}\/\d{2})/i;
 
 const periodSchema = {
   type: 'object',
@@ -95,7 +96,7 @@ TOOLS (args in parentheses; every tool also takes "period"):
 - compare_periods(metric=issues|chats|new_customers, period, period_b, categories?): compare two periods. If only one period is named, set period_b to the previous comparable period.
 - get_customer_stats(metric=total|new|new_list|returning_ratio|new_by_month|repeat_customers): customer counts, who registered, share of chats from existing customers, customers who contacted again / repeated the same problem ("ทักซ้ำ", "แจ้งเรื่องเดิม").
 - search_chats(query): chats about a specific topic that is not a category (e.g. วันเกิด, อายัด, หวย, เปลี่ยนข้อมูล, VIP). query = 1-3 specific Thai keywords (at least 3 letters each); never generic words such as แอดมิน, ลูกค้า, เว็บ, ปัญหา.
-- get_sentiment(): customer mood / satisfaction, and chats where customers praised or thanked the service (positive_examples).
+- get_sentiment(): customer mood / satisfaction, and chats where customers praised or thanked the service (positive_examples) and negative examples. DO NOT pair with list_chats unless the user explicitly asks for full chat listings ("ขอดูแชต", "ขอรายการแชต").
 - get_category_info(category): what a category means.
 - get_resolution_advice(category?): how to fix / root cause / what to do about a problem (omit category to use the top problem).
 
@@ -109,13 +110,13 @@ FOLLOW-UP QUESTIONS
 Set "continues_previous": true when the question builds on the previous turn (refers to its results, numbers or items, or only changes one detail); the system then carries over every argument you do not set. Set it to false for a new, self-contained question.
 A short question that refers to the previous turn ("แล้ว...ล่ะ", "เทียบกับ...", "อันนั้น", "ข้อ 2", "ขอรายละเอียด") continues the previous plan:
 - Keep every argument the user did not change (period, categories, priorities, metric) and change only what the new question mentions.
-- Comparing with another period means compare_periods: the newly mentioned period and the previous turn's period are the two periods, with the previous turn's metric/categories.
+- Comparing with another period means compare_periods: period A is the previous turn's period, period B is the newly mentioned period (or previous comparable period). For example, if the previous turn asked about October, and now asks "เทียบกับเดือนก่อนหน้า (กันยายน) แย่ลงไหม", period A is October, period B is September. NEVER default period A to the current real-time month.
 - Referring to items shown before means list_chats with their chat_ids from the history.
 
 RULES
 - reply_mode "data" when at least one tool call or a missing-data topic applies; "chitchat" for greetings, thanks, compliments or complaints about the bot itself, jokes, small talk and anything unrelated to the business (out_of_scope); "clarify" only if the question is impossible to interpret (ask in Thai in clarify_question).
 - At most ${MAX_CALLS} calls. A question mixing supported and unsupported data gets both calls and unsupported_topics.
-- "focus": short note of what the user wants emphasized (e.g. "ตอบเรื่องเดียว", "เรียงตามวันที่", "เฉพาะเปอร์เซ็นต์"), else "".
+- "focus": short note of special formatting requested by the user (e.g. "3 อันดับแรก", "เรียงตามวันที่", "เฉพาะเปอร์เซ็นต์"), else "". NEVER put "ตอบเรื่องเดียว" unless the user explicitly requested only one item.
 
 
 SIMILAR SOLVED EXAMPLES are given with each question: verified plans for similar questions. Follow their pattern when they fit, but always obey the rules above.`;
@@ -140,9 +141,10 @@ const TOOLS_WITH_SINGLE_CATEGORY = ['get_category_info', 'get_resolution_advice'
  * @param {object} raw - Parsed LLM output
  * @param {any[]} [previousCalls] - Calls of the previous successful turn
  */
-export function sanitizePlan(raw, previousCalls = []) {
+export function sanitizePlan(raw, previousCalls = [], userQuery = '') {
   const previousPeriod = previousCalls.find(c => c.args?.period)?.args.period || null;
-  const continues = raw?.continues_previous === true && previousCalls.length > 0;
+  const isFollowUpPattern = /(ที่เหลือ|หมวดที่เหลือ|อีก \d+ หมวด|อันดับที่เหลือ|แล้ว|แล้วมี|แล้วเคส|ข้อ \d+|เคสนั้น|รายการนี้|แชตไหนบ้าง|เทียบกับ)/i.test(userQuery);
+  const continues = (raw?.continues_previous === true || isFollowUpPattern) && previousCalls.length > 0;
   // Filters of the previous turn that a follow-up keeps unless it sets its own
   const previousFilters = {};
   for (const key of ['categories', 'priorities', 'query']) {
@@ -184,25 +186,59 @@ export function sanitizePlan(raw, previousCalls = []) {
         if (TOOLS_WITH_SINGLE_CATEGORY.includes(c.tool) && !args.category && previousCategory) args.category = previousCategory;
         args.continues_previous = true;
       }
-      if (!args.period && c.tool !== 'get_category_info') {
-        args.period = previousPeriod || { type: 'last_n_days', n: 7 };
-        args.period_inherited = !!previousPeriod;
+      const hasExplicitTime = EXPLICIT_TIME_PATTERN.test(userQuery);
+      if (continues && !hasExplicitTime && previousPeriod) {
+        if (!args.period || args.period.type === 'last_n_days') {
+          args.period = previousPeriod;
+          args.period_inherited = true;
+        }
+      } else if (!args.period && c.tool !== 'get_category_info') {
+        args.period = { type: 'last_n_days', n: 7 };
       }
-      // A comparison that names only one period compares it with the period discussed in the previous turn
-      if (c.tool === 'compare_periods' && !args.period_b && previousPeriod &&
-          JSON.stringify(previousPeriod) !== JSON.stringify(args.period)) {
-        args.period_b = previousPeriod;
+      const isRemainingQuery = /(ที่เหลือ|หมวดที่เหลือ|อีก \d+ หมวด|อันดับที่เหลือ)/i.test(userQuery);
+      if (isRemainingQuery) {
+        if (previousPeriod) args.period = previousPeriod;
+        c.tool = 'get_issue_stats';
+        delete args.categories;
+        args.limit = 30;
+      }
+      // Fix follow-up comparison: If comparing with a prior period and previousPeriod exists from previous turn,
+      // the baseline period A should be the previousPeriod (e.g. October), not defaulted to current month!
+      if (c.tool === 'compare_periods') {
+        if (previousPeriod) {
+          const curMonth = (new Date().getMonth() + 1);
+          if (args.period?.type === 'month' && args.period.month === curMonth && args.period_b && previousPeriod.month !== curMonth) {
+            args.period = previousPeriod;
+          } else if (!args.period_b && JSON.stringify(previousPeriod) !== JSON.stringify(args.period)) {
+            args.period_b = previousPeriod;
+          }
+        }
       }
       return { tool: c.tool, args };
     });
+  // Deduplicate and filter redundant calls
+  let cleanedCalls = calls;
+  if (cleanedCalls.some(c => c.tool === 'get_sentiment') && cleanedCalls.some(c => c.tool === 'list_chats')) {
+    const userWantsList = /(ขอดูแชต|ขอรายการ|ขอลิสต์|ดูแชตทั้งหมด)/i.test(raw?.focus || '') || /(ขอดูแชต|ขอรายการ|ขอลิสต์|ดูแชตทั้งหมด)/i.test(raw?.query || '');
+    if (!userWantsList) {
+      cleanedCalls = cleanedCalls.filter(c => c.tool !== 'list_chats');
+    }
+  }
+  if (cleanedCalls.filter(c => c.tool === 'compare_periods').length > 1) {
+    const generic = cleanedCalls.find(c => c.tool === 'compare_periods' && (!c.args.categories || c.args.categories.length === 0));
+    if (generic) {
+      cleanedCalls = cleanedCalls.filter(c => c.tool !== 'compare_periods' || c === generic);
+    }
+  }
+
   const unsupported = (Array.isArray(raw?.unsupported_topics) ? raw.unsupported_topics : []).filter(t => UNSUPPORTED_TOPICS.includes(t));
   // Nothing to fetch and nothing to refuse except "out of scope" = small talk, answered conversationally
-  const onlySmallTalk = calls.length === 0 && unsupported.every(t => t === 'out_of_scope');
+  const onlySmallTalk = cleanedCalls.length === 0 && unsupported.every(t => t === 'out_of_scope');
   return {
     reply_mode: mode === 'data' && onlySmallTalk ? 'chitchat' : mode,
-    calls,
+    calls: cleanedCalls,
     unsupported_topics: [...new Set(unsupported)],
-    focus: typeof raw?.focus === 'string' ? raw.focus.slice(0, 200) : '',
+    focus: (typeof raw?.focus === 'string' && raw.focus !== 'ตอบเรื่องเดียว' ? raw.focus.slice(0, 200) : ''),
     clarify_question: typeof raw?.clarify_question === 'string' ? raw.clarify_question.slice(0, 300) : ''
   };
 }
@@ -234,7 +270,7 @@ export async function routeQuery({ query, companyId, categories, history }) {
     console.log(`🧭 [Router] attempt ${i + 1}: ${promptTokens ?? '?'} prompt + ${outputTokens ?? '?'} output tokens, ${durationMs ?? '?'} ms (model load ${loadMs ?? 0} ms)`);
     try {
       const previousCalls = [...(history || [])].reverse().find(h => h.slots?.calls?.length)?.slots.calls || [];
-      const plan = sanitizePlan(parseJsonObject(content), previousCalls);
+      const plan = sanitizePlan(parseJsonObject(content), previousCalls, query);
       return {
         ...plan,
         examples_used: examples.map(e => ({ question: e.question, similarity: Math.round(e.similarity * 1000) / 1000 })),

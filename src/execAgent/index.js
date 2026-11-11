@@ -7,21 +7,44 @@ import { TOOL_HANDLERS, loadCategoryContext } from './tools.js';
 import { composeAnswer, composeChitchat, unsupportedText } from './composer.js';
 
 const HISTORY_TURNS = 3;
+const HISTORY_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes threshold for continuous context
 
 // Deterministic backstop for requests of personal contact data (the router also detects these)
 const PERSONAL_DATA_PATTERN = /(เบอร์โทร|เบอร์ลูกค้า|ขอเบอร์|เบอร์มือถือ|อีเมลลูกค้า|ขออีเมล|อีเมล์ลูกค้า|รหัสผ่านลูกค้า|password ลูกค้า|ขอรหัสผ่าน)/i;
 
-/** Last turns of this Telegram chat, for follow-up questions */
+// In-memory conversation history cache (instant & immune to database RLS policies)
+const memoryHistory = new Map();
+
+export function saveHistoryTurn(chatId, turn) {
+  if (!chatId) return;
+  const key = String(chatId);
+  const list = memoryHistory.get(key) || [];
+  list.push({
+    ...turn,
+    created_at: turn.created_at || new Date().toISOString()
+  });
+  memoryHistory.set(key, list.slice(-5));
+}
+
+/** Last turns of this Telegram chat, for follow-up questions (within 30 minutes) */
 async function loadHistory(chatId) {
   if (!chatId) return [];
+  const key = String(chatId);
+  const mem = memoryHistory.get(key) || [];
+  const freshMem = mem.filter(h => (Date.now() - new Date(h.created_at).getTime()) <= HISTORY_MAX_AGE_MS);
+  if (freshMem.length > 0) {
+    return freshMem;
+  }
+
+  const since = new Date(Date.now() - HISTORY_MAX_AGE_MS).toISOString();
   const { data, error } = await supabase
     .from('agent_audit_logs')
     .select('user_query, slots, reply, audit_status, created_at')
-    .eq('chat_id', String(chatId))
+    .eq('chat_id', key)
+    .gte('created_at', since)
     .order('created_at', { ascending: false })
     .limit(HISTORY_TURNS);
   if (error) {
-    console.warn('⚠️ [Exec Agent] Could not load conversation history:', error.message);
     return [];
   }
   return (data || []).reverse();
@@ -45,7 +68,7 @@ function collectChatIds(results) {
  * @param {{ query: string, companyId: string, chatId?: string }} input
  * @returns {Promise<{ reply: string, toolUsed: string, rawData: any, excelExport: any, slots: object, auditStatus: string }>}
  */
-export async function runExecAgent({ query, companyId, chatId }) {
+export async function runExecAgent({ query, companyId, chatId, history: explicitHistory }) {
   if (PERSONAL_DATA_PATTERN.test(query)) {
     return {
       reply: unsupportedText(['personal_data']).replace(/^- /, '🔒 '),
@@ -58,7 +81,8 @@ export async function runExecAgent({ query, companyId, chatId }) {
   }
 
   const categories = await loadCategoryContext(companyId);
-  const history = await loadHistory(chatId);
+  const rawHistory = explicitHistory || await loadHistory(chatId);
+  const history = (rawHistory || []).filter(h => !h.created_at || (Date.now() - new Date(h.created_at).getTime()) <= HISTORY_MAX_AGE_MS);
 
   let plan;
   try {
@@ -105,7 +129,7 @@ export async function runExecAgent({ query, companyId, chatId }) {
     : { reply: unsupportedText(plan.unsupported_topics), mode: 'deterministic' };
 
   const excel = results.find(r => r.excel_export)?.excel_export || null;
-  return {
+  const output = {
     reply,
     toolUsed: plan.calls.map(c => c.tool).join('+') || (plan.unsupported_topics.length ? 'unsupported_data' : 'none'),
     rawData: results,
@@ -113,4 +137,16 @@ export async function runExecAgent({ query, companyId, chatId }) {
     slots: { ...plan, result_chat_ids: collectChatIds(results), compose_mode: mode },
     auditStatus: results.some(r => r.error) ? 'PARTIAL' : mode === 'llm' ? 'OK' : 'DETERMINISTIC'
   };
+
+  if (chatId) {
+    saveHistoryTurn(chatId, {
+      user_query: query,
+      slots: output.slots,
+      reply: output.reply,
+      audit_status: output.auditStatus,
+      created_at: new Date().toISOString()
+    });
+  }
+
+  return output;
 }
