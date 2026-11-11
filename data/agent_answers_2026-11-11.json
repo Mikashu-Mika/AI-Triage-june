@@ -1,0 +1,1923 @@
+[
+  {
+    "id": 1,
+    "q": "วันนี้มีปัญหาอะไรบ้าง",
+    "expect": {
+      "tool": "get_issue_stats",
+      "period": "today"
+    },
+    "toolUsed": "get_issue_stats",
+    "auditStatus": "OK",
+    "durationMs": 49607,
+    "reply": "📊 สรุปปัญหาวันนี้ (11 พ.ย. 2569)\n\n- ไม่มีปัญหาใหม่ในวันนี้ค่ะ\n\n📌 ยังไม่มีปัญหาใหม่เข้ามาในวันนี้ค่ะ",
+    "slots": {
+      "reply_mode": "data",
+      "calls": [
+        {
+          "tool": "get_issue_stats",
+          "args": {
+            "period": {
+              "type": "today"
+            }
+          }
+        }
+      ],
+      "unsupported_topics": [],
+      "focus": "",
+      "clarify_question": "",
+      "examples_used": [
+        {
+          "question": "ขอสรุปปัญหาวันนี้หน่อย",
+          "similarity": 0.822
+        },
+        {
+          "question": "สรุปปัญหาวันนี้กับยอดฝากวันนี้ให้หน่อย",
+          "similarity": 0.743
+        },
+        {
+          "question": "วันนี้ช่วงบ่ายโมงถึงห้าโมงเย็นมีปัญหาเข้ามากี่เคส",
+          "similarity": 0.735
+        },
+        {
+          "question": "ช่วง 14 วันที่ผ่านมา ปัญหาอันดับต้นๆ คืออะไร",
+          "similarity": 0.731
+        },
+        {
+          "question": "สัปดาห์นี้ลูกค้าแจ้งปัญหาอะไรมาบ้าง",
+          "similarity": 0.72
+        }
+      ],
+      "timing": {
+        "prompt_tokens": 2010,
+        "output_tokens": 38,
+        "duration_ms": 23929,
+        "load_ms": 9,
+        "attempts": 1
+      },
+      "result_chat_ids": [],
+      "compose_mode": "llm"
+    }
+  },
+  {
+    "id": 2,
+    "q": "สรุปปัญหาของเมื่อวานให้หน่อย",
+    "expect": {
+      "tool": "get_issue_stats",
+      "period": "yesterday"
+    },
+    "toolUsed": "get_issue_stats",
+    "auditStatus": "OK",
+    "durationMs": 134345,
+    "reply": "📊 สรุปปัญหาเมื่อวาน (10 พ.ย. 2569)\n- รวม 89 ปัญหา จาก 20 แชต\n\n1. ข้อเสนอแนะและร้องเรียน — 18 ปัญหา (20.2%)\n2. ปัญหาการแจ้งเตือน — 9 ปัญหา (10.1%)\n3. ปัญหากราฟิก/การแสดงผลเว็บ — 8 ปัญหา (9%)\n4. ประสิทธิภาพระบบช้า — 7 ปัญหา (7.9%)\n5. ข้อผิดพลาดระบบ API — 6 ปัญหา (6.7%)\n\n- อีก 12 หมวดที่เหลือ รวม 41 ปัญหา\n\n📌 ข้อเสนอแนะและร้องเรียนเป็นปัญหาที่พบมากที่สุดค่ะ",
+    "slots": {
+      "reply_mode": "data",
+      "calls": [
+        {
+          "tool": "get_issue_stats",
+          "args": {
+            "period": {
+              "type": "yesterday"
+            }
+          }
+        }
+      ],
+      "unsupported_topics": [],
+      "focus": "",
+      "clarify_question": "",
+      "examples_used": [
+        {
+          "question": "ขอสรุปปัญหาวันนี้หน่อย",
+          "similarity": 0.913
+        },
+        {
+          "question": "สรุปปัญหาวันนี้กับยอดฝากวันนี้ให้หน่อย",
+          "similarity": 0.805
+        },
+        {
+          "question": "ช่วง 14 วันที่ผ่านมา ปัญหาอันดับต้นๆ คืออะไร",
+          "similarity": 0.701
+        },
+        {
+          "question": "แล้วของเมื่อวานล่ะ",
+          "similarity": 0.69
+        },
+        {
+          "question": "สัปดาห์นี้ปัญหาเยอะขึ้นหรือลดลงจากสัปดาห์ก่อน",
+          "similarity": 0.674
+        }
+      ],
+      "timing": {
+        "prompt_tokens": 2037,
+        "output_tokens": 39,
+        "duration_ms": 24290,
+        "load_ms": 4,
+        "attempts": 1
+      },
+      "result_chat_ids": [],
+      "compose_mode": "llm"
+    }
+  },
+  {
+    "id": 3,
+    "q": "สรุปปัญหาในเดือนนี้หน่อยค่ะ",
+    "expect": {
+      "tool": "get_issue_stats",
+      "period": "this_month"
+    },
+    "toolUsed": "get_issue_stats",
+    "auditStatus": "OK",
+    "durationMs": 143200,
+    "reply": "📊 สรุปปัญหาเดือนนี้ (พฤศจิกายน 2569)\n\n- รวม 89 ปัญหา จาก 20 แชต\n\n1. ข้อเสนอแนะและร้องเรียน — 18 ปัญหา (20.2%)\n2. ปัญหาการแจ้งเตือน — 9 ปัญหา (10.1%)\n3. ปัญหากราฟิก/การแสดงผลเว็บ — 8 ปัญหา (9%)\n4. ประสิทธิภาพระบบช้า — 7 ปัญหา (7.9%)\n5. ข้อผิดพลาดระบบ API — 6 ปัญหา (6.7%)\n\n- อีก 12 หมวดที่เหลือ รวม 41 ปัญหา\n\n💡 เดือนนี้ยังไม่สมบูรณ์ โปรดตรวจสอบข้อมูลที่อัปเดตค่ะ",
+    "slots": {
+      "reply_mode": "data",
+      "calls": [
+        {
+          "tool": "get_issue_stats",
+          "args": {
+            "period": {
+              "type": "this_month"
+            }
+          }
+        }
+      ],
+      "unsupported_topics": [],
+      "focus": "",
+      "clarify_question": "",
+      "examples_used": [
+        {
+          "question": "ขอสรุปปัญหาวันนี้หน่อย",
+          "similarity": 0.871
+        },
+        {
+          "question": "สรุปปัญหาวันนี้กับยอดฝากวันนี้ให้หน่อย",
+          "similarity": 0.769
+        },
+        {
+          "question": "เดือนที่แล้ววันไหนปัญหาพีคที่สุด",
+          "similarity": 0.721
+        },
+        {
+          "question": "ช่วง 14 วันที่ผ่านมา ปัญหาอันดับต้นๆ คืออะไร",
+          "similarity": 0.716
+        },
+        {
+          "question": "สัปดาห์นี้ปัญหาเยอะขึ้นหรือลดลงจากสัปดาห์ก่อน",
+          "similarity": 0.715
+        }
+      ],
+      "timing": {
+        "prompt_tokens": 2024,
+        "output_tokens": 72,
+        "duration_ms": 33453,
+        "load_ms": 5,
+        "attempts": 1
+      },
+      "result_chat_ids": [],
+      "compose_mode": "llm"
+    }
+  },
+  {
+    "id": 4,
+    "q": "สรุปปัญหาในสัปดาห์ที่แล้ว",
+    "expect": {
+      "tool": "get_issue_stats",
+      "period": "last_week"
+    },
+    "toolUsed": "get_issue_stats",
+    "auditStatus": "OK",
+    "durationMs": 56853,
+    "reply": "📊 สรุปปัญหาสัปดาห์ที่แล้ว (2 พ.ย. 2569 - 8 พ.ย. 2569)\n\nไม่พบปัญหาใด ๆ ในสัปดาห์ที่แล้วค่ะ",
+    "slots": {
+      "reply_mode": "data",
+      "calls": [
+        {
+          "tool": "get_issue_stats",
+          "args": {
+            "period": {
+              "type": "last_week"
+            }
+          }
+        }
+      ],
+      "unsupported_topics": [],
+      "focus": "",
+      "clarify_question": "",
+      "examples_used": [
+        {
+          "question": "ขอสรุปปัญหาวันนี้หน่อย",
+          "similarity": 0.818
+        },
+        {
+          "question": "สัปดาห์นี้ปัญหาเยอะขึ้นหรือลดลงจากสัปดาห์ก่อน",
+          "similarity": 0.746
+        },
+        {
+          "question": "สรุปปัญหาวันนี้กับยอดฝากวันนี้ให้หน่อย",
+          "similarity": 0.717
+        },
+        {
+          "question": "สัปดาห์นี้ลูกค้าแจ้งปัญหาอะไรมาบ้าง",
+          "similarity": 0.712
+        },
+        {
+          "question": "ช่วง 14 วันที่ผ่านมา ปัญหาอันดับต้นๆ คืออะไร",
+          "similarity": 0.7
+        }
+      ],
+      "timing": {
+        "prompt_tokens": 2014,
+        "output_tokens": 72,
+        "duration_ms": 32707,
+        "load_ms": 7,
+        "attempts": 1
+      },
+      "result_chat_ids": [],
+      "compose_mode": "llm"
+    }
+  },
+  {
+    "id": 5,
+    "q": "สรุปปัญหาย้อนหลัง 7 วัน ปัญหาไหนมีมากที่สุด",
+    "expect": {
+      "tool": "get_issue_stats",
+      "period": "last_n_days"
+    },
+    "toolUsed": "get_issue_stats",
+    "auditStatus": "OK",
+    "durationMs": 150559,
+    "reply": "📊 สรุปปัญหาย้อนหลัง 7 วัน (5 พ.ย. 2569 - วันนี้)\n\n- รวม 89 ปัญหา จาก 20 แชต\n\n1. ข้อเสนอแนะและร้องเรียน — 18 ปัญหา (20.2%)\n2. ปัญหาการแจ้งเตือน — 9 ปัญหา (10.1%)\n3. ปัญหากราฟิก/การแสดงผลเว็บ — 8 ปัญหา (9%)\n4. ประสิทธิภาพระบบช้า — 7 ปัญหา (7.9%)\n5. ข้อผิดพลาดระบบ API — 6 ปัญหา (6.7%)\n\n- อีก 12 หมวดที่เหลือ รวม 41 ปัญหา\n\n📌 ข้อมูลย้อนหลัง 7 วันยังไม่สมบูรณ์ ค่ะ",
+    "slots": {
+      "reply_mode": "data",
+      "calls": [
+        {
+          "tool": "get_issue_stats",
+          "args": {
+            "period": {
+              "type": "last_n_days",
+              "n": 7
+            },
+            "group_by": "category"
+          }
+        }
+      ],
+      "unsupported_topics": [],
+      "focus": "มากที่สุด",
+      "clarify_question": "",
+      "examples_used": [
+        {
+          "question": "ขอสรุปปัญหาวันนี้หน่อย",
+          "similarity": 0.712
+        },
+        {
+          "question": "ช่วง 14 วันที่ผ่านมา ปัญหาอันดับต้นๆ คืออะไร",
+          "similarity": 0.711
+        },
+        {
+          "question": "สัปดาห์นี้ปัญหาเยอะขึ้นหรือลดลงจากสัปดาห์ก่อน",
+          "similarity": 0.696
+        },
+        {
+          "question": "เดือนที่แล้ววันไหนปัญหาพีคที่สุด",
+          "similarity": 0.69
+        },
+        {
+          "question": "สรุปปัญหาวันนี้กับยอดฝากวันนี้ให้หน่อย",
+          "similarity": 0.678
+        }
+      ],
+      "timing": {
+        "prompt_tokens": 2035,
+        "output_tokens": 94,
+        "duration_ms": 40925,
+        "load_ms": 6,
+        "attempts": 1
+      },
+      "result_chat_ids": [],
+      "compose_mode": "llm"
+    }
+  },
+  {
+    "id": 6,
+    "q": "สรุปปัญหาแชตย้อนหลัง 30 วัน",
+    "expect": {
+      "tool": "get_issue_stats",
+      "period": "last_n_days"
+    },
+    "toolUsed": "get_issue_stats",
+    "auditStatus": "OK",
+    "durationMs": 151807,
+    "reply": "📊 สรุปปัญหาย้อนหลัง 30 วัน (13 ต.ค. 2569 - วันนี้)\n\n- รวม 443 ปัญหา จาก 89 แชต\n\n1. ข้อเสนอแนะและร้องเรียน — 73 ปัญหา (16.5%)\n2. ปัญหาการแจ้งเตือน — 44 ปัญหา (9.9%)\n3. ปัญหากราฟิก/การแสดงผลเว็บ — 44 ปัญหา (9.9%)\n4. ระบบการทำงานล่าช้า — 43 ปัญหา (9.7%)\n5. หน้าเว็บค้าง/โหลดช้า — 41 ปัญหา (9.3%)\n\n- อีก 12 หมวดที่เหลือ รวม 198 ปัญหา\n\n📌 ข้อมูลย้อนหลัง 30 วันยังไม่สมบูรณ์ ค่ะ",
+    "slots": {
+      "reply_mode": "data",
+      "calls": [
+        {
+          "tool": "get_issue_stats",
+          "args": {
+            "period": {
+              "type": "last_n_days",
+              "n": 30
+            }
+          }
+        }
+      ],
+      "unsupported_topics": [],
+      "focus": "",
+      "clarify_question": "",
+      "examples_used": [
+        {
+          "question": "ขอรายการแชตปัญหาการเงินเมื่อวาน เรียงตามเวลา",
+          "similarity": 0.694
+        },
+        {
+          "question": "ขอสรุปปัญหาวันนี้หน่อย",
+          "similarity": 0.651
+        },
+        {
+          "question": "สรุปปัญหาวันนี้กับยอดฝากวันนี้ให้หน่อย",
+          "similarity": 0.627
+        },
+        {
+          "question": "แอดมินตอบแชตเฉลี่ยกี่นาที",
+          "similarity": 0.616
+        },
+        {
+          "question": "ขอดูแชตเรื่องสมัครสมาชิกไม่ได้ของสัปดาห์นี้",
+          "similarity": 0.614
+        }
+      ],
+      "timing": {
+        "prompt_tokens": 1985,
+        "output_tokens": 81,
+        "duration_ms": 36964,
+        "load_ms": 5,
+        "attempts": 1
+      },
+      "result_chat_ids": [],
+      "compose_mode": "llm"
+    }
+  },
+  {
+    "id": 7,
+    "q": "เมื่อวานตอน 12.00-18.00 มีกี่ปัญหา",
+    "expect": {
+      "tool": "get_issue_stats",
+      "period": "yesterday"
+    },
+    "toolUsed": "get_issue_stats",
+    "auditStatus": "OK",
+    "durationMs": 141483,
+    "reply": "📊 สรุปปัญหาเมื่อวาน (10 พ.ย. 2569) เวลา 12:00-18:00 น.\n\n- รวม 51 ปัญหา จาก 10 แชต\n\n1. ข้อเสนอแนะและร้องเรียน — 10 ปัญหา (19.6%)\n2. ปัญหาการแจ้งเตือน — 5 ปัญหา (9.8%)\n3. ระบบการทำงานล่าช้า — 5 ปัญหา (9.8%)\n4. ปัญหากราฟิก/การแสดงผลเว็บ — 5 ปัญหา (9.8%)\n5. ประสิทธิภาพระบบช้า — 5 ปัญหา (9.8%)\n\n- อีก 10 หมวดที่เหลือ รวม 21 ปัญหา\n\n📌 ข้อมูลจากช่วงเวลา 12:00-18:00 น. เมื่อวานค่ะ",
+    "slots": {
+      "reply_mode": "data",
+      "calls": [
+        {
+          "tool": "get_issue_stats",
+          "args": {
+            "period": {
+              "type": "yesterday",
+              "start_hour": 12,
+              "end_hour": 18
+            }
+          }
+        }
+      ],
+      "unsupported_topics": [],
+      "focus": "",
+      "clarify_question": "",
+      "examples_used": [
+        {
+          "question": "วันนี้ช่วงบ่ายโมงถึงห้าโมงเย็นมีปัญหาเข้ามากี่เคส",
+          "similarity": 0.821
+        },
+        {
+          "question": "ปัญหาแจ้งเตือนส่วนใหญ่เข้ามากี่โมง สัปดาห์นี้",
+          "similarity": 0.752
+        },
+        {
+          "question": "ขอสรุปปัญหาวันนี้หน่อย",
+          "similarity": 0.703
+        },
+        {
+          "question": "สรุปปัญหาวันนี้กับยอดฝากวันนี้ให้หน่อย",
+          "similarity": 0.689
+        },
+        {
+          "question": "สัปดาห์นี้ปัญหาเยอะขึ้นหรือลดลงจากสัปดาห์ก่อน",
+          "similarity": 0.689
+        }
+      ],
+      "timing": {
+        "prompt_tokens": 2034,
+        "output_tokens": 50,
+        "duration_ms": 32915,
+        "load_ms": 4,
+        "attempts": 1
+      },
+      "result_chat_ids": [],
+      "compose_mode": "llm"
+    }
+  },
+  {
+    "id": 8,
+    "q": "ในเดือนที่แล้ว ปัญหาอะไรเกิดบ่อยที่สุด",
+    "expect": {
+      "tool": "get_issue_stats",
+      "period": "last_month"
+    },
+    "toolUsed": "get_issue_stats",
+    "auditStatus": "OK",
+    "durationMs": 144122,
+    "reply": "📊 สรุปปัญหาเดือนที่แล้ว (ตุลาคม 2569)\n\n- รวม 450 ปัญหา จาก 101 แชต\n\n1. ข้อเสนอแนะและร้องเรียน — 58 ปัญหา (12.9%)\n2. ระบบการทำงานล่าช้า — 45 ปัญหา (10%)\n3. ปัญหาการแจ้งเตือน — 45 ปัญหา (10%)\n4. หน้าเว็บค้าง/โหลดช้า — 43 ปัญหา (9.6%)\n5. ปัญหากราฟิก/การแสดงผลเว็บ — 43 ปัญหา (9.6%)\n\n- อีก 13 หมวดที่เหลือ รวม 216 ปัญหา\n\n📌 เดือนที่แล้วพบปัญหาเกี่ยวกับข้อเสนอแนะและร้องเรียนมากที่สุดค่ะ",
+    "slots": {
+      "reply_mode": "data",
+      "calls": [
+        {
+          "tool": "get_issue_stats",
+          "args": {
+            "period": {
+              "type": "last_month"
+            },
+            "group_by": "category"
+          }
+        }
+      ],
+      "unsupported_topics": [],
+      "focus": "อันดับต้นๆ",
+      "clarify_question": "",
+      "examples_used": [
+        {
+          "question": "เดือนที่แล้ววันไหนปัญหาพีคที่สุด",
+          "similarity": 0.858
+        },
+        {
+          "question": "สัปดาห์นี้ปัญหาเยอะขึ้นหรือลดลงจากสัปดาห์ก่อน",
+          "similarity": 0.702
+        },
+        {
+          "question": "สัปดาห์นี้ลูกค้าแจ้งปัญหาอะไรมาบ้าง",
+          "similarity": 0.677
+        },
+        {
+          "question": "เดือนสิงหาคมมีปัญหาล็อกอินกี่เคส",
+          "similarity": 0.662
+        },
+        {
+          "question": "ช่วง 14 วันที่ผ่านมา ปัญหาอันดับต้นๆ คืออะไร",
+          "similarity": 0.658
+        }
+      ],
+      "timing": {
+        "prompt_tokens": 2040,
+        "output_tokens": 88,
+        "duration_ms": 23278,
+        "load_ms": 8,
+        "attempts": 1
+      },
+      "result_chat_ids": [],
+      "compose_mode": "llm"
+    }
+  },
+  {
+    "id": 9,
+    "q": "ปัญหาด่วนทั้งหมดมีเท่าไหร่คะ อะไรบ้าง",
+    "expect": {
+      "tool": [
+        "get_issue_stats",
+        "list_chats"
+      ]
+    },
+    "toolUsed": "list_chats",
+    "auditStatus": "DETERMINISTIC",
+    "durationMs": 468826,
+    "reply": "📋 รายการแชต ย้อนหลัง 7 วัน (5 พ.ย. 2569 - วันนี้) — 16 แชต\n\n1. `today055` (10 พ.ย. 2569 18:13 น., ความด่วนฉุกเฉิน)\n   ฉันพยายามเข้าสู่ระบบบัญชีสมาชิกของร้านขายเสื้อผ้าแต่ไม่สามารถเข้าได้ค่ะ ระบบแจ้งว่ารหัสผ่านไม่ถูกต้อง ทั้งที่ใช้รหัสเดิมซึ่งเคยเข้าสู่ระบบได้ตามปกติ เมื่อกดลืมร…\n   หมวด: ปัญหาระบบเข้าใช้งาน/ล็อกอิน, ความปลอดภัยของบัญชี\n2. `today047` (10 พ.ย. 2569 16:15 น., ความด่วนฉุกเฉิน)\n   ฉันได้รับอีเมลแจ้งว่ามีการเข้าสู่ระบบบัญชีสมาชิกจากอุปกรณ์ที่ไม่รู้จัก ทั้งที่ฉันไม่ได้ใช้อุปกรณ์ดังกล่าวค่ะ ฉันเริ่มกังวลว่าบัญชีอาจถูกบุคคลอื่นเข้าถึงและมีการ…\n   หมวด: ความปลอดภัยของบัญชี, ปัญหาระบบเข้าใช้งาน/ล็อกอิน, ประสิทธิภาพระบบช้า, ข้อเสนอแนะและร้องเรียน\n3. `today060` (10 พ.ย. 2569 18:16 น., ความด่วนสูง)\n   ฉันใช้บริการเว็บไซต์ร้านขายอุปกรณ์ไอทีแล้วพบปัญหาหลายอย่างต่อเนื่องค่ะ\n   หมวด: ปัญหาบราวเซอร์/อุปกรณ์, หน้าเว็บค้าง/โหลดช้า, ข้อผิดพลาดระบบ API, ประสิทธิภาพระบบช้า, ขอเพิ่มฟีเจอร์, ข้อเสนอแนะและร้องเรียน\n4. `today059` (10 พ.ย. 2569 18:15 น., ความด่วนสูง)\n   ฉันซื้อสินค้าไปแล้วและต้องการขอถอนเงินคืนจากยอดที่ชำระเกิน แต่ระบบแจ้งว่าทำรายการไม่สำเร็จทุกครั้งค่ะ ฉันตรวจสอบประวัติรายการเงินพบว่าคำขอคืนเงินยังค้างอยู่หลาย…\n   หมวด: การเงินและการชำระเงิน, ข้อเสนอแนะและร้องเรียน\n5. `today057` (10 พ.ย. 2569 18:14 น., ความด่วนสูง)\n   ฉันต้องการสมัครสมาชิกเว็บไซต์ร้านขายอุปกรณ์กีฬาเพื่อใช้ส่วนลดสำหรับลูกค้าใหม่ แต่เมื่อกรอกชื่อ อีเมล และรหัสผ่านครบแล้ว ระบบกลับแจ้งว่าข้อมูลไม่ถูกต้อง บางครั้ง…\n   หมวด: การสมัครสมาชิก, ปัญหาการแจ้งเตือน, โปรโมชั่นและโบนัส, ข้อเสนอแนะและร้องเรียน\n6. `today056` (10 พ.ย. 2569 18:14 น., ความด่วนสูง)\n   ฉันเป็นสมาชิก VIP ของร้านขายเครื่องสำอางและต้องการใช้ส่วนลดพิเศษสำหรับสมาชิก แต่เมื่อเข้าสู่ระบบกลับพบว่าสถานะสมาชิกเปลี่ยนเป็นสมาชิกทั่วไป\n   หมวด: ความปลอดภัยของบัญชี, สิทธิประโยชน์ระดับ VIP, ปัญหากราฟิก/การแสดงผลเว็บ, โปรโมชั่นและโบนัส, ข้อเสนอแนะและร้องเรียน\n7. `today054` (10 พ.ย. 2569 18:13 น., ความด่วนสูง)\n   ฉันสั่งซื้อเครื่องฟอกอากาศและเลือกชำระเงินผ่าน PromptPay แต่ระบบแจ้งว่าไม่สามารถเชื่อมต่อกับผู้ให้บริการชำระเงินได้ค่ะ ฉันลองทำรายการใหม่อีกครั้งแต่ก็ขึ้น Timeo…\n   หมวด: ระบบการชำระเงิน/ธนาคาร, การเงินและการชำระเงิน, ข้อเสนอแนะและร้องเรียน\n8. `today053` (10 พ.ย. 2569 18:12 น., ความด่วนสูง)\n   ฉันเปิดหน้ารายละเอียดสินค้าของร้านขายกล้องแล้วพบข้อผิดพลาดหลายอย่างค่ะ ฉันไม่เข้าใจว่าทำไมข้อมูลสินค้าพื้นฐานถึงไม่สามารถเรียกดูได้ตามปกติ\n   หมวด: ปัญหากราฟิก/การแสดงผลเว็บ, ข้อผิดพลาดระบบ API, ข้อเสนอแนะและร้องเรียน\n9. `today052` (10 พ.ย. 2569 18:12 น., ความด่วนสูง)\n   ช่วงนี้เว็บไซต์ร้านขายเครื่องใช้ไฟฟ้าทำงานช้าผิดปกติมากค่ะ บางครั้งการค้นหาสินค้าใช้เวลานานจนต้องรอผลลัพธ์หลายรอบ\n   หมวด: ประสิทธิภาพระบบช้า, ระบบการทำงานล่าช้า, ข้อเสนอแนะและร้องเรียน\n10. `today051` (10 พ.ย. 2569 18:12 น., ความด่วนสูง)\n   ฉันพยายามเข้าเว็บไซต์ร้านขายอุปกรณ์คอมพิวเตอร์ตั้งแต่ช่วงเช้า แต่ไม่สามารถเปิดหน้าร้านได้เลยค่ะ ระบบแจ้ง 403 Forbidden และบางครั้งก็ขึ้นข้อความว่า Access Denied…\n   หมวด: เข้าหน้าเว็บไม่ได้/ลิงก์เสีย, ปัญหาบราวเซอร์/อุปกรณ์, ข้อเสนอแนะและร้องเรียน\n\n📎 แสดง 10 จาก 16 แชต รายการทั้งหมดอยู่ในไฟล์ Excel ด้านล่างค่ะ",
+    "slots": {
+      "reply_mode": "data",
+      "calls": [
+        {
+          "tool": "list_chats",
+          "args": {
+            "period": {
+              "type": "last_n_days",
+              "n": 7
+            },
+            "priorities": [
+              "urgent",
+              "high"
+            ],
+            "sort": "priority"
+          }
+        }
+      ],
+      "unsupported_topics": [],
+      "focus": "",
+      "clarify_question": "",
+      "examples_used": [
+        {
+          "question": "ตอนนี้ควรรีบแก้ปัญหาอะไรก่อน",
+          "similarity": 0.643
+        },
+        {
+          "question": "เคสฉุกเฉินวันนี้มีแชตไหนบ้าง เรียงจากด่วนสุด",
+          "similarity": 0.634
+        },
+        {
+          "question": "เอาเฉพาะเคสด่วน",
+          "similarity": 0.594
+        },
+        {
+          "question": "วันนี้ช่วงบ่ายโมงถึงห้าโมงเย็นมีปัญหาเข้ามากี่เคส",
+          "similarity": 0.59
+        },
+        {
+          "question": "ช่วง 14 วันที่ผ่านมา ปัญหาอันดับต้นๆ คืออะไร",
+          "similarity": 0.585
+        }
+      ],
+      "timing": {
+        "prompt_tokens": 2100,
+        "output_tokens": 54,
+        "duration_ms": 36955,
+        "load_ms": 7,
+        "attempts": 1
+      },
+      "result_chat_ids": [
+        "today055",
+        "today047",
+        "today060",
+        "today059",
+        "today057",
+        "today056",
+        "today054",
+        "today053",
+        "today052",
+        "today051"
+      ],
+      "compose_mode": "deterministic"
+    }
+  },
+  {
+    "id": 10,
+    "q": "วันนี้มีปัญหาด้านการฝาก-ถอนกี่เคส",
+    "expect": {
+      "tool": "get_issue_stats",
+      "period": "today",
+      "categories": [
+        "deposit_withdrawal"
+      ]
+    },
+    "toolUsed": "get_issue_stats",
+    "auditStatus": "OK",
+    "durationMs": 92669,
+    "reply": "📊 สรุปปัญหาวันนี้ (11 พ.ย. 2569)\n\n- รวม 0 ปัญหา จาก 0 แชต\n\nไม่พบหมวด \"การเงินและการชำระเงิน\" ในระบบค่ะ",
+    "slots": {
+      "reply_mode": "data",
+      "calls": [
+        {
+          "tool": "get_issue_stats",
+          "args": {
+            "period": {
+              "type": "today"
+            },
+            "categories": [
+              "deposit_withdrawal"
+            ]
+          }
+        }
+      ],
+      "unsupported_topics": [],
+      "focus": "",
+      "clarify_question": "",
+      "examples_used": [
+        {
+          "question": "สรุปปัญหาวันนี้กับยอดฝากวันนี้ให้หน่อย",
+          "similarity": 0.806
+        },
+        {
+          "question": "วันนี้ช่วงบ่ายโมงถึงห้าโมงเย็นมีปัญหาเข้ามากี่เคส",
+          "similarity": 0.796
+        },
+        {
+          "question": "เมื่อวานยอดถอนรวมเท่าไหร่",
+          "similarity": 0.733
+        },
+        {
+          "question": "ตอนนี้มีลูกค้าในระบบทั้งหมดกี่คน",
+          "similarity": 0.685
+        },
+        {
+          "question": "ปัญหาแจ้งเตือนส่วนใหญ่เข้ามากี่โมง สัปดาห์นี้",
+          "similarity": 0.68
+        }
+      ],
+      "timing": {
+        "prompt_tokens": 2000,
+        "output_tokens": 45,
+        "duration_ms": 27324,
+        "load_ms": 3,
+        "attempts": 1
+      },
+      "result_chat_ids": [],
+      "compose_mode": "llm"
+    }
+  },
+  {
+    "id": 11,
+    "q": "หมวดหมู่ปัญหาฝาก-ถอนคิดเป็นกี่เปอร์เซ็นต์ของปัญหาทั้งหมดในเดือนสิงหาคม",
+    "expect": {
+      "tool": "get_issue_stats",
+      "period": "month",
+      "categories": [
+        "deposit_withdrawal"
+      ]
+    },
+    "toolUsed": "get_issue_stats",
+    "auditStatus": "DETERMINISTIC",
+    "durationMs": 74656,
+    "reply": "📊 สรุปปัญหาหมวดการเงินและการชำระเงิน เดือนสิงหาคม 2569\n- รวม 58 ปัญหา จาก 58 แชต\n- คิดเป็น 15.8% ของปัญหาทั้งหมด 367 ปัญหา",
+    "slots": {
+      "reply_mode": "data",
+      "calls": [
+        {
+          "tool": "get_issue_stats",
+          "args": {
+            "period": {
+              "type": "month",
+              "month": 8
+            },
+            "categories": [
+              "deposit_withdrawal"
+            ]
+          }
+        }
+      ],
+      "unsupported_topics": [],
+      "focus": "เปอร์เซ็นต์",
+      "clarify_question": "",
+      "examples_used": [
+        {
+          "question": "ปัญหาชำระเงินไม่ผ่านคิดเป็นกี่เปอร์เซ็นต์ของทั้งหมดเดือนนี้",
+          "similarity": 0.696
+        },
+        {
+          "question": "เดือนสิงหาคมมีปัญหาล็อกอินกี่เคส",
+          "similarity": 0.675
+        },
+        {
+          "question": "สรุปปัญหาวันนี้กับยอดฝากวันนี้ให้หน่อย",
+          "similarity": 0.608
+        },
+        {
+          "question": "ปัญหาแจ้งเตือนส่วนใหญ่เข้ามากี่โมง สัปดาห์นี้",
+          "similarity": 0.569
+        },
+        {
+          "question": "เดือนที่แล้ววันไหนปัญหาพีคที่สุด",
+          "similarity": 0.566
+        }
+      ],
+      "timing": {
+        "prompt_tokens": 2062,
+        "output_tokens": 96,
+        "duration_ms": 43399,
+        "load_ms": 6,
+        "attempts": 1
+      },
+      "result_chat_ids": [],
+      "compose_mode": "deterministic"
+    }
+  },
+  {
+    "id": 12,
+    "q": "เดือนที่แล้ว มีปัญหาเกี่ยวกับการสมัครไม่ได้ไหม",
+    "expect": {
+      "tool": "get_issue_stats",
+      "period": "last_month",
+      "categories": [
+        "registration"
+      ]
+    },
+    "toolUsed": "get_issue_stats",
+    "auditStatus": "OK",
+    "durationMs": 62839,
+    "reply": "📊 สรุปปัญหาเดือนที่แล้ว (ตุลาคม 2569)\n\n- รวม 14 ปัญหา จาก 9 แชต เกี่ยวกับการสมัครสมาชิก\n\n1. การสมัครสมาชิก — 14 ปัญหา (100%)\n\n📌 พบปัญหาเกี่ยวกับการสมัครสมาชิก 14 ปัญหาในเดือนที่แล้วค่ะ",
+    "slots": {
+      "reply_mode": "data",
+      "calls": [
+        {
+          "tool": "get_issue_stats",
+          "args": {
+            "period": {
+              "type": "last_month"
+            },
+            "categories": [
+              "registration"
+            ]
+          }
+        }
+      ],
+      "unsupported_topics": [],
+      "focus": "",
+      "clarify_question": "",
+      "examples_used": [
+        {
+          "question": "ขอดูแชตเรื่องสมัครสมาชิกไม่ได้ของสัปดาห์นี้",
+          "similarity": 0.77
+        },
+        {
+          "question": "ปัญหาชำระเงินไม่ผ่านคิดเป็นกี่เปอร์เซ็นต์ของทั้งหมดเดือนนี้",
+          "similarity": 0.661
+        },
+        {
+          "question": "ปัญหาหน้าเว็บค้างเดือนนี้เทียบเดือนที่แล้วเป็นยังไง",
+          "similarity": 0.658
+        },
+        {
+          "question": "เมื่อวานมีคนสมัครใหม่กี่คน",
+          "similarity": 0.627
+        },
+        {
+          "question": "มีแชตไหนที่ลูกค้าบ่นว่าแอดมินไม่ตอบบ้าง เดือนนี้",
+          "similarity": 0.625
+        }
+      ],
+      "timing": {
+        "prompt_tokens": 2066,
+        "output_tokens": 43,
+        "duration_ms": 30670,
+        "load_ms": 8,
+        "attempts": 1
+      },
+      "result_chat_ids": [],
+      "compose_mode": "llm"
+    }
+  },
+  {
+    "id": 13,
+    "q": "ใน 7 วันที่ผ่านมา มีปัญหาเกี่ยวกับ หน้าเว็บโหลดค้างไหม",
+    "expect": {
+      "tool": "get_issue_stats",
+      "period": "last_n_days",
+      "categories": [
+        "page_load_freeze"
+      ]
+    },
+    "toolUsed": "get_issue_stats",
+    "auditStatus": "OK",
+    "durationMs": 68597,
+    "reply": "📊 สรุปปัญหาหน้าเว็บค้าง/โหลดช้า ย้อนหลัง 7 วัน (5 พ.ย. 2569 - วันนี้)\n\n- รวม 5 ปัญหา จาก 5 แชต\n\n1. หน้าเว็บค้าง/โหลดช้า — 5 ปัญหา (100%)\n\n💡 ควรตรวจสอบสาเหตุของปัญหาหน้าเว็บค้าง/โหลดช้าค่ะ",
+    "slots": {
+      "reply_mode": "data",
+      "calls": [
+        {
+          "tool": "get_issue_stats",
+          "args": {
+            "period": {
+              "type": "last_n_days",
+              "n": 7
+            },
+            "categories": [
+              "page_load_freeze"
+            ]
+          }
+        }
+      ],
+      "unsupported_topics": [],
+      "focus": "",
+      "clarify_question": "",
+      "examples_used": [
+        {
+          "question": "ปัญหาหน้าเว็บค้างเดือนนี้เทียบเดือนที่แล้วเป็นยังไง",
+          "similarity": 0.816
+        },
+        {
+          "question": "ช่วง 14 วันที่ผ่านมา ปัญหาอันดับต้นๆ คืออะไร",
+          "similarity": 0.652
+        },
+        {
+          "question": "สัปดาห์นี้ลูกค้าแจ้งปัญหาอะไรมาบ้าง",
+          "similarity": 0.635
+        },
+        {
+          "question": "สัปดาห์นี้ปัญหาเยอะขึ้นหรือลดลงจากสัปดาห์ก่อน",
+          "similarity": 0.618
+        },
+        {
+          "question": "ปัญหาแจ้งเตือนส่วนใหญ่เข้ามากี่โมง สัปดาห์นี้",
+          "similarity": 0.617
+        }
+      ],
+      "timing": {
+        "prompt_tokens": 2070,
+        "output_tokens": 51,
+        "duration_ms": 34084,
+        "load_ms": 4,
+        "attempts": 1
+      },
+      "result_chat_ids": [],
+      "compose_mode": "llm"
+    }
+  },
+  {
+    "id": 14,
+    "q": "มีปัญหาเกี่ยวกับการสมัครสมาชิกไหมในเดือนนี้ คิดเป็นกี่ % ในเดือนนี้",
+    "expect": {
+      "tool": "get_issue_stats",
+      "period": "this_month",
+      "categories": [
+        "registration"
+      ]
+    },
+    "toolUsed": "get_issue_stats",
+    "auditStatus": "DETERMINISTIC",
+    "durationMs": 68369,
+    "reply": "📊 สรุปปัญหาหมวดการสมัครสมาชิก เดือนนี้ (พฤศจิกายน 2569)\n- รวม 2 ปัญหา จาก 2 แชต\n- คิดเป็น 2.2% ของปัญหาทั้งหมด 89 ปัญหา\n\n📌 ช่วงเวลานี้ยังไม่จบ ตัวเลขนับถึงปัจจุบันค่ะ",
+    "slots": {
+      "reply_mode": "data",
+      "calls": [
+        {
+          "tool": "get_issue_stats",
+          "args": {
+            "period": {
+              "type": "this_month"
+            },
+            "categories": [
+              "registration"
+            ]
+          }
+        }
+      ],
+      "unsupported_topics": [],
+      "focus": "เปอร์เซ็นต์",
+      "clarify_question": "",
+      "examples_used": [
+        {
+          "question": "ปัญหาชำระเงินไม่ผ่านคิดเป็นกี่เปอร์เซ็นต์ของทั้งหมดเดือนนี้",
+          "similarity": 0.735
+        },
+        {
+          "question": "ยอดสมาชิกใหม่รายเดือนตั้งแต่กรกฎาคม",
+          "similarity": 0.701
+        },
+        {
+          "question": "ขอดูแชตเรื่องสมัครสมาชิกไม่ได้ของสัปดาห์นี้",
+          "similarity": 0.696
+        },
+        {
+          "question": "ลูกค้าสมัครใหม่สัปดาห์นี้มากกว่าสัปดาห์ที่แล้วไหม",
+          "similarity": 0.677
+        },
+        {
+          "question": "เดือนนี้ได้กำไรเท่าไหร่",
+          "similarity": 0.661
+        }
+      ],
+      "timing": {
+        "prompt_tokens": 2064,
+        "output_tokens": 50,
+        "duration_ms": 34070,
+        "load_ms": 5,
+        "attempts": 1
+      },
+      "result_chat_ids": [],
+      "compose_mode": "deterministic"
+    }
+  },
+  {
+    "id": 15,
+    "q": "ปัญหาฝากถอนส่วนมากที่ลูกค้าเเจ้งมาช่วงเวลาใด ในเดือนที่แล้ว",
+    "expect": {
+      "tool": "get_issue_stats",
+      "period": "last_month",
+      "categories": [
+        "deposit_withdrawal"
+      ],
+      "group_by": "hour"
+    },
+    "toolUsed": "get_issue_stats",
+    "auditStatus": "OK",
+    "durationMs": 126337,
+    "reply": "📊 สรุปปัญหาเดือนที่แล้ว (ตุลาคม 2569)\n\n- รวม 21 ปัญหา จาก 17 แชต\n\n1. 11:00-11:59 น. — 6 ปัญหา (28.6%)\n2. 14:00-14:59 น. — 5 ปัญหา (23.8%)\n3. 12:00-12:59 น. — 4 ปัญหา (19%)\n4. 10:00-10:59 น. — 3 ปัญหา (14.3%)\n5. 17:00-17:59 น. — 1 ปัญหา (4.8%)\n- อีก 2 หมวดที่เหลือ รวม 2 ปัญหา\n\n📌 ปัญหาเกี่ยวกับการฝากถอนส่วนใหญ่เกิดขึ้นในช่วงเวลา 11:00-11:59 น. และ 14:00-14:59 น. ค่ะ",
+    "slots": {
+      "reply_mode": "data",
+      "calls": [
+        {
+          "tool": "get_issue_stats",
+          "args": {
+            "period": {
+              "type": "last_month"
+            },
+            "categories": [
+              "deposit_withdrawal"
+            ],
+            "group_by": "hour"
+          }
+        }
+      ],
+      "unsupported_topics": [],
+      "focus": "ช่วงเวลา",
+      "clarify_question": "",
+      "examples_used": [
+        {
+          "question": "สัปดาห์นี้ลูกค้าแจ้งปัญหาอะไรมาบ้าง",
+          "similarity": 0.73
+        },
+        {
+          "question": "เดือนที่แล้ววันไหนปัญหาพีคที่สุด",
+          "similarity": 0.702
+        },
+        {
+          "question": "สรุปปัญหาวันนี้กับยอดฝากวันนี้ให้หน่อย",
+          "similarity": 0.695
+        },
+        {
+          "question": "ปัญหาชำระเงินไม่ผ่านคิดเป็นกี่เปอร์เซ็นต์ของทั้งหมดเดือนนี้",
+          "similarity": 0.677
+        },
+        {
+          "question": "เมื่อวานยอดถอนรวมเท่าไหร่",
+          "similarity": 0.674
+        }
+      ],
+      "timing": {
+        "prompt_tokens": 2011,
+        "output_tokens": 54,
+        "duration_ms": 31658,
+        "load_ms": 4,
+        "attempts": 1
+      },
+      "result_chat_ids": [],
+      "compose_mode": "llm"
+    }
+  },
+  {
+    "id": 16,
+    "q": "ช่วงเวลาไหนคนทักเยอะสุด",
+    "expect": {
+      "tool": "get_issue_stats",
+      "group_by": "hour"
+    },
+    "toolUsed": "get_issue_stats",
+    "auditStatus": "OK",
+    "durationMs": 80736,
+    "reply": "📊 สรุปปัญหาย้อนหลัง 7 วัน (5 พ.ย. 2569 - วันนี้)\n\n- รวม 89 ปัญหา จาก 20 แชต\n\n1. 16:00-16:59 น. — 51 ปัญหา (57.3%)\n2. 18:00-18:59 น. — 38 ปัญหา (42.7%)\n\nช่วงเวลาที่คนทักเยอะสุดคือ 16:00-16:59 น. และ 18:00-18:59 น. ค่ะ",
+    "slots": {
+      "reply_mode": "data",
+      "calls": [
+        {
+          "tool": "get_issue_stats",
+          "args": {
+            "period": {
+              "type": "last_n_days",
+              "n": 7
+            },
+            "group_by": "hour"
+          }
+        }
+      ],
+      "unsupported_topics": [],
+      "focus": "",
+      "clarify_question": "",
+      "examples_used": [
+        {
+          "question": "แชตเข้ามาวันนี้เยอะกว่าเมื่อวานไหม",
+          "similarity": 0.669
+        },
+        {
+          "question": "ปัญหาแจ้งเตือนส่วนใหญ่เข้ามากี่โมง สัปดาห์นี้",
+          "similarity": 0.669
+        },
+        {
+          "question": "มีลูกค้าคนไหนทักมาเรื่องเดิมหลายรอบในสัปดาห์นี้",
+          "similarity": 0.633
+        },
+        {
+          "question": "แคมเปญไหนดึงลูกค้าได้เยอะสุด",
+          "similarity": 0.618
+        },
+        {
+          "question": "มีแชตไหนที่ลูกค้าบ่นว่าแอดมินไม่ตอบบ้าง เดือนนี้",
+          "similarity": 0.608
+        }
+      ],
+      "timing": {
+        "prompt_tokens": 2010,
+        "output_tokens": 48,
+        "duration_ms": 31212,
+        "load_ms": 5,
+        "attempts": 1
+      },
+      "result_chat_ids": [],
+      "compose_mode": "llm"
+    }
+  },
+  {
+    "id": 17,
+    "q": "วันไหนมีปัญหาเยอะสุดในเดือนนี้",
+    "expect": {
+      "tool": "get_issue_stats",
+      "period": "this_month",
+      "group_by": "day"
+    },
+    "toolUsed": "get_issue_stats",
+    "auditStatus": "OK",
+    "durationMs": 77330,
+    "reply": "📊 สรุปปัญหาเดือนนี้ (พฤศจิกายน 2569)\n\n- รวม 89 ปัญหา จาก 20 แชต\n\n1. 10 พฤศจิกายน — 89 ปัญหา (100%)\n\n📌 วันที่มีปัญหาเยอะที่สุดในเดือนนี้คือ 10 พฤศจิกายน ค่ะ",
+    "slots": {
+      "reply_mode": "data",
+      "calls": [
+        {
+          "tool": "get_issue_stats",
+          "args": {
+            "period": {
+              "type": "this_month"
+            },
+            "group_by": "day"
+          }
+        }
+      ],
+      "unsupported_topics": [],
+      "focus": "วันที่มากที่สุด",
+      "clarify_question": "",
+      "examples_used": [
+        {
+          "question": "เดือนที่แล้ววันไหนปัญหาพีคที่สุด",
+          "similarity": 0.876
+        },
+        {
+          "question": "สัปดาห์นี้ปัญหาเยอะขึ้นหรือลดลงจากสัปดาห์ก่อน",
+          "similarity": 0.702
+        },
+        {
+          "question": "ปัญหาแจ้งเตือนส่วนใหญ่เข้ามากี่โมง สัปดาห์นี้",
+          "similarity": 0.701
+        },
+        {
+          "question": "สัปดาห์นี้ลูกค้าแจ้งปัญหาอะไรมาบ้าง",
+          "similarity": 0.666
+        },
+        {
+          "question": "ปัญหาหน้าเว็บค้างเดือนนี้เทียบเดือนที่แล้วเป็นยังไง",
+          "similarity": 0.659
+        }
+      ],
+      "timing": {
+        "prompt_tokens": 2048,
+        "output_tokens": 90,
+        "duration_ms": 44138,
+        "load_ms": 6,
+        "attempts": 1
+      },
+      "result_chat_ids": [],
+      "compose_mode": "llm"
+    }
+  },
+  {
+    "id": 18,
+    "q": "มีแชทร้องเรียนแอดมินไหมใน1สัปดาห์",
+    "expect": {
+      "tool": [
+        "get_issue_stats",
+        "list_chats",
+        "search_chats"
+      ],
+      "period": "last_n_days"
+    },
+    "toolUsed": "list_chats",
+    "auditStatus": "OK",
+    "durationMs": 57824,
+    "reply": "📊 สรุปปัญหาใน 7 วัน (5 พ.ย. 2569 - วันนี้)\n\n- ไม่พบแชทร้องเรียนแอดมินในระบบค่ะ\n\n📌 ไม่มีแชทร้องเรียนแอดมินในช่วง 7 วันที่ผ่านมาค่ะ",
+    "slots": {
+      "reply_mode": "data",
+      "calls": [
+        {
+          "tool": "list_chats",
+          "args": {
+            "period": {
+              "type": "last_n_days",
+              "n": 7
+            },
+            "categories": [
+              "feedback_complaint"
+            ],
+            "query": "แอดมิน"
+          }
+        }
+      ],
+      "unsupported_topics": [],
+      "focus": "",
+      "clarify_question": "",
+      "examples_used": [
+        {
+          "question": "มีแชตไหนที่ลูกค้าบ่นว่าแอดมินไม่ตอบบ้าง เดือนนี้",
+          "similarity": 0.768
+        },
+        {
+          "question": "สัปดาห์นี้ลูกค้าแจ้งปัญหาอะไรมาบ้าง",
+          "similarity": 0.739
+        },
+        {
+          "question": "แอดมินตอบแชตเฉลี่ยกี่นาที",
+          "similarity": 0.719
+        },
+        {
+          "question": "ปัญหาแจ้งเตือนส่วนใหญ่เข้ามากี่โมง สัปดาห์นี้",
+          "similarity": 0.715
+        },
+        {
+          "question": "ขออีเมลลูกค้าที่ร้องเรียนหน่อย",
+          "similarity": 0.699
+        }
+      ],
+      "timing": {
+        "prompt_tokens": 1979,
+        "output_tokens": 56,
+        "duration_ms": 30750,
+        "load_ms": 4,
+        "attempts": 1
+      },
+      "result_chat_ids": [],
+      "compose_mode": "llm"
+    }
+  },
+  {
+    "id": 19,
+    "q": "โดนร้องเรียนในเรื่องอะไรเมื่อวาน",
+    "expect": {
+      "tool": [
+        "get_issue_stats",
+        "list_chats"
+      ],
+      "period": "yesterday",
+      "categories": [
+        "feedback_complaint"
+      ]
+    },
+    "toolUsed": "get_issue_stats",
+    "auditStatus": "OK",
+    "durationMs": 115892,
+    "reply": "📊 สรุปปัญหาเมื่อวาน (10 พ.ย. 2569)\n\n- รวม 63 ปัญหา จาก 16 แชต\n\n1. ข้อเสนอแนะและร้องเรียน — 15 ปัญหา (23.8%)\n- อีก 12 หมวดที่เหลือ รวม 32 ปัญหา\n\n📌 ข้อเสนอแนะและร้องเรียนเป็นปัญหาที่พบมากที่สุดเมื่อวานค่ะ",
+    "slots": {
+      "reply_mode": "data",
+      "calls": [
+        {
+          "tool": "get_issue_stats",
+          "args": {
+            "period": {
+              "type": "yesterday"
+            },
+            "priorities": [
+              "urgent",
+              "high"
+            ]
+          }
+        }
+      ],
+      "unsupported_topics": [],
+      "focus": "",
+      "clarify_question": "",
+      "examples_used": [
+        {
+          "question": "สัปดาห์นี้ลูกค้าแจ้งปัญหาอะไรมาบ้าง",
+          "similarity": 0.74
+        },
+        {
+          "question": "แล้วของเมื่อวานล่ะ",
+          "similarity": 0.705
+        },
+        {
+          "question": "ขออีเมลลูกค้าที่ร้องเรียนหน่อย",
+          "similarity": 0.688
+        },
+        {
+          "question": "วันนี้ช่วงบ่ายโมงถึงห้าโมงเย็นมีปัญหาเข้ามากี่เคส",
+          "similarity": 0.673
+        },
+        {
+          "question": "มีลูกค้าคนไหนทักมาเรื่องเดิมหลายรอบในสัปดาห์นี้",
+          "similarity": 0.664
+        }
+      ],
+      "timing": {
+        "prompt_tokens": 2016,
+        "output_tokens": 46,
+        "duration_ms": 30390,
+        "load_ms": 7,
+        "attempts": 1
+      },
+      "result_chat_ids": [],
+      "compose_mode": "llm"
+    }
+  },
+  {
+    "id": 20,
+    "q": "ขอรายละเอียดดูแชตหมวด ข้อเสนอแนะและร้องเรียน ของวันนี้",
+    "expect": {
+      "tool": "list_chats",
+      "period": "today",
+      "categories": [
+        "feedback_complaint"
+      ]
+    },
+    "toolUsed": "list_chats",
+    "auditStatus": "OK",
+    "durationMs": 55098,
+    "reply": "📊 สรุปปัญหาวันนี้ (11 พ.ย. 2569)\n\nไม่พบหมวด \"ข้อเสนอแนะและร้องเรียน\" ในระบบค่ะ",
+    "slots": {
+      "reply_mode": "data",
+      "calls": [
+        {
+          "tool": "list_chats",
+          "args": {
+            "period": {
+              "type": "today"
+            },
+            "categories": [
+              "feedback_complaint"
+            ]
+          }
+        }
+      ],
+      "unsupported_topics": [],
+      "focus": "",
+      "clarify_question": "",
+      "examples_used": [
+        {
+          "question": "ขอดูสลิปที่ลูกค้าส่งมาวันนี้",
+          "similarity": 0.649
+        },
+        {
+          "question": "ขออีเมลลูกค้าที่ร้องเรียนหน่อย",
+          "similarity": 0.648
+        },
+        {
+          "question": "ขอรายการแชตปัญหาการเงินเมื่อวาน เรียงตามเวลา",
+          "similarity": 0.644
+        },
+        {
+          "question": "แชตเข้ามาวันนี้เยอะกว่าเมื่อวานไหม",
+          "similarity": 0.641
+        },
+        {
+          "question": "ขอสรุปปัญหาวันนี้หน่อย",
+          "similarity": 0.619
+        }
+      ],
+      "timing": {
+        "prompt_tokens": 1974,
+        "output_tokens": 76,
+        "duration_ms": 37289,
+        "load_ms": 6,
+        "attempts": 1
+      },
+      "result_chat_ids": [],
+      "compose_mode": "llm"
+    }
+  },
+  {
+    "id": 21,
+    "q": "ขอรายละเอียดดูแชตหมวด หน้าเว็บค้าง/โหลดช้า ของเดือนที่แล้ว (กันยายน)",
+    "expect": {
+      "tool": "list_chats",
+      "categories": [
+        "page_load_freeze"
+      ]
+    },
+    "toolUsed": "list_chats",
+    "auditStatus": "DETERMINISTIC",
+    "durationMs": 131516,
+    "reply": "📋 แชตหมวดหน้าเว็บค้าง/โหลดช้า เดือนกันยายน 2569 — 41 แชต\n\n1. `chat-alpha-017` (25 ก.ย. 2569 11:54 น., ความด่วนกลาง)\n   หน้าโปรโมชั่นโหลดช้ามาก / แบนเนอร์บางอันไม่แสดง / ข้อความเงื่อนไขโปรโมชั่นถูกตัดออก\n2. `chat-alpha-016` (25 ก.ย. 2569 10:48 น., ความด่วนกลาง)\n   หน้าเว็บโหลดไม่ขึ้น / ไม่มีอีเมลยืนยันเข้ามา\n3. `chat-alpha-015` (23 ก.ย. 2569 15:56 น., ความด่วนกลาง)\n   กดดูรายละเอียดแล้วระบบโหลดอยู่นานมาก / บางครั้งหน้ารายละเอียดเปิดไม่ได้เลย\n4. `chat-alpha-014` (23 ก.ย. 2569 15:52 น., ความด่วนกลาง)\n   กดสมัครใหม่ปุ่มก็ไม่ตอบสนอง / หน้าเว็บค้าง\n5. `chat-alpha-013` (23 ก.ย. 2569 15:46 น., ความด่วนกลาง)\n   หน้า Payment โหลดช้ามาก\n6. `chat-alpha-011` (23 ก.ย. 2569 15:38 น., ความด่วนกลาง)\n   หน้าเว็บเปิดช้ามาก / กว่าจะเห็นสินค้าใช้เวลานาน / ปุ่มไม่ตอบสนอง / ต้องกดหลายครั้งกว่าจะเลือกได้ / หน้าจอค้างไปพักหนึ่ง / ต้องปิดหน้าเว็บแล้วเปิดใหม่\n7. `chat-alpha-010` (23 ก.ย. 2569 15:37 น., ความด่วนสูง)\n   เข้าไปดูประวัติออเดอร์ก็โหลดไม่ขึ้น\n8. `chat-295900` (23 ก.ย. 2569 12:08 น., ความด่วนสูง)\n   ทำไมเข้าเว็บแล้วค้าง / จอขาว / เว็บกาก\n9. `chat-387121` (23 ก.ย. 2569 12:07 น., ความด่วนสูง)\n   ทำไมเข้าเว็บแล้วค้าง / จอขาว / เว็บกาก\n10. `chat-100143` (23 ก.ย. 2569 11:36 น., ความด่วนสูง)\n   ทำไมเข้าเว็บแล้วค้าง / จอขาว / เว็บกาก\n\n📎 แสดง 10 จาก 41 แชต รายการทั้งหมดอยู่ในไฟล์ Excel ด้านล่างค่ะ",
+    "slots": {
+      "reply_mode": "data",
+      "calls": [
+        {
+          "tool": "list_chats",
+          "args": {
+            "period": {
+              "type": "month",
+              "month": 9
+            },
+            "categories": [
+              "page_load_freeze"
+            ]
+          }
+        }
+      ],
+      "unsupported_topics": [],
+      "focus": "",
+      "clarify_question": "",
+      "examples_used": [
+        {
+          "question": "ปัญหาหน้าเว็บค้างเดือนนี้เทียบเดือนที่แล้วเป็นยังไง",
+          "similarity": 0.754
+        },
+        {
+          "question": "ขอดูแชตเรื่องสมัครสมาชิกไม่ได้ของสัปดาห์นี้",
+          "similarity": 0.665
+        },
+        {
+          "question": "มีแชตไหนที่ลูกค้าบ่นว่าแอดมินไม่ตอบบ้าง เดือนนี้",
+          "similarity": 0.653
+        },
+        {
+          "question": "ขอรายการแชตปัญหาการเงินเมื่อวาน เรียงตามเวลา",
+          "similarity": 0.635
+        },
+        {
+          "question": "แชตเข้ามาวันนี้เยอะกว่าเมื่อวานไหม",
+          "similarity": 0.58
+        }
+      ],
+      "timing": {
+        "prompt_tokens": 2079,
+        "output_tokens": 49,
+        "duration_ms": 34868,
+        "load_ms": 5,
+        "attempts": 1
+      },
+      "result_chat_ids": [
+        "chat-alpha-017",
+        "chat-alpha-016",
+        "chat-alpha-015",
+        "chat-alpha-014",
+        "chat-alpha-013",
+        "chat-alpha-011",
+        "chat-alpha-010",
+        "chat-295900",
+        "chat-387121",
+        "chat-100143"
+      ],
+      "compose_mode": "deterministic"
+    }
+  },
+  {
+    "id": 22,
+    "q": "เคสด่วนเดือนนี้มีเคสไหนบ้าง",
+    "expect": {
+      "tool": "list_chats",
+      "period": "this_month"
+    },
+    "toolUsed": "list_chats",
+    "auditStatus": "OK",
+    "durationMs": 522007,
+    "reply": "🚨 เคสฉุกเฉินและสูงเดือนนี้ (พฤศจิกายน 2569)\n\n- รวม 16 เคส\n\n1. `today055` (10 พ.ย. 2569 18:13 น., ฉุกเฉิน)\n ปัญหาเข้าสู่ระบบและปัญหาความปลอดภัยของบัญชี\n\n2. `today047` (10 พ.ย. 2569 16:15 น., ฉุกเฉิน)\n ปัญหาความปลอดภัยของบัญชีและปัญหาเข้าสู่ระบบ\n\n3. `today060` (10 พ.ย. 2569 18:16 น., สูง)\n ปัญหาบราวเซอร์/อุปกรณ์, หน้าเว็บค้าง/โหลดช้า และข้อผิดพลาดระบบ API\n\n4. `today059` (10 พ.ย. 2569 18:15 น., สูง)\n ปัญหาการเงินและการชำระเงิน\n\n5. `today057` (10 พ.ย. 2569 18:14 น., สูง)\n ปัญหาการสมัครสมาชิก, ปัญหาการแจ้งเตือน และโปรโมชั่นและโบนัส\n\n6. `today056` (10 พ.ย. 2569 18:14 น., สูง)\n ปัญหาความปลอดภัยของบัญชี, สิทธิประโยชน์ระดับ VIP และปัญหากราฟิก/การแสดงผลเว็บ\n\n7. `today054` (10 พ.ย. 2569 18:13 น., สูง)\n ปัญหาระบบการชำระเงิน/ธนาคาร และปัญหาการเงินและการชำระเงิน\n\n8. `today053` (10 พ.ย. 2569 18:12 น., สูง)\n ปัญหากราฟิก/การแสดงผลเว็บ และข้อผิดพลาดระบบ API\n\n9. `today052` (10 พ.ย. 2569 18:12 น., สูง)\n ปัญหาประสิทธิภาพระบบช้า และปัญหาระบบการทำงานล่าช้า\n\n10. `today051` (10 พ.ย. 2569 18:12 น., สูง)\n ปัญหาเข้าหน้าเว็บไม่ได้/ลิงก์เสีย และปัญหาบราวเซอร์/อุปกรณ์\n\n📌 เดือนนี้มีปัญหาฉุกเฉินและสูงเกี่ยวกับความปลอดภัยของบัญชีและปัญหาเข้าสู่ระบบค่อนข้างมากค่ะ",
+    "slots": {
+      "reply_mode": "data",
+      "calls": [
+        {
+          "tool": "list_chats",
+          "args": {
+            "period": {
+              "type": "this_month"
+            },
+            "priorities": [
+              "urgent",
+              "high"
+            ],
+            "sort": "priority"
+          }
+        }
+      ],
+      "unsupported_topics": [],
+      "focus": "",
+      "clarify_question": "",
+      "examples_used": [
+        {
+          "question": "เอาเฉพาะเคสด่วน",
+          "similarity": 0.737
+        },
+        {
+          "question": "สัปดาห์นี้มีเคสระดับสูงกับฉุกเฉินรวมกี่เคส",
+          "similarity": 0.73
+        },
+        {
+          "question": "เคสฉุกเฉินวันนี้มีแชตไหนบ้าง เรียงจากด่วนสุด",
+          "similarity": 0.715
+        },
+        {
+          "question": "วันนี้ช่วงบ่ายโมงถึงห้าโมงเย็นมีปัญหาเข้ามากี่เคส",
+          "similarity": 0.622
+        },
+        {
+          "question": "สัปดาห์นี้ลูกค้าแจ้งปัญหาอะไรมาบ้าง",
+          "similarity": 0.618
+        }
+      ],
+      "timing": {
+        "prompt_tokens": 2081,
+        "output_tokens": 49,
+        "duration_ms": 34710,
+        "load_ms": 6,
+        "attempts": 1
+      },
+      "result_chat_ids": [
+        "today055",
+        "today047",
+        "today060",
+        "today059",
+        "today057",
+        "today056",
+        "today054",
+        "today053",
+        "today052",
+        "today051"
+      ],
+      "compose_mode": "llm"
+    }
+  },
+  {
+    "id": 23,
+    "q": "อยากรู้กรณีฉุกเฉินคือเคสไหน",
+    "expect": {
+      "tool": "list_chats"
+    },
+    "toolUsed": "list_chats",
+    "auditStatus": "OK",
+    "durationMs": 101429,
+    "reply": "📊 สรุปปัญหาวันนี้ (11 พ.ย. 2569)\n\n- ไม่มีแชตฉุกเฉินในวันนี้ค่ะ\n\n📌 วันนี้ไม่มีแชตฉุกเฉินใด ๆ ค่ะ",
+    "slots": {
+      "reply_mode": "data",
+      "calls": [
+        {
+          "tool": "list_chats",
+          "args": {
+            "period": {
+              "type": "today"
+            },
+            "priorities": [
+              "urgent"
+            ]
+          }
+        }
+      ],
+      "unsupported_topics": [],
+      "focus": "",
+      "clarify_question": "",
+      "examples_used": [
+        {
+          "question": "เอาเฉพาะเคสด่วน",
+          "similarity": 0.709
+        },
+        {
+          "question": "เคสฉุกเฉินวันนี้มีแชตไหนบ้าง เรียงจากด่วนสุด",
+          "similarity": 0.697
+        },
+        {
+          "question": "สัปดาห์นี้มีเคสระดับสูงกับฉุกเฉินรวมกี่เคส",
+          "similarity": 0.659
+        },
+        {
+          "question": "วันนี้ช่วงบ่ายโมงถึงห้าโมงเย็นมีปัญหาเข้ามากี่เคส",
+          "similarity": 0.557
+        },
+        {
+          "question": "ตอนนี้ควรรีบแก้ปัญหาอะไรก่อน",
+          "similarity": 0.51
+        }
+      ],
+      "timing": {
+        "prompt_tokens": 2093,
+        "output_tokens": 43,
+        "duration_ms": 29446,
+        "load_ms": 5,
+        "attempts": 1
+      },
+      "result_chat_ids": [],
+      "compose_mode": "llm"
+    }
+  },
+  {
+    "id": 24,
+    "q": "เปรียบเทียบสถิติปัญหาของเดือนนี้และเดือนที่แล้ว",
+    "expect": {
+      "tool": "compare_periods",
+      "period": "this_month",
+      "metric": "issues"
+    },
+    "toolUsed": "compare_periods",
+    "auditStatus": "DETERMINISTIC",
+    "durationMs": 114167,
+    "reply": "📅 เปรียบเทียบจำนวนปัญหา\n- เดือนนี้ (พฤศจิกายน 2569): 89 ปัญหา (เฉลี่ย 8.1/วัน)\n- เดือนที่แล้ว (ตุลาคม 2569): 450 ปัญหา (เฉลี่ย 14.5/วัน)\n- เปลี่ยนแปลง: -361 ปัญหา (-80.2%)\n\n📌 หมวดที่เปลี่ยนแปลงมากที่สุด\n- ข้อเสนอแนะและร้องเรียน: 58 → 18\n- ระบบการทำงานล่าช้า: 45 → 6\n- หน้าเว็บค้าง/โหลดช้า: 43 → 5\n- ปัญหาการแจ้งเตือน: 45 → 9\n- ปัญหากราฟิก/การแสดงผลเว็บ: 43 → 8\n\n📌 เดือนนี้ (พฤศจิกายน 2569) ยังไม่จบ (11 วัน) ควรเทียบที่ค่าเฉลี่ยต่อวันค่ะ",
+    "slots": {
+      "reply_mode": "data",
+      "calls": [
+        {
+          "tool": "compare_periods",
+          "args": {
+            "period": {
+              "type": "this_month"
+            },
+            "period_b": {
+              "type": "last_month"
+            },
+            "metric": "issues"
+          }
+        }
+      ],
+      "unsupported_topics": [],
+      "focus": "",
+      "clarify_question": "",
+      "examples_used": [
+        {
+          "question": "สัปดาห์นี้ปัญหาเยอะขึ้นหรือลดลงจากสัปดาห์ก่อน",
+          "similarity": 0.746
+        },
+        {
+          "question": "ปัญหาหน้าเว็บค้างเดือนนี้เทียบเดือนที่แล้วเป็นยังไง",
+          "similarity": 0.731
+        },
+        {
+          "question": "เดือนที่แล้ววันไหนปัญหาพีคที่สุด",
+          "similarity": 0.725
+        },
+        {
+          "question": "ขอสรุปปัญหาวันนี้หน่อย",
+          "similarity": 0.687
+        },
+        {
+          "question": "สัปดาห์นี้ลูกค้าแจ้งปัญหาอะไรมาบ้าง",
+          "similarity": 0.679
+        }
+      ],
+      "timing": {
+        "prompt_tokens": 2034,
+        "output_tokens": 49,
+        "duration_ms": 34149,
+        "load_ms": 5,
+        "attempts": 1
+      },
+      "result_chat_ids": [],
+      "compose_mode": "deterministic"
+    }
+  },
+  {
+    "id": 25,
+    "q": "เปรียบเที่ยบปัญหาวันนี้ และปัญหาเมื่อวาน",
+    "expect": {
+      "tool": "compare_periods",
+      "period": "today",
+      "metric": "issues"
+    },
+    "toolUsed": "compare_periods",
+    "auditStatus": "DETERMINISTIC",
+    "durationMs": 105275,
+    "reply": "📅 เปรียบเทียบจำนวนปัญหา\n- วันนี้ (11 พ.ย. 2569): 0 ปัญหา (เฉลี่ย 0/วัน)\n- เมื่อวาน (10 พ.ย. 2569): 89 ปัญหา (เฉลี่ย 89/วัน)\n- เปลี่ยนแปลง: -89 ปัญหา (-100%)\n\n📌 หมวดที่เปลี่ยนแปลงมากที่สุด\n- ข้อเสนอแนะและร้องเรียน: 18 → 0\n- ปัญหาการแจ้งเตือน: 9 → 0\n- ปัญหากราฟิก/การแสดงผลเว็บ: 8 → 0\n- ประสิทธิภาพระบบช้า: 7 → 0\n- ข้อผิดพลาดระบบ API: 6 → 0\n\n📌 วันนี้ (11 พ.ย. 2569) ยังไม่จบ (1 วัน) ควรเทียบที่ค่าเฉลี่ยต่อวันค่ะ",
+    "slots": {
+      "reply_mode": "data",
+      "calls": [
+        {
+          "tool": "compare_periods",
+          "args": {
+            "period": {
+              "type": "today"
+            },
+            "period_b": {
+              "type": "yesterday"
+            },
+            "metric": "issues"
+          }
+        }
+      ],
+      "unsupported_topics": [],
+      "focus": "",
+      "clarify_question": "",
+      "examples_used": [
+        {
+          "question": "ขอสรุปปัญหาวันนี้หน่อย",
+          "similarity": 0.674
+        },
+        {
+          "question": "สัปดาห์นี้ปัญหาเยอะขึ้นหรือลดลงจากสัปดาห์ก่อน",
+          "similarity": 0.64
+        },
+        {
+          "question": "แล้วของเมื่อวานล่ะ",
+          "similarity": 0.62
+        },
+        {
+          "question": "สรุปปัญหาวันนี้กับยอดฝากวันนี้ให้หน่อย",
+          "similarity": 0.611
+        },
+        {
+          "question": "ขอรายการแชตปัญหาการเงินเมื่อวาน เรียงตามเวลา",
+          "similarity": 0.605
+        }
+      ],
+      "timing": {
+        "prompt_tokens": 2041,
+        "output_tokens": 85,
+        "duration_ms": 45854,
+        "load_ms": 5,
+        "attempts": 1
+      },
+      "result_chat_ids": [],
+      "compose_mode": "deterministic"
+    }
+  },
+  {
+    "id": 26,
+    "q": "ปัญหาทั้งหมดเดือนนี้ลดลงจากเดือนที่แล้วไหม",
+    "expect": {
+      "tool": "compare_periods",
+      "period": "this_month",
+      "metric": "issues"
+    },
+    "toolUsed": "compare_periods",
+    "auditStatus": "OK",
+    "durationMs": 106098,
+    "reply": "📊 สรุปปัญหาเดือนนี้ (พฤศจิกายน 2569)\n\n- รวม 89 ปัญหา จาก 11 วัน\n- เดือนที่แล้ว (ตุลาคม 2569) มี 450 ปัญหา (14.5 ปัญหาต่อวัน)\n- เดือนนี้ (พฤศจิกายน 2569) มี 89 ปัญหา (8.1 ปัญหาต่อวัน)\n- ลดลง 361 ปัญหา (-80.2%)\n- หมวดที่ลดลงมากที่สุด:\n 1. ข้อเสนอแนะและร้องเรียน: 58 → 18\n 2. ระบบการทำงานล่าช้า: 45 → 6\n 3. หน้าเว็บค้าง/โหลดช้า: 43 → 5\n 4. ปัญหาการแจ้งเตือน: 45 → 9\n 5. ปัญหากราฟิก/การแสดงผลเว็บ: 43 → 8\n\n📌 เดือนนี้มีปัญหาน้อยลงจากเดือนที่แล้วค่ะ",
+    "slots": {
+      "reply_mode": "data",
+      "calls": [
+        {
+          "tool": "compare_periods",
+          "args": {
+            "period": {
+              "type": "this_month"
+            },
+            "period_b": {
+              "type": "last_month"
+            },
+            "metric": "issues"
+          }
+        }
+      ],
+      "unsupported_topics": [],
+      "focus": "",
+      "clarify_question": "",
+      "examples_used": [
+        {
+          "question": "สัปดาห์นี้ปัญหาเยอะขึ้นหรือลดลงจากสัปดาห์ก่อน",
+          "similarity": 0.814
+        },
+        {
+          "question": "ปัญหาหน้าเว็บค้างเดือนนี้เทียบเดือนที่แล้วเป็นยังไง",
+          "similarity": 0.664
+        },
+        {
+          "question": "เดือนที่แล้ววันไหนปัญหาพีคที่สุด",
+          "similarity": 0.66
+        },
+        {
+          "question": "สัปดาห์นี้ลูกค้าแจ้งปัญหาอะไรมาบ้าง",
+          "similarity": 0.656
+        },
+        {
+          "question": "ปัญหาแจ้งเตือนส่วนใหญ่เข้ามากี่โมง สัปดาห์นี้",
+          "similarity": 0.633
+        }
+      ],
+      "timing": {
+        "prompt_tokens": 2054,
+        "output_tokens": 49,
+        "duration_ms": 30751,
+        "load_ms": 3,
+        "attempts": 1
+      },
+      "result_chat_ids": [],
+      "compose_mode": "llm"
+    }
+  },
+  {
+    "id": 27,
+    "q": "เปรียบเที่ยบสมาชิกใหม่เดือนนี้ และเดือนที่แล้วให้หน่อย",
+    "expect": {
+      "tool": "compare_periods",
+      "period": "this_month",
+      "metric": "new_customers"
+    },
+    "toolUsed": "compare_periods",
+    "auditStatus": "OK",
+    "durationMs": 74732,
+    "reply": "📊 เปรียบเทียบลูกค้าใหม่เดือนนี้ และเดือนที่แล้ว\n\n- ลูกค้าใหม่เดือนนี้ (พฤศจิกายน 2569) มี 20 คน (เฉลี่ย 1.8 คนต่อวัน)\n- ลูกค้าใหม่เดือนที่แล้ว (ตุลาคม 2569) มี 79 คน (เฉลี่ย 2.5 คนต่อวัน)\n\nความแตกต่าง: -59 คน (-74.7%)\n📌 เดือนนี้มีลูกค้าใหม่น้อยกว่าเดือนที่แล้วค่ะ",
+    "slots": {
+      "reply_mode": "data",
+      "calls": [
+        {
+          "tool": "compare_periods",
+          "args": {
+            "period": {
+              "type": "this_month"
+            },
+            "period_b": {
+              "type": "last_month"
+            },
+            "metric": "new_customers"
+          }
+        }
+      ],
+      "unsupported_topics": [],
+      "focus": "",
+      "clarify_question": "",
+      "examples_used": [
+        {
+          "question": "ยอดสมาชิกใหม่รายเดือนตั้งแต่กรกฎาคม",
+          "similarity": 0.714
+        },
+        {
+          "question": "ลูกค้าสมัครใหม่สัปดาห์นี้มากกว่าสัปดาห์ที่แล้วไหม",
+          "similarity": 0.698
+        },
+        {
+          "question": "เมื่อวานมีคนสมัครใหม่กี่คน",
+          "similarity": 0.662
+        },
+        {
+          "question": "แล้วถ้าเทียบกับสัปดาห์ที่แล้วล่ะ",
+          "similarity": 0.648
+        },
+        {
+          "question": "ปัญหาหน้าเว็บค้างเดือนนี้เทียบเดือนที่แล้วเป็นยังไง",
+          "similarity": 0.627
+        }
+      ],
+      "timing": {
+        "prompt_tokens": 2131,
+        "output_tokens": 51,
+        "duration_ms": 33973,
+        "load_ms": 6,
+        "attempts": 1
+      },
+      "result_chat_ids": [],
+      "compose_mode": "llm"
+    }
+  },
+  {
+    "id": 28,
+    "q": "วันนี้มีลูกค้าใหม่กี่คน",
+    "expect": {
+      "tool": "get_customer_stats",
+      "period": "today"
+    },
+    "toolUsed": "get_customer_stats",
+    "auditStatus": "OK",
+    "durationMs": 44907,
+    "reply": "📊 สรุปปัญหาวันนี้ (11 พ.ย. 2569)\n\n- วันนี้ไม่มีลูกค้าใหม่ค่ะ\n\n📌 วันนี้ไม่มีการเพิ่มจำนวนลูกค้าใหม่ค่ะ",
+    "slots": {
+      "reply_mode": "data",
+      "calls": [
+        {
+          "tool": "get_customer_stats",
+          "args": {
+            "period": {
+              "type": "today"
+            },
+            "metric": "new"
+          }
+        }
+      ],
+      "unsupported_topics": [],
+      "focus": "",
+      "clarify_question": "",
+      "examples_used": [
+        {
+          "question": "ตอนนี้มีลูกค้าในระบบทั้งหมดกี่คน",
+          "similarity": 0.839
+        },
+        {
+          "question": "เมื่อวานมีคนสมัครใหม่กี่คน",
+          "similarity": 0.83
+        },
+        {
+          "question": "ลูกค้าสมัครใหม่สัปดาห์นี้มากกว่าสัปดาห์ที่แล้วไหม",
+          "similarity": 0.796
+        },
+        {
+          "question": "ขอรายชื่อลูกค้าที่สมัครสัปดาห์นี้",
+          "similarity": 0.763
+        },
+        {
+          "question": "แชตสัปดาห์นี้มาจากลูกค้าเดิมกี่เปอร์เซ็นต์",
+          "similarity": 0.723
+        }
+      ],
+      "timing": {
+        "prompt_tokens": 2021,
+        "output_tokens": 41,
+        "duration_ms": 26599,
+        "load_ms": 7,
+        "attempts": 1
+      },
+      "result_chat_ids": [],
+      "compose_mode": "llm"
+    }
+  },
+  {
+    "id": 29,
+    "q": "วันนี้มีลูกค้าสมัครใหม่กี่คน",
+    "expect": {
+      "tool": "get_customer_stats",
+      "period": "today"
+    },
+    "toolUsed": "get_customer_stats",
+    "auditStatus": "OK",
+    "durationMs": 53521,
+    "reply": "📊 สรุปปัญหาวันนี้ (11 พ.ย. 2569)\n- ไม่มีลูกค้าสมัครใหม่ในวันนี้ค่ะ\n\n📌 วันนี้ไม่มีการสมัครสมาชิกใหม่ค่ะ",
+    "slots": {
+      "reply_mode": "data",
+      "calls": [
+        {
+          "tool": "get_customer_stats",
+          "args": {
+            "period": {
+              "type": "today"
+            },
+            "metric": "new"
+          }
+        }
+      ],
+      "unsupported_topics": [],
+      "focus": "",
+      "clarify_question": "",
+      "examples_used": [
+        {
+          "question": "เมื่อวานมีคนสมัครใหม่กี่คน",
+          "similarity": 0.895
+        },
+        {
+          "question": "ตอนนี้มีลูกค้าในระบบทั้งหมดกี่คน",
+          "similarity": 0.836
+        },
+        {
+          "question": "ลูกค้าสมัครใหม่สัปดาห์นี้มากกว่าสัปดาห์ที่แล้วไหม",
+          "similarity": 0.831
+        },
+        {
+          "question": "ขอรายชื่อลูกค้าที่สมัครสัปดาห์นี้",
+          "similarity": 0.804
+        },
+        {
+          "question": "วันนี้ช่วงบ่ายโมงถึงห้าโมงเย็นมีปัญหาเข้ามากี่เคส",
+          "similarity": 0.719
+        }
+      ],
+      "timing": {
+        "prompt_tokens": 2031,
+        "output_tokens": 78,
+        "duration_ms": 35579,
+        "load_ms": 9,
+        "attempts": 1
+      },
+      "result_chat_ids": [],
+      "compose_mode": "llm"
+    }
+  },
+  {
+    "id": 30,
+    "q": "ลูกค้าทั้งหมดมีกี่คน",
+    "expect": {
+      "tool": "get_customer_stats",
+      "metric": "total"
+    },
+    "toolUsed": "get_customer_stats",
+    "auditStatus": "OK",
+    "durationMs": 52559,
+    "reply": "📊 สรุปข้อมูลลูกค้าทั้งหมดที่มีในระบบ\n\n- รวม 192 บัญชีผู้ใช้\n\n📌 ข้อมูลนี้แสดงถึงจำนวนลูกค้าทั้งหมดที่มีอยู่ในระบบค่ะ",
+    "slots": {
+      "reply_mode": "data",
+      "calls": [
+        {
+          "tool": "get_customer_stats",
+          "args": {
+            "period": {
+              "type": "all_time"
+            }
+          }
+        }
+      ],
+      "unsupported_topics": [],
+      "focus": "",
+      "clarify_question": "",
+      "examples_used": [
+        {
+          "question": "ตอนนี้มีลูกค้าในระบบทั้งหมดกี่คน",
+          "similarity": 0.886
+        },
+        {
+          "question": "ขอรายชื่อลูกค้าที่สมัครสัปดาห์นี้",
+          "similarity": 0.701
+        },
+        {
+          "question": "สัปดาห์นี้มีลูกค้าชมบริการไหม",
+          "similarity": 0.683
+        },
+        {
+          "question": "เมื่อวานมีคนสมัครใหม่กี่คน",
+          "similarity": 0.679
+        },
+        {
+          "question": "สัปดาห์นี้ลูกค้าแจ้งปัญหาอะไรมาบ้าง",
+          "similarity": 0.661
+        }
+      ],
+      "timing": {
+        "prompt_tokens": 1991,
+        "output_tokens": 72,
+        "duration_ms": 31972,
+        "load_ms": 4,
+        "attempts": 1
+      },
+      "result_chat_ids": [],
+      "compose_mode": "llm"
+    }
+  }
+]

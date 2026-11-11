@@ -40,8 +40,8 @@ async function run() {
     const result = await response.json();
     console.log('✅ Ingest API Response:', JSON.stringify(result, null, 2));
 
-    // 3. Wait for background AI Triage process to finish
-    console.log('- Waiting 15 seconds for AI Triage pipeline to run...');
+    // 3. Wait for background Sift AI process to finish
+    console.log('- Waiting 15 seconds for Sift AI pipeline to run...');
     await new Promise(resolve => setTimeout(resolve, 15000));
 
     // 4. Query the database to check if the OCR text was appended and analyzed!

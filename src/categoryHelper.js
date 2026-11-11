@@ -222,6 +222,27 @@ export function findCategoryKeysByName(targetName, categories = []) {
       ) {
         matchedKeys.add(cleanKey);
       }
+
+      // Match slash/comma-separated subnames (e.g. "เข้าหน้าเว็บไม่ได้/ลิงก์เสีย" -> "เข้าหน้าเว็บไม่ได้", "ลิงก์เสีย")
+      const subNames = [cName, cNameTh, cNameEn]
+        .filter(Boolean)
+        .flatMap(n => n.split(/[/,]+/).map(s => s.trim()))
+        .filter(s => s.length >= 3);
+
+      if (subNames.some(s => lowerTarget.includes(s))) {
+        matchedKeys.add(cleanKey);
+      }
+
+      // Match against dynamic description phrases in Supabase
+      if (c.description) {
+        const descPhrases = c.description
+          .split(/[,/]+/)
+          .map(p => p.trim().toLowerCase())
+          .filter(p => p.length >= 4);
+        if (descPhrases.some(p => lowerTarget.includes(p))) {
+          matchedKeys.add(cleanKey);
+        }
+      }
     }
   }
 
@@ -234,38 +255,53 @@ export function findCategoryKeysByName(targetName, categories = []) {
   }
 
   // Common synonym / natural language mapping for robust dynamic resolution
-  if (lowerTarget.includes('การเงิน') || lowerTarget.includes('ชำระเงิน') || lowerTarget.includes('ฝาก') || lowerTarget.includes('ถอน') || lowerTarget.includes('โอน')) {
+  if (lowerTarget.includes('การเงิน') || lowerTarget.includes('ฝาก') || lowerTarget.includes('ถอน') || lowerTarget.includes('โอน')) {
     matchedKeys.add('deposit_withdrawal');
+  }
+  if (lowerTarget.includes('ชำระเงิน') || lowerTarget.includes('payment') || lowerTarget.includes('qr code') || lowerTarget.includes('พร้อมเพย์') || lowerTarget.includes('สแกนจ่าย')) {
+    matchedKeys.add('payment_gateway');
   }
   if (lowerTarget.includes('เข้าสู่ระบบ') || lowerTarget.includes('ล็อกอิน') || lowerTarget.includes('login') || lowerTarget.includes('รหัสผ่าน')) {
     matchedKeys.add('login_issue');
   }
-  if (lowerTarget.includes('โปรโมชั่น') || lowerTarget.includes('โบนัส') || lowerTarget.includes('แต้ม') || lowerTarget.includes('สิทธิ์')) {
+  if (lowerTarget.includes('โปรโมชั่น') || lowerTarget.includes('โบนัส') || lowerTarget.includes('แต้ม') || lowerTarget.includes('สิทธิ์') || lowerTarget.includes('โปร')) {
     matchedKeys.add('promo_bonus');
   }
-  if (lowerTarget.includes('ค้าง') || lowerTarget.includes('โหลดช้า') || lowerTarget.includes('หน้าเว็บ')) {
+  if (lowerTarget.includes('ค้าง') || lowerTarget.includes('โหลดช้า') || lowerTarget.includes('หน้าเว็บค้าง') || lowerTarget.includes('หมุนค้าง')) {
     matchedKeys.add('page_load_freeze');
   }
-  if (lowerTarget.includes('แสดงผล') || lowerTarget.includes('เพี้ยน') || lowerTarget.includes('รูปไม่ขึ้น') || lowerTarget.includes('จอดำ') || lowerTarget.includes('จอมืด')) {
+  if (lowerTarget.includes('ระบบช้า') || lowerTarget.includes('ทำงานช้า') || lowerTarget.includes('ประสิทธิภาพ') || lowerTarget.includes('ความเร็วตก') || lowerTarget.includes('อืด')) {
+    matchedKeys.add('performance_issue');
+  }
+  if (lowerTarget.includes('แสดงผล') || lowerTarget.includes('เพี้ยน') || lowerTarget.includes('รูปไม่ขึ้น') || lowerTarget.includes('จอดำ') || lowerTarget.includes('จอมืด') || lowerTarget.includes('กราฟิก') || lowerTarget.includes('ตัวหนังสือซ้อน') || lowerTarget.includes('ทับกัน')) {
     matchedKeys.add('ui_rendering_issue');
   }
-  if (lowerTarget.includes('ตอบสนอง') || lowerTarget.includes('กดไม่ได้') || lowerTarget.includes('ปุ่ม')) {
+  if (lowerTarget.includes('ตอบสนอง') || lowerTarget.includes('กดไม่ได้') || lowerTarget.includes('ปุ่ม') || lowerTarget.includes('กดแล้วไม่ไป') || lowerTarget.includes('ล่าช้า')) {
     matchedKeys.add('interaction_lag');
   }
-  if (lowerTarget.includes('แจ้งเตือน') || lowerTarget.includes('otp') || lowerTarget.includes('sms')) {
+  if (lowerTarget.includes('แจ้งเตือน') || lowerTarget.includes('otp') || lowerTarget.includes('sms') || lowerTarget.includes('อีเมลยืนยัน')) {
     matchedKeys.add('notification_issue');
   }
-  if (lowerTarget.includes('ปลอดภัย') || lowerTarget.includes('แฮก') || lowerTarget.includes('เปลี่ยนเบอร์')) {
+  if (lowerTarget.includes('ปลอดภัย') || lowerTarget.includes('แฮก') || lowerTarget.includes('เปลี่ยนเบอร์') || lowerTarget.includes('เข้าใช้บัญชี') || lowerTarget.includes('บัญชีโดน')) {
     matchedKeys.add('account_security');
   }
-  if (lowerTarget.includes('สมัคร') || lowerTarget.includes('register')) {
+  if (lowerTarget.includes('สมัคร') || lowerTarget.includes('register') || lowerTarget.includes('การสมัคร')) {
     matchedKeys.add('registration');
   }
-  if (lowerTarget.includes('ลิงก์เสีย') || lowerTarget.includes('เข้าเว็บไม่ได้') || lowerTarget.includes('ระงับ')) {
+  if (lowerTarget.includes('เบราว์เซอร์') || lowerTarget.includes('บราวเซอร์') || lowerTarget.includes('browser') || lowerTarget.includes('มือถือกับคอม') || lowerTarget.includes('อุปกรณ์')) {
+    matchedKeys.add('device_compatibility');
+  }
+  if (lowerTarget.includes('ลิงก์เสีย') || lowerTarget.includes('เข้าเว็บไม่ได้') || lowerTarget.includes('เข้าหน้าเว็บไม่ได้') || lowerTarget.includes('ระงับ') || lowerTarget.includes('502') || lowerTarget.includes('500') || lowerTarget.includes('403') || lowerTarget.includes('404')) {
     matchedKeys.add('access_blocked');
   }
-  if (lowerTarget.includes('ร้องเรียน') || lowerTarget.includes('ข้อเสนอแนะ') || lowerTarget.includes('บริการ')) {
+  if (lowerTarget.includes('ร้องเรียน') || lowerTarget.includes('ข้อเสนอแนะ') || lowerTarget.includes('บริการ') || lowerTarget.includes('บ่น') || lowerTarget.includes('ไม่ประทับใจ')) {
     matchedKeys.add('feedback_complaint');
+  }
+  if (lowerTarget.includes('ขอเพิ่ม') || lowerTarget.includes('ฟีเจอร์') || lowerTarget.includes('ฟังก์ชัน')) {
+    matchedKeys.add('feature_request');
+  }
+  if (lowerTarget.includes('เกม') || lowerTarget.includes('ตัวเกม') || lowerTarget.includes('เล่นเกม')) {
+    matchedKeys.add('game_issue');
   }
 
   return Array.from(matchedKeys);

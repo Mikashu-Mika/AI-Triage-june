@@ -3,7 +3,7 @@ import { supabase } from '../src/supabase.js';
 
 async function main() {
   const chatIds = ['chat-0115', 'chat-10100', 'chat-0116', 'chat-0117'];
-  console.log('🚀 Starting sequential AI Triage for today\'s 4 chats...');
+  console.log('🚀 Starting sequential Sift AI for today\'s 4 chats...');
 
   // Reset status to pending for clean run
   await supabase

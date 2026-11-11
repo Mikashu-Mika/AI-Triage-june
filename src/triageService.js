@@ -5,19 +5,14 @@ import { checkCompanyQuota } from './quotaService.js';
 import { waitForInteractiveIdle } from './aiScheduler.js';
 
 /**
- * Orchestrate the triage pipeline:
- * 1. Fetch available categories from Supabase.
- * 2. Fetch pending chats from Supabase.
- * 3. Process each chat through Qwen for triage parameters using dynamic categories.
- * 4. Process the summary through BGE-M3 for vector embedding.
- * 5. Query similar cases in the database via pgvector similarity search.
- * 6. Update the chat entry in Supabase (with category_id foreign key and all intelligence metrics).
- * 
+ * Classify every pending chat (optionally for one company) one by one with processSingleChat,
+ * so batch and real-time classification share exactly the same logic, persistence and audit log.
+ * @param {string} [companyId]
  * @returns {Promise<{processedCount: number, successCount: number, failures: any[]}>}
  */
 export async function runTriagePipeline(companyId) {
-  console.log(`Starting AI Triage Pipeline for Company: ${companyId || 'Global'}...`);
-  
+  console.log(`Starting Sift AI Pipeline for Company: ${companyId || 'Global'}...`);
+
   // 0. Quota Check: If company specified, check if monthly quota is exceeded
   if (companyId) {
     const quota = await checkCompanyQuota(companyId);
@@ -28,27 +23,8 @@ export async function runTriagePipeline(companyId) {
     }
   }
 
-  // 1. Fetch active categories & training examples
-  let categories = [];
-  let trainingExamples = [];
-  try {
-    categories = await getCategories(companyId);
-    trainingExamples = await getTrainingExamples(companyId);
-    console.log(`Loaded ${categories.length} categories and ${trainingExamples.length} training examples from Supabase.`);
-  } catch (error) {
-    console.error('Error fetching categories or training examples from Supabase:', error);
-    throw error;
-  }
-
-  // 2. Fetch pending chats
-  let pendingChats = [];
-  try {
-    pendingChats = await getPendingChats(companyId);
-    console.log(`Found ${pendingChats.length} pending chats to process.`);
-  } catch (error) {
-    console.error('Error fetching pending chats from Supabase:', error);
-    throw error;
-  }
+  const pendingChats = await getPendingChats(companyId);
+  console.log(`Found ${pendingChats.length} pending chats to process.`);
 
   const results = {
     processedCount: pendingChats.length,
@@ -56,116 +32,21 @@ export async function runTriagePipeline(companyId) {
     failures: []
   };
 
-  // 3. Process each chat
   for (const chat of pendingChats) {
     const customerName = chat.customers?.name || 'Unknown customer';
-    console.log(`Processing chat ${chat.id} (Customer: ${customerName})...`);
     try {
-      if (!chat.conversation) {
-        throw new Error(`Chat conversation content is empty`);
-      }
-
-      // Step 3a: Layer 1 Dynamic Clause Segmentation + Layer 2 Triage Analysis (qwen2.5:14b)
-      const { clauses: preSegmentedClauses } = segmentConversationIntoClauses(chat.conversation);
-      console.log(`- Running Triage Analysis (Qwen 2.5) across ${preSegmentedClauses.length} dynamic clauses...`);
-      await waitForInteractiveIdle(`runTriagePipeline (${chat.id}) - Qwen Triage`);
-      const triage = await generateTriage(chat.conversation, categories, trainingExamples, preSegmentedClauses);
-      console.log(`  Result: CategoryID="${triage.category_id}", Priority="${triage.priority}", Summary="${triage.summary}"`);
-
-      // Step 3b: Generate Embeddings from Summary (bge-m3)
-      console.log(`- Generating vector embedding (BGE-M3)...`);
-      await waitForInteractiveIdle(`runTriagePipeline (${chat.id}) - BGE-M3 Embedding`);
-      const embedding = await getEmbedding(triage.summary);
-      console.log(`  Result: Vector generated successfully (length: ${embedding.length})`);
-
-      // Step 3c: Search for similar cases in database using pgvector
-      console.log(`- Searching for semantically similar cases...`);
-      const similarChats = await findSimilarChats(embedding, 0.70, 5);
-      
-      let finalRecommendation = triage.ai_recommendation;
-      if (similarChats.length > 0) {
-        // Exclude the current chat itself if it matches (though it is pending so shouldn't have an embedding yet)
-        const filteredMatches = similarChats.filter(match => match.id !== chat.id);
-        if (filteredMatches.length > 0) {
-          const closest = filteredMatches[0];
-          console.log(`  Found ${filteredMatches.length} similar cases! Closest similarity: ${(closest.similarity * 100).toFixed(1)}%`);
-          finalRecommendation = `[พบคดีที่คล้ายกัน ${(closest.similarity * 100).toFixed(1)}% ID: ${closest.id} - "${closest.summary}"]\n` + triage.ai_recommendation;
-        } else {
-          console.log(`  No similar cases found after filtering.`);
-        }
+      const outcome = await processSingleChat(chat.id);
+      if (outcome?.status === 'quota_exceeded') {
+        results.failures.push({ id: chat.id, customer_name: customerName, error: 'quota_exceeded' });
       } else {
-        console.log(`  No similar cases found.`);
+        results.successCount++;
       }
-      
-      finalRecommendation = formatMultiIssuesRecommendation(triage, finalRecommendation);
-
-      // Step 3d: Prepare & validate multi-issue breakdown using Layer 3 Dynamic Semantic Engine
-      const sanitizedDetectedIssues = (triage.detected_issues || []).map(iss => {
-        const text = iss.problem_summary || iss.summary || '';
-        const validated = sanitizeAndValidateIssueCategory(text, iss.category_id, categories);
-        return {
-          ...iss,
-          category_id: validated.category_id,
-          urgency: validated.isGuarded && validated.priority ? validated.priority : (iss.urgency || iss.priority || 'medium'),
-          department: validated.isGuarded && validated.department ? validated.department : (iss.department || 'Support')
-        };
-      });
-
-      let normalizedIssues = sanitizedDetectedIssues.map(iss => ({
-        chat_id: chat.id,
-        category_id: iss.category_id,
-        priority: iss.urgency || iss.priority || triage.priority || 'medium',
-        department: iss.department || triage.department || 'Support',
-        summary: iss.problem_summary || iss.summary || triage.summary || 'ไม่มีบทสรุป',
-        recommended_reply: ''
-      }));
-      normalizedIssues = await ensureCompleteSentenceCoverage(
-        chat.conversation,
-        normalizedIssues,
-        categories,
-        chat.id,
-        triage.priority || 'medium',
-        triage.department || 'Support'
-      );
-
-      // Step 3e: Update primary chat result & save multi-issue breakdown to Supabase
-      console.log(`- Saving results & relational multi-issue breakdown to Supabase...`);
-      const normalizedCategory = resolvePrimaryCategory(triage.category_id, normalizedIssues, categories);
-      await updateTriageResult(chat.id, {
-        category_id: normalizedCategory,
-        priority: triage.priority,
-        summary: triage.summary,
-        embedding,
-        sub_category: triage.sub_category,
-        intent: triage.intent,
-        root_cause: triage.root_cause,
-        sentiment: triage.sentiment,
-        urgency: triage.urgency,
-        department: triage.department,
-        keywords: triage.keywords,
-        confidence: triage.confidence,
-        recommended_reply: triage.recommended_reply,
-        resolution: triage.resolution,
-        business_impact: triage.business_impact,
-        business_impact_score: triage.business_impact_score,
-        ai_recommendation: finalRecommendation
-      });
-
-      await saveChatIssues(chat.id, normalizedIssues);
-
-      console.log(`Chat ${chat.id} processed successfully!`);
-      results.successCount++;
     } catch (error) {
-      console.error(`Failed to process chat ${chat.id}:`, error.message);
-      results.failures.push({
-        id: chat.id,
-        customer_name: customerName,
-        error: error.message
-      });
+      results.failures.push({ id: chat.id, customer_name: customerName, error: error.message });
     }
   }
 
-  console.log(`AI Triage Pipeline finished. Processed: ${results.processedCount}, Success: ${results.successCount}, Failures: ${results.failures.length}`);
+  console.log(`Sift AI Pipeline finished. Processed: ${results.processedCount}, Success: ${results.successCount}, Failures: ${results.failures.length}`);
   return results;
 }
 
@@ -184,6 +65,23 @@ function cosineSimilarity(vecA, vecB) {
   }
   if (normA === 0 || normB === 0) return 0;
   return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+/**
+ * Apply the deterministic rule guards only when the LLM did not find a real problem
+ * (missing / unknown / "other" category). A concrete LLM category is never overridden.
+ * @param {string} text
+ * @param {string} rawCategoryId
+ * @param {any[]} categories
+ * @returns {{ category_id: string, priority?: string, department?: string, isGuarded: boolean }}
+ */
+export function applyRuleGuardIfUnclassified(text, rawCategoryId, categories = []) {
+  const normalized = normalizeCategoryId(rawCategoryId, categories);
+  const isUnclassified = !normalized || normalized.split(':').pop().toLowerCase() === 'other';
+  if (!isUnclassified) {
+    return { category_id: normalized, isGuarded: false };
+  }
+  return sanitizeAndValidateIssueCategory(text, rawCategoryId, categories);
 }
 
 /**
@@ -235,7 +133,7 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
   }
 
   // Guard 3: Customer feedback, complaints, and service improvement suggestions
-  const isFeedbackOrComplaint = /(ปัญหาแบบนี้ทำให้|ทำให้การเริ่มใช้งาน|ยุ่งยากมาก|เกือบจะเปลี่ยน|บริการแย่|ไม่โอเคมาก|เสียเวลา|ลองซ้ำ|จนไม่สามารถตัดสินใจซื้อได้|รู้สึกผิดหวัง|ผิดหวัง|ท้อ|ไม่ประทับใจ|ปัญหาแบบนี้ไม่ควรเกิดขึ้น|อยากให้ปรับปรุง|ช่วยปรับปรุงระบบ|ช่วยตรวจสอบ|ปรับปรุงข้อความแจ้งข้อผิดพลาด)/i.test(cleanText);
+  const isFeedbackOrComplaint = /(ปัญหาแบบนี้ทำให้|ทำให้การเริ่มใช้งาน|ยุ่งยากมาก|เกือบจะเปลี่ยน|บริการแย่|ไม่โอเคมาก|เสียเวลา|ลองซ้ำ|จนไม่สามารถตัดสินใจซื้อได้|รู้สึกผิดหวัง|ผิดหวัง|ท้อ|ไม่ประทับใจ|ปัญหาแบบนี้ไม่ควรเกิดขึ้น|อยากให้ปรับปรุง|ช่วยปรับปรุงระบบ|ปรับปรุงข้อความแจ้งข้อผิดพลาด)/i.test(cleanText);
   if (isFeedbackOrComplaint) {
     const feedbackCat = categories.find(c => c.id.endsWith(':feedback_complaint') || c.id === 'feedback_complaint');
     if (feedbackCat) {
@@ -252,17 +150,17 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
     }
   }
 
-  // Guard 5: Account security / change sensitive info (bank account, phone number, password, credentials)
-  const isBankOrSecurityChange = /(เปลี่ยน|แก้|ย้าย|อัปเดต|ขอเปลี่ยน|ขอแก้).*(บัญชีธนาคาร|เลขบัญชี|สมุดบัญชี|เบอร์โทร|เบอร์ศัพท์)|(ขอเปลี่ยน|ขอแก้).*(บัญชี|เบอร์)/i.test(cleanText);
-  if (isBankOrSecurityChange) {
+  // Guard 5: Account security / change sensitive info / unauthorized access / suspected hack
+  const isAccountSecurity = /(เปลี่ยน|แก้|ย้าย|อัปเดต|ขอเปลี่ยน|ขอแก้).*(บัญชีธนาคาร|เลขบัญชี|สมุดบัญชี|เบอร์โทร|เบอร์ศัพท์)|(ขอเปลี่ยน|ขอแก้).*(บัญชี|เบอร์)|(มีใครเข้าใช้บัญชี|มีคนเข้าใช้บัญชี|มีคนอื่นเข้าใช้|มีคนแอบเข้า|โดนแฮก|ถูกแฮก|สงสัยว่าโดนแฮก|ตรวจสอบการเข้าถึง)/i.test(cleanText);
+  if (isAccountSecurity) {
     const secCat = categories.find(c => c.id.endsWith(':account_security') || c.id === 'account_security');
     if (secCat) {
-      return { category_id: secCat.id, priority: 'high', department: 'Support', isGuarded: true };
+      return { category_id: secCat.id, priority: 'urgent', department: 'Support', isGuarded: true };
     }
   }
 
   // Guard 6: Access blocked / broken links / 403 / 404 / 500 / outage
-  const isAccessBlocked = /(ขอลิงก์|ขอลิ้ง|ขอเว็บ).*(ใหม่|สำรอง|เดิม|ไม่ได้|เข้าไม่ได้)|(ลิงก์|ลิ้ง|link).*(เป็นอะไร|เข้าไม่ได้|เสีย|พัง|เปิดไม่ติด|โหลดไม่ขึ้น|error)|(เข้าเว็บ|เข้าเว็บไซต์|เข้าหน้าเว็บ|เข้า web|เปิดเว็บ|เปิดเว็บไซต์).*(ไม่ได้|ไม่สำเร็จ|ไม่ติด| error| 403| 404)|(403|404|500|502|forbidden|access denied|blocked)/i.test(cleanText);
+  const isAccessBlocked = /(ขอลิงก์|ขอลิ้ง|ขอเว็บ).*(ใหม่|สำรอง|เดิม|ไม่ได้|เข้าไม่ได้)|(ลิงก์|ลิ้ง|link).*(เป็นอะไร|เข้าไม่ได้|เสีย|พัง|เปิดไม่ติด|โหลดไม่ขึ้น|error)|(เข้าเว็บ|เข้าเว็บไซต์|เข้าหน้าเว็บ|เข้า web|เปิดเว็บ|เปิดเว็บไซต์).*(ไม่ได้|ไม่สำเร็จ|ไม่ติด| error| 403| 404)|(?:error|เออเร่อ|ข้อผิดพลาด|http)\s*:?\s*(403|404)\b|forbidden|access denied/i.test(cleanText);
   if (isAccessBlocked) {
     const accessCat = categories.find(c => c.id.endsWith(':access_blocked') || c.id === 'access_blocked');
     if (accessCat) {
@@ -270,17 +168,28 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
     }
   }
 
-  // Guard 7: Page load freeze / loading delay / refresh
-  const isPageFreeze = /(รีเฟรช|refresh).*(ถึงจะเห็น|ถึงจะขึ้น|ถึงจะอัปเดต)|(หน้าเว็บ|เว็บ|หน้าเว็บไซต์).*(โหลดช้า|ค้าง|หมุน|ช้ามาก|เปิดช้า|โหลดรายละเอียด)|(โหลดช้ามาก|โหลดนานมาก|ค้างบ่อย|หมุนติ้ว)/i.test(cleanText);
+  // Guard 7a: Page load freeze / screen freeze / infinite spinning / refresh
+  const isPageFreeze = /(รีเฟรช|refresh).*(ถึงจะเห็น|ถึงจะขึ้น|ถึงจะอัปเดต)|(หน้าเว็บ|เว็บ|หน้าจอ|จอ|ระบบ|แอป|แอพ).*(ค้าง|หมุนติ้ว|หมุนค้าง|หมุนอยู่นานมาก|นิ่งไปเลย|ค้างตลอด|ค้างบ่อย)|(ค้างไปเลย|ค้างสนิท|หมุนค้าง|หมุนติ้ว|หมุนไม่หยุด|ค้างตลอด|หน้าประวัติค้าง)/i.test(cleanText);
   if (isPageFreeze) {
-    const freezeCat = categories.find(c => c.id.endsWith(':page_load_freeze') || c.id === 'page_load_freeze' || c.id.endsWith(':performance_issue') || c.id === 'performance_issue');
+    const freezeCat = categories.find(c => c.id.endsWith(':page_load_freeze') || c.id === 'page_load_freeze') ||
+      categories.find(c => c.id.endsWith(':performance_issue') || c.id === 'performance_issue');
     if (freezeCat) {
       return { category_id: freezeCat.id, priority: 'medium', department: 'Support', isGuarded: true };
     }
   }
 
+  // Guard 7b: System performance / slow loading / delay (without freeze/hang)
+  const isPerformanceIssue = /(เข้าได้ช้า|โหลดช้ามาก|โหลดนานมาก|รอโหลดนาน|โหลดนาน|เข้าช้ามาก|เข้าช้า|ระบบช้า|ทำงานช้า|อืดมาก|อืด|ประสิทธิภาพระบบ|ความเร็วตก|หมุนอยู่นานมาก|หมุนอยู่นาน|หมุนนานมาก|หมุนนาน|ช้ามาก|ต้องรอนาน|กว่าจะ.*ได้ต้องรอ)/i.test(cleanText);
+  if (isPerformanceIssue) {
+    const perfCat = categories.find(c => c.id.endsWith(':performance_issue') || c.id === 'performance_issue') ||
+      categories.find(c => c.id.endsWith(':page_load_freeze') || c.id === 'page_load_freeze');
+    if (perfCat) {
+      return { category_id: perfCat.id, priority: 'medium', department: 'Support', isGuarded: true };
+    }
+  }
+
   // Guard 8: Button response lag / multiple clicks / freeze
-  const isButtonLag = /(กดหลายครั้ง|กดซ้ำ|กดแล้วไม่ไป|ปุ่มไม่ตอบสนอง|ตอบสนองช้า|ไม่ตอบสนอง|ไม่มีการตอบสนอง|กว่าจะเลือกได้|กว่าจะติด|ระบบถึงเลือกให้|ปุ่ม.*ค้าง|ระบบยังตอบสนองช้า)/i.test(cleanText);
+  const isButtonLag = /(กดหลายครั้ง|กดซ้ำ|กดแล้วไม่ไป|ปุ่มไม่ตอบสนอง|ตอบสนองช้า|ไม่ตอบสนอง|ไม่มีการตอบสนอง|กว่าจะเลือกได้|กว่าจะติด|ระบบถึงเลือกให้|ปุ่ม.*ค้าง|ระบบยังตอบสนองช้า|เลือก.*(สี|ขนาด|รุ่น|ตัวเลือก).*ไม่ได้|ไม่มีการเปลี่ยนแปลง|ไม่มีอะไรเกิดขึ้น|กด.*ไม่เปลี่ยน|กดแต่ละสีแล้ว|ปุ่มกดไม่ไป)/i.test(cleanText);
   if (isButtonLag) {
     const lagCat = categories.find(c => c.id.endsWith(':interaction_lag') || c.id === 'interaction_lag');
     if (lagCat) {
@@ -289,7 +198,7 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
   }
 
   // Guard 9: Graphics / UI Rendering Issue
-  const isUiRendering = /(แสดงผลผิดปกติ|แสดงผลเพี้ยน|ตัดทอน|ถูกตัด|ไม่จบประโยค|ตกขอบ|ล้นขอบ|เลยขอบ|ล้นจอ|เลยขอบหน้าจอ|ตัวหนังสือซ้อน|ฟอนต์เละ|ปุ่มอยู่เลย|ปุ่มล้น|หลุดกรอบ|รูป.*(ไม่ขึ้น|หาย|ว่าง|ถูกตัด|แตก|เป็นพื้นที่ว่าง|กลายเป็นพื้นที่ว่าง)|การแสดงผล.*(ผิดปกติ|เพี้ยน|ไม่สมบูรณ์|ไม่ตรง)|หน้าเว็บ.*แสดงผลผิดปกติ)/i.test(cleanText);
+  const isUiRendering = /(แสดงผลผิดปกติ|แสดงผลเพี้ยน|ตัดทอน|ถูกตัด|ไม่จบประโยค|ตกขอบ|ล้นขอบ|เลยขอบ|ล้นจอ|เลยขอบหน้าจอ|ตัวหนังสือซ้อน|ฟอนต์เละ|ปุ่มอยู่เลย|ปุ่มล้น|หลุดกรอบ|รูป.*(ไม่ขึ้น|หาย|ว่าง|ถูกตัด|แตก|เป็นพื้นที่ว่าง|กลายเป็นพื้นที่ว่าง)|(รายละเอียด|ข้อมูล|สเปก|ราคา|ข้อความ).*(หาย|หายไป|ไม่ขึ้น|แสดงไม่ครบ|ทับกัน|ซ้อนกัน)|(ข้อความ|ตัวหนังสือ|ฟอนต์|ตัวอักษร).*(ทับกัน|ซ้อนกัน)|อ่านไม่รู้เรื่อง|การแสดงผล.*(ผิดปกติ|เพี้ยน|ไม่สมบูรณ์|ไม่ตรง)|หน้าเว็บ.*แสดงผลผิดปกติ)/i.test(cleanText);
   if (isUiRendering) {
     const uiCat = categories.find(c => c.id.endsWith(':ui_rendering_issue') || c.id === 'ui_rendering_issue');
     if (uiCat) {
@@ -298,7 +207,7 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
   }
 
   // Guard 10: Device / Browser compatibility
-  const isDeviceComp = /(เบราว์เซอร์อื่น|บราวเซอร์อื่น|browser อื่น|ลองเปิดผ่าน|เปิดผ่านเบราว์เซอร์|เปิดผ่านบราวเซอร์|ลองเปลี่ยนเบราว์เซอร์|chrome|safari|firefox|edge|อุปกรณ์อื่น|ลองเครื่องอื่น|มือถือกับคอม|เปิดในคอม|เปิดในมือถือ|บนคอมพิวเตอร์|สลับไปใช้คอม|สลับไปใช้มือถือ|ไม่รองรับมือถือ|หน้าจอมือถือ|เฉพาะในมือถือ|สั่งซื้อผ่านมือถือ)/i.test(cleanText);
+  const isDeviceComp = /(เบราว์เซอร์อื่น|บราวเซอร์อื่น|browser อื่น|ลองเปิดผ่าน|เปิดผ่านเบราว์เซอร์|เปิดผ่านบราวเซอร์|ลองเปลี่ยนเบราว์เซอร์|chrome|safari|firefox|\bedge\b|อุปกรณ์อื่น|ลองเครื่องอื่น|มือถือกับคอม|เปิดในคอม|เปิดในมือถือ|บนคอมพิวเตอร์|สลับไปใช้คอม|สลับไปใช้มือถือ|ไม่รองรับมือถือ|หน้าจอมือถือ|เฉพาะในมือถือ|สั่งซื้อผ่านมือถือ)/i.test(cleanText);
   if (isDeviceComp) {
     const devCat = categories.find(c => c.id.endsWith(':device_compatibility') || c.id === 'device_compatibility');
     if (devCat) {
@@ -307,7 +216,7 @@ export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories
   }
 
   // Guard 11: Deposit / Withdrawal issue
-  const isDepositWithdrawal = /(ถอน|ฝาก|โอน).*(ไม่เข้า|ช้า|ดีเลย์|ยังไม่ได้|หาย|ไม่อัปเดต|ค้าง)/i.test(cleanText);
+  const isDepositWithdrawal = /(ถอน|ฝาก(?!ดู|บอก|ข้อความ|ตรวจ|แก้)|โอน).*(ไม่เข้า|ช้า|ดีเลย์|ยังไม่ได้|หาย|ไม่อัปเดต|ค้าง)/i.test(cleanText);
   if (isDepositWithdrawal) {
     const depCat = categories.find(c => c.id.endsWith(':deposit_withdrawal') || c.id === 'deposit_withdrawal');
     if (depCat) {
@@ -408,7 +317,15 @@ export function segmentConversationIntoClauses(conversation) {
         }
       }
     } else {
-      sentences.push(turn);
+      // For multi-turn conversations, if a turn is an elaboration/troubleshooting action for the preceding issue
+      // (e.g. "ลองออกจากระบบแล้วเข้าใหม่ก็ยังเหมือนเดิม", "ลองรีเฟรชแล้วก็ยังเหมือนเดิม")
+      // attach it to the preceding sentence rather than creating an isolated phantom login/other issue
+      const isTroubleshootingContinuation = /^(ลอง(ออกจากระบบ|ล็อกอิน|รีเฟรช|เข้าใหม่|ทำใหม่|อีกรอบ|เปลี่ยนเครื่อง|สลับไปใช้).*(ก็ยังเหมือนเดิม|ก็ยังเป็นเหมือนเดิม|ยังเหมือนเดิม|ไม่หาย))$/i.test(turn.trim());
+      if (isTroubleshootingContinuation && sentences.length > 0) {
+        sentences[sentences.length - 1] += ` ${turn.trim()}`;
+      } else {
+        sentences.push(turn);
+      }
     }
   }
 
@@ -578,8 +495,11 @@ export async function ensureCompleteSentenceCoverage(
 
     if (matchingLlmIssue) {
       const llmCatNormalized = normalizeCategoryId(matchingLlmIssue.category_id, categories) || otherCatId;
-      // Trust LLM category for single-clause match unless Dynamic Vector+Schema Engine is highly confident (>= 0.78) on a different category
-      if (semanticMatch.similarity >= 0.78 && semanticMatch.category_id !== llmCatNormalized) {
+      const isLlmOther = llmCatNormalized === otherCatId || llmCatNormalized.endsWith(':other');
+      // If LLM said 'other' (non-problem), but Dynamic Vector detected a real problem category (similarity >= 0.55), do NOT keep 'other'!
+      // For two competing real categories, require high confidence (>= 0.78) to override LLM.
+      const overrideThreshold = isLlmOther ? 0.55 : 0.78;
+      if (semanticMatch.similarity >= overrideThreshold && semanticMatch.category_id !== llmCatNormalized) {
         finalCategoryId = semanticMatch.category_id;
         matchSource = `${semanticMatch.source} (Override)`;
       } else {
@@ -594,8 +514,8 @@ export async function ensureCompleteSentenceCoverage(
       finalDepartment = 'Support';
     }
 
-    // Re-verify deterministic guard on the atomic clause
-    const guarded = sanitizeAndValidateIssueCategory(clause, finalCategoryId, categories);
+    // Rule guards only fill in clauses that are still unclassified ("other")
+    const guarded = applyRuleGuardIfUnclassified(clause, finalCategoryId, categories);
     if (guarded.isGuarded) {
       finalCategoryId = guarded.category_id;
       if (guarded.priority) finalPriority = guarded.priority;
@@ -626,8 +546,15 @@ export async function ensureCompleteSentenceCoverage(
       !/(ไม่ได้|ไม่สำเร็จ|ล้มเหลว|พัง|ค้าง|ช้า|เออเร่อ|หลุด|หาย|เกิดข้อผิดพลาด|แจ้งว่า|ถูกใช้งาน)/.test(item.summary);
     if (isOrphanNounPhrase) continue;
 
-    // RULE: NEVER consolidate 'other' category across clauses into a monster issue!
+    // Skip standalone closing pleas / call to action / non-issues when real technical issues are present in the conversation
+    // (e.g. "ช่วยแก้ไขหน่อยค่ะ จะสั่งซื้อแต่ทำอะไรไม่ได้สักอย่าง", "ช่วยตรวจสอบระบบให้หน่อยค่ะ ไม่สามารถเช็กข้อมูลก่อนซื้อได้")
+    const isClosingPlea = /^(ช่วย(ตรวจสอบ|แก้ไข|แก้|ดู|ปรับปรุง)|รบกวน(ช่วย)?(ตรวจสอบ|แก้ไข|แก้|ดู)|ฝาก(ดู|ตรวจสอบ|แก้ไข)).*(ระบบ|ให้หน่อย|หน่อย|ด้วย|ด่วน)?.*(ไม่สามารถ.*(ซื้อ|ดู|เช็ก|ใช้งาน|ทำอะไร)|จะสั่งซื้อแต่|ต้องการดูสินค้า|ทำอะไรไม่ได้สักอย่าง|ทำอะไรไม่ได้เลย)?.*(ค่ะ|ครับ|คะ|นะ|ด้วย)?$/i.test(item.summary) ||
+      /^(ช่วย(แก้ไข|ตรวจสอบ|ดู).*(หน่อย|ด่วน|นะคะ|นะครับ|ด้วย))$/i.test(item.summary);
     const isOtherCat = (item.category_id || '').split(':').pop().trim().toLowerCase() === 'other';
+    const hasRealTechnicalIssues = resolvedClauseIssues.some(iss => iss !== item && !iss.category_id.endsWith(':other') && !iss.category_id.endsWith(':feedback_complaint'));
+    if ((isClosingPlea || isOtherCat) && hasRealTechnicalIssues) continue;
+
+    // RULE: For non-defect chats (e.g. pure inquiry/context), preserve standalone 'other' category without monster consolidation
     if (isOtherCat) {
       consolidatedByCategory.push({ ...item });
       continue;
@@ -652,8 +579,89 @@ export async function ensureCompleteSentenceCoverage(
 }
 
 /**
- * Process a single chat session through the triage pipeline.
+ * Run the full classification of one chat WITHOUT writing anything to the database
+ * (used by processSingleChat and by the offline evaluation script).
+ * @param {{ id: string, conversation: string, company_id?: string }} chat
+ * @param {{ categories?: any[], trainingExamples?: any[] }} [context] - Pre-loaded company context (fetched when omitted).
+ * @returns {Promise<{ triage: any, embedding: number[]|null, issues: any[], primary: { category_id: string, priority: string, department: string }, aiRecommendation: string }>}
+ */
+export async function classifyChat(chat, context = {}) {
+  if (!chat.conversation) {
+    throw new Error(`Chat conversation content is empty`);
+  }
+
+  const categories = context.categories || await getCategories(chat.company_id);
+  const trainingExamples = context.trainingExamples || await getTrainingExamples(chat.company_id);
+
+  // 1. Layer 1 clause segmentation + Layer 2 LLM classification
+  const { clauses: preSegmentedClauses } = segmentConversationIntoClauses(chat.conversation);
+  await waitForInteractiveIdle(`classifyChat (${chat.id}) - LLM`);
+  const triage = await generateTriage(chat.conversation, categories, trainingExamples, preSegmentedClauses);
+
+  // 2. Embedding of the summary + similar cases of the same company
+  await waitForInteractiveIdle(`classifyChat (${chat.id}) - Embedding`);
+  const embedding = await getEmbedding(triage.summary);
+  const similarChats = await findSimilarChats(embedding, 0.70, 5, chat.company_id);
+  let aiRecommendation = triage.ai_recommendation;
+  const closest = similarChats.find(match => match.id !== chat.id);
+  if (closest) {
+    aiRecommendation = `[พบเคสที่คล้ายกัน ${(closest.similarity * 100).toFixed(1)}% ID: ${closest.id} - "${closest.summary}"]\n` + triage.ai_recommendation;
+  }
+  aiRecommendation = formatMultiIssuesRecommendation(triage, aiRecommendation);
+
+  // 3. Layer 3: keep the LLM category; rule guards only fill in when the LLM found no real problem
+  let issues = (triage.detected_issues || []).map(iss => {
+    const text = iss.problem_summary || iss.summary || '';
+    const validated = applyRuleGuardIfUnclassified(text, iss.category_id, categories);
+    return {
+      chat_id: chat.id,
+      category_id: validated.category_id,
+      priority: (validated.isGuarded && validated.priority) || iss.urgency || iss.priority || triage.priority || 'medium',
+      department: (validated.isGuarded && validated.department) || iss.department || triage.department || 'Support',
+      summary: text || triage.summary || 'ไม่มีบทสรุป',
+      recommended_reply: ''
+    };
+  });
+  if (issues.length === 0) {
+    issues = [{
+      chat_id: chat.id,
+      category_id: normalizeCategoryId(triage.category_id, categories),
+      priority: triage.priority || 'medium',
+      department: triage.department || 'Support',
+      summary: triage.summary || 'ไม่มีบทสรุป',
+      recommended_reply: ''
+    }];
+  }
+  issues = await ensureCompleteSentenceCoverage(
+    chat.conversation,
+    issues,
+    categories,
+    chat.id,
+    triage.priority || 'medium',
+    triage.department || 'Support'
+  );
+
+  // 4. Primary decision for the chats row = most severe real problem
+  const primaryCategory = resolvePrimaryCategory(triage.category_id, issues, categories);
+  const primaryIssue = issues.find(iss => iss.category_id === primaryCategory) || issues[0];
+
+  return {
+    triage,
+    embedding,
+    issues,
+    aiRecommendation,
+    primary: {
+      category_id: primaryCategory,
+      priority: primaryIssue?.priority || triage.priority || 'medium',
+      department: primaryIssue?.department || triage.department || 'Support'
+    }
+  };
+}
+
+/**
+ * Process a single chat session through the triage pipeline and persist the result.
  * @param {string} chatId - The ID of the chat.
+ * @returns {Promise<{ status: string, chatId: string }>}
  */
 export async function processSingleChat(chatId) {
   console.log(`Processing single chat ${chatId} in real-time...`);
@@ -661,19 +669,22 @@ export async function processSingleChat(chatId) {
     // 1. Fetch the specific chat
     const { data: chat, error: fetchErr } = await supabase
       .from('chats')
-      .select('*, customers(*)')
+      .select('*, customers(*), chat_issues(id, is_human_verified)')
       .eq('id', chatId)
       .single();
-      
+
     if (fetchErr || !chat) {
       throw new Error(`Chat ${chatId} not found in database: ${fetchErr?.message || ''}`);
     }
-    
-    if (!chat.conversation) {
-      throw new Error(`Chat conversation content is empty`);
+
+    // 1.1 Human-verified results (corrected in BO) are never overwritten by the AI
+    if ((chat.chat_issues || []).some(iss => iss.is_human_verified)) {
+      console.log(`🛡️ Chat ${chatId} has human-verified issues; skipping AI re-classification.`);
+      await supabase.from('chats').update({ status: 'completed' }).eq('id', chatId);
+      return { status: 'human_verified', chatId };
     }
 
-    // 1.1 Quota Enforcement: Check if company has exceeded monthly chat quota
+    // 1.2 Quota Enforcement: Check if company has exceeded monthly chat quota
     if (chat.company_id) {
       const quota = await checkCompanyQuota(chat.company_id);
       if (quota.isExceeded) {
@@ -695,78 +706,13 @@ export async function processSingleChat(chatId) {
       }
     }
 
-    // 2. Fetch available categories & training examples for the chat's company
-    const categories = await getCategories(chat.company_id);
-    const trainingExamples = await getTrainingExamples(chat.company_id);
+    // 2. Classify (LLM + embedding + rules), no writes yet
+    const { triage, embedding, issues, aiRecommendation, primary } = await classifyChat(chat);
 
-    // 3. Layer 1 Dynamic Clause Segmentation + Layer 2 Triage Analysis (Qwen 2.5)
-    const { clauses: preSegmentedClauses } = segmentConversationIntoClauses(chat.conversation);
-    await waitForInteractiveIdle(`processSingleChat (${chatId}) - Qwen Triage`);
-    const triage = await generateTriage(chat.conversation, categories, trainingExamples, preSegmentedClauses);
-    
-    // 4. Generate Embeddings (BGE-M3)
-    await waitForInteractiveIdle(`processSingleChat (${chatId}) - BGE-M3 Embedding`);
-    const embedding = await getEmbedding(triage.summary);
-    
-    // 5. Search for similar cases (pgvector)
-    const similarChats = await findSimilarChats(embedding, 0.70, 5);
-    let finalRecommendation = triage.ai_recommendation;
-    if (similarChats.length > 0) {
-      const filteredMatches = similarChats.filter(match => match.id !== chat.id);
-      if (filteredMatches.length > 0) {
-        const closest = filteredMatches[0];
-        finalRecommendation = `[พบคดีที่คล้ายกัน ${(closest.similarity * 100).toFixed(1)}% ID: ${closest.id} - "${closest.summary}"]\n` + triage.ai_recommendation;
-      }
-    }
-    finalRecommendation = formatMultiIssuesRecommendation(triage, finalRecommendation);
-
-    // 6. Layer 3: Validate & ensure complete atomic clause coverage
-    const sanitizedDetectedIssues = (triage.detected_issues || []).map(iss => {
-      const text = iss.problem_summary || iss.summary || '';
-      const validated = sanitizeAndValidateIssueCategory(text, iss.category_id, categories);
-      return {
-        ...iss,
-        category_id: validated.category_id,
-        urgency: validated.isGuarded && validated.priority ? validated.priority : (iss.urgency || iss.priority || 'medium'),
-        department: validated.isGuarded && validated.department ? validated.department : (iss.department || 'Support')
-      };
-    });
-
-    let normalizedFinalIssues = [];
-    if (sanitizedDetectedIssues.length > 0) {
-      normalizedFinalIssues = sanitizedDetectedIssues.map(issue => ({
-        chat_id: chat.id,
-        category_id: issue.category_id,
-        priority: issue.urgency || issue.priority || triage.priority || 'medium',
-        department: issue.department || triage.department || 'Support',
-        summary: issue.problem_summary || issue.summary || triage.summary || 'ไม่มีบทสรุป',
-        recommended_reply: ''
-      }));
-    } else {
-      normalizedFinalIssues = [{
-        chat_id: chat.id,
-        category_id: normalizeCategoryId(triage.category_id, categories),
-        priority: triage.priority || 'medium',
-        department: triage.department || 'Support',
-        summary: triage.summary || 'ไม่มีบทสรุป',
-        recommended_reply: ''
-      }];
-    }
-
-    normalizedFinalIssues = await ensureCompleteSentenceCoverage(
-      chat.conversation,
-      normalizedFinalIssues,
-      categories,
-      chat.id,
-      triage.priority || 'medium',
-      triage.department || 'Support'
-    );
-
-    // 7. Update primary chat record & save multi-issue breakdown in Supabase
-    const normalizedCategory = resolvePrimaryCategory(triage.category_id, normalizedFinalIssues, categories);
+    // 3. Persist primary chat result & multi-issue breakdown
     await updateTriageResult(chat.id, {
-      category_id: normalizedCategory,
-      priority: triage.priority,
+      category_id: primary.category_id,
+      priority: primary.priority,
       summary: triage.summary,
       embedding,
       sub_category: triage.sub_category,
@@ -774,30 +720,29 @@ export async function processSingleChat(chatId) {
       root_cause: triage.root_cause,
       sentiment: triage.sentiment,
       urgency: triage.urgency,
-      department: triage.department,
+      department: primary.department,
       keywords: triage.keywords,
       confidence: triage.confidence,
       recommended_reply: triage.recommended_reply,
       resolution: triage.resolution,
       business_impact: triage.business_impact,
       business_impact_score: triage.business_impact_score,
-      ai_recommendation: finalRecommendation
+      ai_recommendation: aiRecommendation
     });
 
-    console.log(`- Saving multi-issue breakdown (${normalizedFinalIssues.length} items) to Supabase...`);
-    await saveChatIssues(chat.id, normalizedFinalIssues);
+    console.log(`- Saving multi-issue breakdown (${issues.length} items) to Supabase...`);
+    await saveChatIssues(chat.id, issues);
 
-    // Output detailed audit log for full transparency
-    logTriageAudit(chatId, {
+    // 4. Save detailed audit log to DB for full transparency
+    await logTriageAudit(chatId, {
+      companyId: chat.company_id,
       conversation: chat.conversation,
       llmResponse: triage,
       llmDetectedIssues: triage.detected_issues || [],
-      sentenceBreakdown: normalizedFinalIssues,
+      sentenceBreakdown: issues,
       primaryDecision: {
-        category_id: triage.category_id,
-        priority: triage.priority,
+        ...primary,
         urgency: triage.urgency,
-        department: triage.department,
         sentiment: triage.sentiment,
         root_cause: triage.root_cause,
         summary: triage.summary
@@ -805,16 +750,17 @@ export async function processSingleChat(chatId) {
     });
 
     console.log(`Single chat ${chatId} processed successfully!`);
+    return { status: 'completed', chatId };
   } catch (err) {
     console.error(`Error in processSingleChat for ${chatId}:`, err);
-    // Mark as failed in Supabase so queue doesn't hang
-    await supabase.from('chats').update({ status: 'failed', summary: `Triage failed: ${err.message}` }).eq('id', chatId);
+    // Mark as failed so the queue doesn't hang; keep the existing summary (an error message is not a chat summary)
+    await supabase.from('chats').update({ status: 'failed' }).eq('id', chatId);
     throw err;
   }
 }
 
 /**
- * Helper to format multi-issue breakdowns from AI triage into a readable list.
+ * Helper to format multi-issue breakdowns from Sift AI classification into a readable list.
  * @param {object} triage - The raw AI output object.
  * @param {string} baseRec - The existing AI recommendation / case similarity string.
  * @returns {string} - The formatted recommendation.
@@ -886,8 +832,15 @@ export function resolvePrimaryCategory(triageCategoryId, detectedIssues, categor
     });
 
     if (problemIssues.length > 0) {
-      // Pick the problem issue with the highest urgency/priority
-      const sorted = [...problemIssues].sort((a, b) => {
+      // Prioritize concrete technical defects over generic feedback/complaint when both are present
+      const technicalIssues = problemIssues.filter(iss => {
+        const clean = (iss.category_id || '').split(':').pop().trim().toLowerCase();
+        return clean !== 'feedback_complaint';
+      });
+      const candidateList = technicalIssues.length > 0 ? technicalIssues : problemIssues;
+
+      // Pick the issue with the highest urgency/priority
+      const sorted = [...candidateList].sort((a, b) => {
         const weightA = priorityWeight[(a.urgency || a.priority || 'medium').toLowerCase()] || 2;
         const weightB = priorityWeight[(b.urgency || b.priority || 'medium').toLowerCase()] || 2;
         return weightB - weightA;

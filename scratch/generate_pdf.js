@@ -122,7 +122,7 @@ async function generatePDF() {
   <body>
     <div class="header">
       <h1>แผนงานพัฒนา AI Agent ตอบคำถามผ่าน Telegram & เชื่อมต่อ MCP</h1>
-      <div class="subtitle">ระบบคัดกรองและประเมินผล AI Triage (Telegram Bot Agent & Multi-MCP Integration)</div>
+      <div class="subtitle">ระบบคัดกรองและประเมินผล Sift AI (Telegram Bot Agent & Multi-MCP Integration)</div>
       <div class="badge">ปรับแก้ไข 1.3: ตอบคำถาม/รับคำสั่งผ่าน Telegram Bot แทนหน้า BO</div>
     </div>
 
@@ -162,7 +162,7 @@ async function generatePDF() {
     <div class="card">
       <h3>2.1 พัฒนา MCP Client Architecture</h3>
       <ul>
-        <li>สร้างโมดูล <b>MCP Client</b> ภายในระบบ AI Triage เพื่อทำหน้าที่ค้นหาและเชื่อมต่อไปยัง MCP Servers ภายนอก</li>
+        <li>สร้างโมดูล <b>MCP Client</b> ภายในระบบ Sift AI เพื่อทำหน้าที่ค้นหาและเชื่อมต่อไปยัง MCP Servers ภายนอก</li>
       </ul>
 
       <h3>2.2 เชื่อมต่อกับ MCP Server ภายนอก (External MCP Integration)</h3>

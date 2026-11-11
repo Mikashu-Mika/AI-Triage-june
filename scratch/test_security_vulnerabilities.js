@@ -86,7 +86,7 @@ async function runSecurityTestSuite() {
       method: 'PUT',
       headers: { 
         'Content-Type': 'application/json',
-        'X-Admin-Key': 'sift-admin-secret-2026'
+        'X-Admin-Key': process.env.ADMIN_API_KEY
       }
     }, { custom_quota: 50000, package_tier: 'pro' });
 
@@ -120,7 +120,7 @@ async function runSecurityTestSuite() {
   }
 
   // -------------------------------------------------------------
-  // TEST 4: VULN-04 - Unauthenticated AI Triage & Query DoS
+  // TEST 4: VULN-04 - Unauthenticated Sift AI & Query DoS
   // -------------------------------------------------------------
   console.log('📌 [TEST 4] ทดสอบการยิง DoS สั่งประมวลผล AI และแอบดูข้อมูลหลังบ้าน (Unauthenticated AI DoS)');
   try {
@@ -145,7 +145,7 @@ async function runSecurityTestSuite() {
     recordTest('VULN-04', 'ป้องกันการสั่งรัน AI และดักข้อมูลการเงินโดยไม่มีสิทธิ์ (AI DoS & Data Leak)', 'PASSED',
       `ทั้ง 3 Endpoints (/triage/save, /chats/:id/triage, /agent/chat) ถูกปิดกั้นด้วย HTTP 401 Unauthorized เรียบร้อย`);
   } catch (err) {
-    recordTest('VULN-04', 'Unauthenticated AI Triage & Query DoS', 'ERROR', err.message);
+    recordTest('VULN-04', 'Unauthenticated Sift AI & Query DoS', 'ERROR', err.message);
   }
 
   // -------------------------------------------------------------

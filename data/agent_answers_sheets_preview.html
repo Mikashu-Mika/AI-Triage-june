@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <title>ผลการทดสอบคำถาม 30 ข้อ — SIFT AI Executive Bot</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 24px; background: #f8fafc; color: #1e293b; }
+    .header-box { display: flex; justify-content: space-between; align-items: center; background: white; padding: 20px 24px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 20px; border: 1px solid #e2e8f0; }
+    .btn-green { background: #0f9d58; color: white; border: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; font-size: 15px; transition: background 0.15s; box-shadow: 0 2px 4px rgba(15,157,88,0.2); }
+    .btn-green:hover { background: #0b8043; }
+    .table-container { background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border: 1px solid #e2e8f0; }
+    .instruction-banner { background: #e6f4ea; border: 1px solid #34a853; border-radius: 8px; padding: 12px 18px; margin-bottom: 16px; color: #137333; font-size: 14px; font-weight: 500; }
+    .toast { position: fixed; bottom: 24px; right: 24px; background: #1e293b; color: white; padding: 14px 24px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.25); display: none; font-size: 14px; z-index: 1000; border-left: 4px solid #0f9d58; }
+  </style>
+</head>
+<body>
+  <div class="header-box">
+    <div>
+      <h2 style="margin: 0 0 6px 0; color: #0f9d58;">📊 ผลการทดสอบ 30 คำถามจริงของผู้บริหาร (SIFT AI Executive Bot)</h2>
+      <p style="margin: 0; color: #64748b; font-size: 13px;">วันที่บันทึก: 11 พฤศจิกายน 2569 | จำนวนเคส: 30 ข้อ (ผ่านเกณฑ์ 100%)</p>
+    </div>
+    <div style="display: flex; gap: 12px;">
+      <button class="btn-green" onclick="copyAndOpenGoogleSheets()">
+        📋 คัดลอกตารางทั้งหมด & เปิดชีตของมิกะทันที
+      </button>
+    </div>
+  </div>
+
+  <div class="instruction-banner">
+    👉 <strong>วิธีวางข้อมูลลง Google Sheets:</strong> กดปุ่มสีเขียวด้านบนเพื่อคัดลอกตาราง ➔ ระบบจะเปิด Google Sheet ของมิกะขึ้นมา ➔ คลิกที่ช่อง <strong>A1</strong> แล้วกด <strong>Ctrl + V</strong> ได้เลยค่ะ!
+  </div>
+
+  <div class="table-container">
+    
+    <table id="dataTable" style="width: 100%; border-collapse: collapse; font-family: Arial, sans-serif; font-size: 12px; border: 1px solid #dadce0;">
+      <thead>
+        <tr style="background-color: #0f9d58; color: #ffffff; text-align: left;">
+          <th style="padding: 12px 10px; text-align: center; width: 40px; border-right: 1px solid rgba(255,255,255,0.2);">#</th>
+          <th style="padding: 12px 10px; width: 220px; border-right: 1px solid rgba(255,255,255,0.2);">คำถามที่ผู้บริหารถาม (Query)</th>
+          <th style="padding: 12px 10px; width: 140px; border-right: 1px solid rgba(255,255,255,0.2);">Tool ที่บอทเลือกใช้</th>
+          <th style="padding: 12px 10px; width: 160px; border-right: 1px solid rgba(255,255,255,0.2);">สิ่งที่ควรได้ (Expected)</th>
+          <th style="padding: 12px 10px; text-align: center; width: 80px; border-right: 1px solid rgba(255,255,255,0.2);">สถานะ</th>
+          <th style="padding: 12px 10px; text-align: center; width: 80px; border-right: 1px solid rgba(255,255,255,0.2);">เวลา</th>
+          <th style="padding: 12px 10px; border-right: 1px solid rgba(255,255,255,0.2);">คำตอบฉบับเต็มของบอท (Bot Reply)</th>
+          <th style="padding: 12px 10px; width: 140px;">ผลการตรวจสอบ</th>
+        </tr>
+      </thead>
+      <tbody>
+        
+      <tr style="background-color: #ffffff; border-bottom: 1px solid #dadce0;">
+        <td style="padding: 10px; text-align: center; vertical-align: top; font-weight: bold; color: #5f6368;">1</td>
+        <td style="padding: 10px; vertical-align: top; font-weight: 500; color: #1a73e8;">วันนี้มีปัญหาอะไรบ้าง</td>
+        <td style="padding: 10px; vertical-align: top; font-family: monospace; font-size: 11px; color: #202124;"><code>get_issue_stats</code></td>
+        <td style="padding: 10px; vertical-align: top; font-size: 11px; color: #5f6368;"><strong>tool:</strong> get_issue_stats<br><strong>period:</strong> today</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-weight: bold; color: #137333;">OK</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-size: 11px; color: #5f6368;">49.6s</td>
+        <td style="padding: 10px; vertical-align: top; font-size: 12px; line-height: 1.5; color: #202124; white-space: pre-wrap;">📊 สรุปปัญหาวันนี้ (11 พ.ย. 2569)<br><br>- ไม่มีปัญหาใหม่ในวันนี้ค่ะ<br><br>📌 ยังไม่มีปัญหาใหม่เข้ามาในวันนี้ค่ะ</td>
+        <td style="padding: 10px; vertical-align: top; color: #5f6368; font-size: 11px;"></td>
+      </tr>
+    
+      <tr style="background-color: #f8f9fa; border-bottom: 1px solid #dadce0;">
+        <td style="padding: 10px; text-align: center; vertical-align: top; font-weight: bold; color: #5f6368;">2</td>
+        <td style="padding: 10px; vertical-align: top; font-weight: 500; color: #1a73e8;">สรุปปัญหาของเมื่อวานให้หน่อย</td>
+        <td style="padding: 10px; vertical-align: top; font-family: monospace; font-size: 11px; color: #202124;"><code>get_issue_stats</code></td>
+        <td style="padding: 10px; vertical-align: top; font-size: 11px; color: #5f6368;"><strong>tool:</strong> get_issue_stats<br><strong>period:</strong> yesterday</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-weight: bold; color: #137333;">OK</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-size: 11px; color: #5f6368;">134.3s</td>
+        <td style="padding: 10px; vertical-align: top; font-size: 12px; line-height: 1.5; color: #202124; white-space: pre-wrap;">📊 สรุปปัญหาเมื่อวาน (10 พ.ย. 2569)<br>- รวม 89 ปัญหา จาก 20 แชต<br><br>1. ข้อเสนอแนะและร้องเรียน — 18 ปัญหา (20.2%)<br>2. ปัญหาการแจ้งเตือน — 9 ปัญหา (10.1%)<br>3. ปัญหากราฟิก/การแสดงผลเว็บ — 8 ปัญหา (9%)<br>4. ประสิทธิภาพระบบช้า — 7 ปัญหา (7.9%)<br>5. ข้อผิดพลาดระบบ API — 6 ปัญหา (6.7%)<br><br>- อีก 12 หมวดที่เหลือ รวม 41 ปัญหา<br><br>📌 ข้อเสนอแนะและร้องเรียนเป็นปัญหาที่พบมากที่สุดค่ะ</td>
+        <td style="padding: 10px; vertical-align: top; color: #5f6368; font-size: 11px;"></td>
+      </tr>
+    
+      <tr style="background-color: #ffffff; border-bottom: 1px solid #dadce0;">
+        <td style="padding: 10px; text-align: center; vertical-align: top; font-weight: bold; color: #5f6368;">3</td>
+        <td style="padding: 10px; vertical-align: top; font-weight: 500; color: #1a73e8;">สรุปปัญหาในเดือนนี้หน่อยค่ะ</td>
+        <td style="padding: 10px; vertical-align: top; font-family: monospace; font-size: 11px; color: #202124;"><code>get_issue_stats</code></td>
+        <td style="padding: 10px; vertical-align: top; font-size: 11px; color: #5f6368;"><strong>tool:</strong> get_issue_stats<br><strong>period:</strong> this_month</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-weight: bold; color: #137333;">OK</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-size: 11px; color: #5f6368;">143.2s</td>
+        <td style="padding: 10px; vertical-align: top; font-size: 12px; line-height: 1.5; color: #202124; white-space: pre-wrap;">📊 สรุปปัญหาเดือนนี้ (พฤศจิกายน 2569)<br><br>- รวม 89 ปัญหา จาก 20 แชต<br><br>1. ข้อเสนอแนะและร้องเรียน — 18 ปัญหา (20.2%)<br>2. ปัญหาการแจ้งเตือน — 9 ปัญหา (10.1%)<br>3. ปัญหากราฟิก/การแสดงผลเว็บ — 8 ปัญหา (9%)<br>4. ประสิทธิภาพระบบช้า — 7 ปัญหา (7.9%)<br>5. ข้อผิดพลาดระบบ API — 6 ปัญหา (6.7%)<br><br>- อีก 12 หมวดที่เหลือ รวม 41 ปัญหา<br><br>💡 เดือนนี้ยังไม่สมบูรณ์ โปรดตรวจสอบข้อมูลที่อัปเดตค่ะ</td>
+        <td style="padding: 10px; vertical-align: top; color: #5f6368; font-size: 11px;"></td>
+      </tr>
+    
+      <tr style="background-color: #f8f9fa; border-bottom: 1px solid #dadce0;">
+        <td style="padding: 10px; text-align: center; vertical-align: top; font-weight: bold; color: #5f6368;">4</td>
+        <td style="padding: 10px; vertical-align: top; font-weight: 500; color: #1a73e8;">สรุปปัญหาในสัปดาห์ที่แล้ว</td>
+        <td style="padding: 10px; vertical-align: top; font-family: monospace; font-size: 11px; color: #202124;"><code>get_issue_stats</code></td>
+        <td style="padding: 10px; vertical-align: top; font-size: 11px; color: #5f6368;"><strong>tool:</strong> get_issue_stats<br><strong>period:</strong> last_week</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-weight: bold; color: #137333;">OK</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-size: 11px; color: #5f6368;">56.9s</td>
+        <td style="padding: 10px; vertical-align: top; font-size: 12px; line-height: 1.5; color: #202124; white-space: pre-wrap;">📊 สรุปปัญหาสัปดาห์ที่แล้ว (2 พ.ย. 2569 - 8 พ.ย. 2569)<br><br>ไม่พบปัญหาใด ๆ ในสัปดาห์ที่แล้วค่ะ</td>
+        <td style="padding: 10px; vertical-align: top; color: #5f6368; font-size: 11px;"></td>
+      </tr>
+    
+      <tr style="background-color: #ffffff; border-bottom: 1px solid #dadce0;">
+        <td style="padding: 10px; text-align: center; vertical-align: top; font-weight: bold; color: #5f6368;">5</td>
+        <td style="padding: 10px; vertical-align: top; font-weight: 500; color: #1a73e8;">สรุปปัญหาย้อนหลัง 7 วัน ปัญหาไหนมีมากที่สุด</td>
+        <td style="padding: 10px; vertical-align: top; font-family: monospace; font-size: 11px; color: #202124;"><code>get_issue_stats</code></td>
+        <td style="padding: 10px; vertical-align: top; font-size: 11px; color: #5f6368;"><strong>tool:</strong> get_issue_stats<br><strong>period:</strong> last_n_days</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-weight: bold; color: #137333;">OK</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-size: 11px; color: #5f6368;">150.6s</td>
+        <td style="padding: 10px; vertical-align: top; font-size: 12px; line-height: 1.5; color: #202124; white-space: pre-wrap;">📊 สรุปปัญหาย้อนหลัง 7 วัน (5 พ.ย. 2569 - วันนี้)<br><br>- รวม 89 ปัญหา จาก 20 แชต<br><br>1. ข้อเสนอแนะและร้องเรียน — 18 ปัญหา (20.2%)<br>2. ปัญหาการแจ้งเตือน — 9 ปัญหา (10.1%)<br>3. ปัญหากราฟิก/การแสดงผลเว็บ — 8 ปัญหา (9%)<br>4. ประสิทธิภาพระบบช้า — 7 ปัญหา (7.9%)<br>5. ข้อผิดพลาดระบบ API — 6 ปัญหา (6.7%)<br><br>- อีก 12 หมวดที่เหลือ รวม 41 ปัญหา<br><br>📌 ข้อมูลย้อนหลัง 7 วันยังไม่สมบูรณ์ ค่ะ</td>
+        <td style="padding: 10px; vertical-align: top; color: #5f6368; font-size: 11px;"></td>
+      </tr>
+    
+      <tr style="background-color: #f8f9fa; border-bottom: 1px solid #dadce0;">
+        <td style="padding: 10px; text-align: center; vertical-align: top; font-weight: bold; color: #5f6368;">6</td>
+        <td style="padding: 10px; vertical-align: top; font-weight: 500; color: #1a73e8;">สรุปปัญหาแชตย้อนหลัง 30 วัน</td>
+        <td style="padding: 10px; vertical-align: top; font-family: monospace; font-size: 11px; color: #202124;"><code>get_issue_stats</code></td>
+        <td style="padding: 10px; vertical-align: top; font-size: 11px; color: #5f6368;"><strong>tool:</strong> get_issue_stats<br><strong>period:</strong> last_n_days</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-weight: bold; color: #137333;">OK</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-size: 11px; color: #5f6368;">151.8s</td>
+        <td style="padding: 10px; vertical-align: top; font-size: 12px; line-height: 1.5; color: #202124; white-space: pre-wrap;">📊 สรุปปัญหาย้อนหลัง 30 วัน (13 ต.ค. 2569 - วันนี้)<br><br>- รวม 443 ปัญหา จาก 89 แชต<br><br>1. ข้อเสนอแนะและร้องเรียน — 73 ปัญหา (16.5%)<br>2. ปัญหาการแจ้งเตือน — 44 ปัญหา (9.9%)<br>3. ปัญหากราฟิก/การแสดงผลเว็บ — 44 ปัญหา (9.9%)<br>4. ระบบการทำงานล่าช้า — 43 ปัญหา (9.7%)<br>5. หน้าเว็บค้าง/โหลดช้า — 41 ปัญหา (9.3%)<br><br>- อีก 12 หมวดที่เหลือ รวม 198 ปัญหา<br><br>📌 ข้อมูลย้อนหลัง 30 วันยังไม่สมบูรณ์ ค่ะ</td>
+        <td style="padding: 10px; vertical-align: top; color: #5f6368; font-size: 11px;"></td>
+      </tr>
+    
+      <tr style="background-color: #ffffff; border-bottom: 1px solid #dadce0;">
+        <td style="padding: 10px; text-align: center; vertical-align: top; font-weight: bold; color: #5f6368;">7</td>
+        <td style="padding: 10px; vertical-align: top; font-weight: 500; color: #1a73e8;">เมื่อวานตอน 12.00-18.00 มีกี่ปัญหา</td>
+        <td style="padding: 10px; vertical-align: top; font-family: monospace; font-size: 11px; color: #202124;"><code>get_issue_stats</code></td>
+        <td style="padding: 10px; vertical-align: top; font-size: 11px; color: #5f6368;"><strong>tool:</strong> get_issue_stats<br><strong>period:</strong> yesterday</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-weight: bold; color: #137333;">OK</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-size: 11px; color: #5f6368;">141.5s</td>
+        <td style="padding: 10px; vertical-align: top; font-size: 12px; line-height: 1.5; color: #202124; white-space: pre-wrap;">📊 สรุปปัญหาเมื่อวาน (10 พ.ย. 2569) เวลา 12:00-18:00 น.<br><br>- รวม 51 ปัญหา จาก 10 แชต<br><br>1. ข้อเสนอแนะและร้องเรียน — 10 ปัญหา (19.6%)<br>2. ปัญหาการแจ้งเตือน — 5 ปัญหา (9.8%)<br>3. ระบบการทำงานล่าช้า — 5 ปัญหา (9.8%)<br>4. ปัญหากราฟิก/การแสดงผลเว็บ — 5 ปัญหา (9.8%)<br>5. ประสิทธิภาพระบบช้า — 5 ปัญหา (9.8%)<br><br>- อีก 10 หมวดที่เหลือ รวม 21 ปัญหา<br><br>📌 ข้อมูลจากช่วงเวลา 12:00-18:00 น. เมื่อวานค่ะ</td>
+        <td style="padding: 10px; vertical-align: top; color: #5f6368; font-size: 11px;"></td>
+      </tr>
+    
+      <tr style="background-color: #f8f9fa; border-bottom: 1px solid #dadce0;">
+        <td style="padding: 10px; text-align: center; vertical-align: top; font-weight: bold; color: #5f6368;">8</td>
+        <td style="padding: 10px; vertical-align: top; font-weight: 500; color: #1a73e8;">ในเดือนที่แล้ว ปัญหาอะไรเกิดบ่อยที่สุด</td>
+        <td style="padding: 10px; vertical-align: top; font-family: monospace; font-size: 11px; color: #202124;"><code>get_issue_stats</code></td>
+        <td style="padding: 10px; vertical-align: top; font-size: 11px; color: #5f6368;"><strong>tool:</strong> get_issue_stats<br><strong>period:</strong> last_month</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-weight: bold; color: #137333;">OK</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-size: 11px; color: #5f6368;">144.1s</td>
+        <td style="padding: 10px; vertical-align: top; font-size: 12px; line-height: 1.5; color: #202124; white-space: pre-wrap;">📊 สรุปปัญหาเดือนที่แล้ว (ตุลาคม 2569)<br><br>- รวม 450 ปัญหา จาก 101 แชต<br><br>1. ข้อเสนอแนะและร้องเรียน — 58 ปัญหา (12.9%)<br>2. ระบบการทำงานล่าช้า — 45 ปัญหา (10%)<br>3. ปัญหาการแจ้งเตือน — 45 ปัญหา (10%)<br>4. หน้าเว็บค้าง/โหลดช้า — 43 ปัญหา (9.6%)<br>5. ปัญหากราฟิก/การแสดงผลเว็บ — 43 ปัญหา (9.6%)<br><br>- อีก 13 หมวดที่เหลือ รวม 216 ปัญหา<br><br>📌 เดือนที่แล้วพบปัญหาเกี่ยวกับข้อเสนอแนะและร้องเรียนมากที่สุดค่ะ</td>
+        <td style="padding: 10px; vertical-align: top; color: #5f6368; font-size: 11px;"></td>
+      </tr>
+    
+      <tr style="background-color: #ffffff; border-bottom: 1px solid #dadce0;">
+        <td style="padding: 10px; text-align: center; vertical-align: top; font-weight: bold; color: #5f6368;">9</td>
+        <td style="padding: 10px; vertical-align: top; font-weight: 500; color: #1a73e8;">ปัญหาด่วนทั้งหมดมีเท่าไหร่คะ อะไรบ้าง</td>
+        <td style="padding: 10px; vertical-align: top; font-family: monospace; font-size: 11px; color: #202124;"><code>list_chats</code></td>
+        <td style="padding: 10px; vertical-align: top; font-size: 11px; color: #5f6368;"><strong>tool:</strong> get_issue_stats, list_chats</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-weight: bold; color: #137333;">DETERMINISTIC</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-size: 11px; color: #5f6368;">468.8s</td>
+        <td style="padding: 10px; vertical-align: top; font-size: 12px; line-height: 1.5; color: #202124; white-space: pre-wrap;">📋 รายการแชต ย้อนหลัง 7 วัน (5 พ.ย. 2569 - วันนี้) — 16 แชต<br><br>1. `today055` (10 พ.ย. 2569 18:13 น., ความด่วนฉุกเฉิน)<br>   ฉันพยายามเข้าสู่ระบบบัญชีสมาชิกของร้านขายเสื้อผ้าแต่ไม่สามารถเข้าได้ค่ะ ระบบแจ้งว่ารหัสผ่านไม่ถูกต้อง ทั้งที่ใช้รหัสเดิมซึ่งเคยเข้าสู่ระบบได้ตามปกติ เมื่อกดลืมร…<br>   หมวด: ปัญหาระบบเข้าใช้งาน/ล็อกอิน, ความปลอดภัยของบัญชี<br>2. `today047` (10 พ.ย. 2569 16:15 น., ความด่วนฉุกเฉิน)<br>   ฉันได้รับอีเมลแจ้งว่ามีการเข้าสู่ระบบบัญชีสมาชิกจากอุปกรณ์ที่ไม่รู้จัก ทั้งที่ฉันไม่ได้ใช้อุปกรณ์ดังกล่าวค่ะ ฉันเริ่มกังวลว่าบัญชีอาจถูกบุคคลอื่นเข้าถึงและมีการ…<br>   หมวด: ความปลอดภัยของบัญชี, ปัญหาระบบเข้าใช้งาน/ล็อกอิน, ประสิทธิภาพระบบช้า, ข้อเสนอแนะและร้องเรียน<br>3. `today060` (10 พ.ย. 2569 18:16 น., ความด่วนสูง)<br>   ฉันใช้บริการเว็บไซต์ร้านขายอุปกรณ์ไอทีแล้วพบปัญหาหลายอย่างต่อเนื่องค่ะ<br>   หมวด: ปัญหาบราวเซอร์/อุปกรณ์, หน้าเว็บค้าง/โหลดช้า, ข้อผิดพลาดระบบ API, ประสิทธิภาพระบบช้า, ขอเพิ่มฟีเจอร์, ข้อเสนอแนะและร้องเรียน<br>4. `today059` (10 พ.ย. 2569 18:15 น., ความด่วนสูง)<br>   ฉันซื้อสินค้าไปแล้วและต้องการขอถอนเงินคืนจากยอดที่ชำระเกิน แต่ระบบแจ้งว่าทำรายการไม่สำเร็จทุกครั้งค่ะ ฉันตรวจสอบประวัติรายการเงินพบว่าคำขอคืนเงินยังค้างอยู่หลาย…<br>   หมวด: การเงินและการชำระเงิน, ข้อเสนอแนะและร้องเรียน<br>5. `today057` (10 พ.ย. 2569 18:14 น., ความด่วนสูง)<br>   ฉันต้องการสมัครสมาชิกเว็บไซต์ร้านขายอุปกรณ์กีฬาเพื่อใช้ส่วนลดสำหรับลูกค้าใหม่ แต่เมื่อกรอกชื่อ อีเมล และรหัสผ่านครบแล้ว ระบบกลับแจ้งว่าข้อมูลไม่ถูกต้อง บางครั้ง…<br>   หมวด: การสมัครสมาชิก, ปัญหาการแจ้งเตือน, โปรโมชั่นและโบนัส, ข้อเสนอแนะและร้องเรียน<br>6. `today056` (10 พ.ย. 2569 18:14 น., ความด่วนสูง)<br>   ฉันเป็นสมาชิก VIP ของร้านขายเครื่องสำอางและต้องการใช้ส่วนลดพิเศษสำหรับสมาชิก แต่เมื่อเข้าสู่ระบบกลับพบว่าสถานะสมาชิกเปลี่ยนเป็นสมาชิกทั่วไป<br>   หมวด: ความปลอดภัยของบัญชี, สิทธิประโยชน์ระดับ VIP, ปัญหากราฟิก/การแสดงผลเว็บ, โปรโมชั่นและโบนัส, ข้อเสนอแนะและร้องเรียน<br>7. `today054` (10 พ.ย. 2569 18:13 น., ความด่วนสูง)<br>   ฉันสั่งซื้อเครื่องฟอกอากาศและเลือกชำระเงินผ่าน PromptPay แต่ระบบแจ้งว่าไม่สามารถเชื่อมต่อกับผู้ให้บริการชำระเงินได้ค่ะ ฉันลองทำรายการใหม่อีกครั้งแต่ก็ขึ้น Timeo…<br>   หมวด: ระบบการชำระเงิน/ธนาคาร, การเงินและการชำระเงิน, ข้อเสนอแนะและร้องเรียน<br>8. `today053` (10 พ.ย. 2569 18:12 น., ความด่วนสูง)<br>   ฉันเปิดหน้ารายละเอียดสินค้าของร้านขายกล้องแล้วพบข้อผิดพลาดหลายอย่างค่ะ ฉันไม่เข้าใจว่าทำไมข้อมูลสินค้าพื้นฐานถึงไม่สามารถเรียกดูได้ตามปกติ<br>   หมวด: ปัญหากราฟิก/การแสดงผลเว็บ, ข้อผิดพลาดระบบ API, ข้อเสนอแนะและร้องเรียน<br>9. `today052` (10 พ.ย. 2569 18:12 น., ความด่วนสูง)<br>   ช่วงนี้เว็บไซต์ร้านขายเครื่องใช้ไฟฟ้าทำงานช้าผิดปกติมากค่ะ บางครั้งการค้นหาสินค้าใช้เวลานานจนต้องรอผลลัพธ์หลายรอบ<br>   หมวด: ประสิทธิภาพระบบช้า, ระบบการทำงานล่าช้า, ข้อเสนอแนะและร้องเรียน<br>10. `today051` (10 พ.ย. 2569 18:12 น., ความด่วนสูง)<br>   ฉันพยายามเข้าเว็บไซต์ร้านขายอุปกรณ์คอมพิวเตอร์ตั้งแต่ช่วงเช้า แต่ไม่สามารถเปิดหน้าร้านได้เลยค่ะ ระบบแจ้ง 403 Forbidden และบางครั้งก็ขึ้นข้อความว่า Access Denied…<br>   หมวด: เข้าหน้าเว็บไม่ได้/ลิงก์เสีย, ปัญหาบราวเซอร์/อุปกรณ์, ข้อเสนอแนะและร้องเรียน<br><br>📎 แสดง 10 จาก 16 แชต รายการทั้งหมดอยู่ในไฟล์ Excel ด้านล่างค่ะ</td>
+        <td style="padding: 10px; vertical-align: top; color: #5f6368; font-size: 11px;"></td>
+      </tr>
+    
+      <tr style="background-color: #f8f9fa; border-bottom: 1px solid #dadce0;">
+        <td style="padding: 10px; text-align: center; vertical-align: top; font-weight: bold; color: #5f6368;">10</td>
+        <td style="padding: 10px; vertical-align: top; font-weight: 500; color: #1a73e8;">วันนี้มีปัญหาด้านการฝาก-ถอนกี่เคส</td>
+        <td style="padding: 10px; vertical-align: top; font-family: monospace; font-size: 11px; color: #202124;"><code>get_issue_stats</code></td>
+        <td style="padding: 10px; vertical-align: top; font-size: 11px; color: #5f6368;"><strong>tool:</strong> get_issue_stats<br><strong>period:</strong> today<br><strong>categories:</strong> deposit_withdrawal</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-weight: bold; color: #137333;">OK</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-size: 11px; color: #5f6368;">92.7s</td>
+        <td style="padding: 10px; vertical-align: top; font-size: 12px; line-height: 1.5; color: #202124; white-space: pre-wrap;">📊 สรุปปัญหาวันนี้ (11 พ.ย. 2569)<br><br>- รวม 0 ปัญหา จาก 0 แชต<br><br>ไม่พบหมวด "การเงินและการชำระเงิน" ในระบบค่ะ</td>
+        <td style="padding: 10px; vertical-align: top; color: #5f6368; font-size: 11px;"></td>
+      </tr>
+    
+      <tr style="background-color: #ffffff; border-bottom: 1px solid #dadce0;">
+        <td style="padding: 10px; text-align: center; vertical-align: top; font-weight: bold; color: #5f6368;">11</td>
+        <td style="padding: 10px; vertical-align: top; font-weight: 500; color: #1a73e8;">หมวดหมู่ปัญหาฝาก-ถอนคิดเป็นกี่เปอร์เซ็นต์ของปัญหาทั้งหมดในเดือนสิงหาคม</td>
+        <td style="padding: 10px; vertical-align: top; font-family: monospace; font-size: 11px; color: #202124;"><code>get_issue_stats</code></td>
+        <td style="padding: 10px; vertical-align: top; font-size: 11px; color: #5f6368;"><strong>tool:</strong> get_issue_stats<br><strong>period:</strong> month<br><strong>categories:</strong> deposit_withdrawal</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-weight: bold; color: #137333;">DETERMINISTIC</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-size: 11px; color: #5f6368;">74.7s</td>
+        <td style="padding: 10px; vertical-align: top; font-size: 12px; line-height: 1.5; color: #202124; white-space: pre-wrap;">📊 สรุปปัญหาหมวดการเงินและการชำระเงิน เดือนสิงหาคม 2569<br>- รวม 58 ปัญหา จาก 58 แชต<br>- คิดเป็น 15.8% ของปัญหาทั้งหมด 367 ปัญหา</td>
+        <td style="padding: 10px; vertical-align: top; color: #5f6368; font-size: 11px;"></td>
+      </tr>
+    
+      <tr style="background-color: #f8f9fa; border-bottom: 1px solid #dadce0;">
+        <td style="padding: 10px; text-align: center; vertical-align: top; font-weight: bold; color: #5f6368;">12</td>
+        <td style="padding: 10px; vertical-align: top; font-weight: 500; color: #1a73e8;">เดือนที่แล้ว มีปัญหาเกี่ยวกับการสมัครไม่ได้ไหม</td>
+        <td style="padding: 10px; vertical-align: top; font-family: monospace; font-size: 11px; color: #202124;"><code>get_issue_stats</code></td>
+        <td style="padding: 10px; vertical-align: top; font-size: 11px; color: #5f6368;"><strong>tool:</strong> get_issue_stats<br><strong>period:</strong> last_month<br><strong>categories:</strong> registration</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-weight: bold; color: #137333;">OK</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-size: 11px; color: #5f6368;">62.8s</td>
+        <td style="padding: 10px; vertical-align: top; font-size: 12px; line-height: 1.5; color: #202124; white-space: pre-wrap;">📊 สรุปปัญหาเดือนที่แล้ว (ตุลาคม 2569)<br><br>- รวม 14 ปัญหา จาก 9 แชต เกี่ยวกับการสมัครสมาชิก<br><br>1. การสมัครสมาชิก — 14 ปัญหา (100%)<br><br>📌 พบปัญหาเกี่ยวกับการสมัครสมาชิก 14 ปัญหาในเดือนที่แล้วค่ะ</td>
+        <td style="padding: 10px; vertical-align: top; color: #5f6368; font-size: 11px;"></td>
+      </tr>
+    
+      <tr style="background-color: #ffffff; border-bottom: 1px solid #dadce0;">
+        <td style="padding: 10px; text-align: center; vertical-align: top; font-weight: bold; color: #5f6368;">13</td>
+        <td style="padding: 10px; vertical-align: top; font-weight: 500; color: #1a73e8;">ใน 7 วันที่ผ่านมา มีปัญหาเกี่ยวกับ หน้าเว็บโหลดค้างไหม</td>
+        <td style="padding: 10px; vertical-align: top; font-family: monospace; font-size: 11px; color: #202124;"><code>get_issue_stats</code></td>
+        <td style="padding: 10px; vertical-align: top; font-size: 11px; color: #5f6368;"><strong>tool:</strong> get_issue_stats<br><strong>period:</strong> last_n_days<br><strong>categories:</strong> page_load_freeze</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-weight: bold; color: #137333;">OK</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-size: 11px; color: #5f6368;">68.6s</td>
+        <td style="padding: 10px; vertical-align: top; font-size: 12px; line-height: 1.5; color: #202124; white-space: pre-wrap;">📊 สรุปปัญหาหน้าเว็บค้าง/โหลดช้า ย้อนหลัง 7 วัน (5 พ.ย. 2569 - วันนี้)<br><br>- รวม 5 ปัญหา จาก 5 แชต<br><br>1. หน้าเว็บค้าง/โหลดช้า — 5 ปัญหา (100%)<br><br>💡 ควรตรวจสอบสาเหตุของปัญหาหน้าเว็บค้าง/โหลดช้าค่ะ</td>
+        <td style="padding: 10px; vertical-align: top; color: #5f6368; font-size: 11px;"></td>
+      </tr>
+    
+      <tr style="background-color: #f8f9fa; border-bottom: 1px solid #dadce0;">
+        <td style="padding: 10px; text-align: center; vertical-align: top; font-weight: bold; color: #5f6368;">14</td>
+        <td style="padding: 10px; vertical-align: top; font-weight: 500; color: #1a73e8;">มีปัญหาเกี่ยวกับการสมัครสมาชิกไหมในเดือนนี้ คิดเป็นกี่ % ในเดือนนี้</td>
+        <td style="padding: 10px; vertical-align: top; font-family: monospace; font-size: 11px; color: #202124;"><code>get_issue_stats</code></td>
+        <td style="padding: 10px; vertical-align: top; font-size: 11px; color: #5f6368;"><strong>tool:</strong> get_issue_stats<br><strong>period:</strong> this_month<br><strong>categories:</strong> registration</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-weight: bold; color: #137333;">DETERMINISTIC</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-size: 11px; color: #5f6368;">68.4s</td>
+        <td style="padding: 10px; vertical-align: top; font-size: 12px; line-height: 1.5; color: #202124; white-space: pre-wrap;">📊 สรุปปัญหาหมวดการสมัครสมาชิก เดือนนี้ (พฤศจิกายน 2569)<br>- รวม 2 ปัญหา จาก 2 แชต<br>- คิดเป็น 2.2% ของปัญหาทั้งหมด 89 ปัญหา<br><br>📌 ช่วงเวลานี้ยังไม่จบ ตัวเลขนับถึงปัจจุบันค่ะ</td>
+        <td style="padding: 10px; vertical-align: top; color: #5f6368; font-size: 11px;"></td>
+      </tr>
+    
+      <tr style="background-color: #ffffff; border-bottom: 1px solid #dadce0;">
+        <td style="padding: 10px; text-align: center; vertical-align: top; font-weight: bold; color: #5f6368;">15</td>
+        <td style="padding: 10px; vertical-align: top; font-weight: 500; color: #1a73e8;">ปัญหาฝากถอนส่วนมากที่ลูกค้าเเจ้งมาช่วงเวลาใด ในเดือนที่แล้ว</td>
+        <td style="padding: 10px; vertical-align: top; font-family: monospace; font-size: 11px; color: #202124;"><code>get_issue_stats</code></td>
+        <td style="padding: 10px; vertical-align: top; font-size: 11px; color: #5f6368;"><strong>tool:</strong> get_issue_stats<br><strong>period:</strong> last_month<br><strong>categories:</strong> deposit_withdrawal<br><strong>group_by:</strong> hour</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-weight: bold; color: #137333;">OK</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-size: 11px; color: #5f6368;">126.3s</td>
+        <td style="padding: 10px; vertical-align: top; font-size: 12px; line-height: 1.5; color: #202124; white-space: pre-wrap;">📊 สรุปปัญหาเดือนที่แล้ว (ตุลาคม 2569)<br><br>- รวม 21 ปัญหา จาก 17 แชต<br><br>1. 11:00-11:59 น. — 6 ปัญหา (28.6%)<br>2. 14:00-14:59 น. — 5 ปัญหา (23.8%)<br>3. 12:00-12:59 น. — 4 ปัญหา (19%)<br>4. 10:00-10:59 น. — 3 ปัญหา (14.3%)<br>5. 17:00-17:59 น. — 1 ปัญหา (4.8%)<br>- อีก 2 หมวดที่เหลือ รวม 2 ปัญหา<br><br>📌 ปัญหาเกี่ยวกับการฝากถอนส่วนใหญ่เกิดขึ้นในช่วงเวลา 11:00-11:59 น. และ 14:00-14:59 น. ค่ะ</td>
+        <td style="padding: 10px; vertical-align: top; color: #5f6368; font-size: 11px;"></td>
+      </tr>
+    
+      <tr style="background-color: #f8f9fa; border-bottom: 1px solid #dadce0;">
+        <td style="padding: 10px; text-align: center; vertical-align: top; font-weight: bold; color: #5f6368;">16</td>
+        <td style="padding: 10px; vertical-align: top; font-weight: 500; color: #1a73e8;">ช่วงเวลาไหนคนทักเยอะสุด</td>
+        <td style="padding: 10px; vertical-align: top; font-family: monospace; font-size: 11px; color: #202124;"><code>get_issue_stats</code></td>
+        <td style="padding: 10px; vertical-align: top; font-size: 11px; color: #5f6368;"><strong>tool:</strong> get_issue_stats<br><strong>group_by:</strong> hour</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-weight: bold; color: #137333;">OK</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-size: 11px; color: #5f6368;">80.7s</td>
+        <td style="padding: 10px; vertical-align: top; font-size: 12px; line-height: 1.5; color: #202124; white-space: pre-wrap;">📊 สรุปปัญหาย้อนหลัง 7 วัน (5 พ.ย. 2569 - วันนี้)<br><br>- รวม 89 ปัญหา จาก 20 แชต<br><br>1. 16:00-16:59 น. — 51 ปัญหา (57.3%)<br>2. 18:00-18:59 น. — 38 ปัญหา (42.7%)<br><br>ช่วงเวลาที่คนทักเยอะสุดคือ 16:00-16:59 น. และ 18:00-18:59 น. ค่ะ</td>
+        <td style="padding: 10px; vertical-align: top; color: #5f6368; font-size: 11px;"></td>
+      </tr>
+    
+      <tr style="background-color: #ffffff; border-bottom: 1px solid #dadce0;">
+        <td style="padding: 10px; text-align: center; vertical-align: top; font-weight: bold; color: #5f6368;">17</td>
+        <td style="padding: 10px; vertical-align: top; font-weight: 500; color: #1a73e8;">วันไหนมีปัญหาเยอะสุดในเดือนนี้</td>
+        <td style="padding: 10px; vertical-align: top; font-family: monospace; font-size: 11px; color: #202124;"><code>get_issue_stats</code></td>
+        <td style="padding: 10px; vertical-align: top; font-size: 11px; color: #5f6368;"><strong>tool:</strong> get_issue_stats<br><strong>period:</strong> this_month<br><strong>group_by:</strong> day</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-weight: bold; color: #137333;">OK</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-size: 11px; color: #5f6368;">77.3s</td>
+        <td style="padding: 10px; vertical-align: top; font-size: 12px; line-height: 1.5; color: #202124; white-space: pre-wrap;">📊 สรุปปัญหาเดือนนี้ (พฤศจิกายน 2569)<br><br>- รวม 89 ปัญหา จาก 20 แชต<br><br>1. 10 พฤศจิกายน — 89 ปัญหา (100%)<br><br>📌 วันที่มีปัญหาเยอะที่สุดในเดือนนี้คือ 10 พฤศจิกายน ค่ะ</td>
+        <td style="padding: 10px; vertical-align: top; color: #5f6368; font-size: 11px;"></td>
+      </tr>
+    
+      <tr style="background-color: #f8f9fa; border-bottom: 1px solid #dadce0;">
+        <td style="padding: 10px; text-align: center; vertical-align: top; font-weight: bold; color: #5f6368;">18</td>
+        <td style="padding: 10px; vertical-align: top; font-weight: 500; color: #1a73e8;">มีแชทร้องเรียนแอดมินไหมใน1สัปดาห์</td>
+        <td style="padding: 10px; vertical-align: top; font-family: monospace; font-size: 11px; color: #202124;"><code>list_chats</code></td>
+        <td style="padding: 10px; vertical-align: top; font-size: 11px; color: #5f6368;"><strong>tool:</strong> get_issue_stats, list_chats, search_chats<br><strong>period:</strong> last_n_days</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-weight: bold; color: #137333;">OK</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-size: 11px; color: #5f6368;">57.8s</td>
+        <td style="padding: 10px; vertical-align: top; font-size: 12px; line-height: 1.5; color: #202124; white-space: pre-wrap;">📊 สรุปปัญหาใน 7 วัน (5 พ.ย. 2569 - วันนี้)<br><br>- ไม่พบแชทร้องเรียนแอดมินในระบบค่ะ<br><br>📌 ไม่มีแชทร้องเรียนแอดมินในช่วง 7 วันที่ผ่านมาค่ะ</td>
+        <td style="padding: 10px; vertical-align: top; color: #5f6368; font-size: 11px;"></td>
+      </tr>
+    
+      <tr style="background-color: #ffffff; border-bottom: 1px solid #dadce0;">
+        <td style="padding: 10px; text-align: center; vertical-align: top; font-weight: bold; color: #5f6368;">19</td>
+        <td style="padding: 10px; vertical-align: top; font-weight: 500; color: #1a73e8;">โดนร้องเรียนในเรื่องอะไรเมื่อวาน</td>
+        <td style="padding: 10px; vertical-align: top; font-family: monospace; font-size: 11px; color: #202124;"><code>get_issue_stats</code></td>
+        <td style="padding: 10px; vertical-align: top; font-size: 11px; color: #5f6368;"><strong>tool:</strong> get_issue_stats, list_chats<br><strong>period:</strong> yesterday<br><strong>categories:</strong> feedback_complaint</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-weight: bold; color: #137333;">OK</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-size: 11px; color: #5f6368;">115.9s</td>
+        <td style="padding: 10px; vertical-align: top; font-size: 12px; line-height: 1.5; color: #202124; white-space: pre-wrap;">📊 สรุปปัญหาเมื่อวาน (10 พ.ย. 2569)<br><br>- รวม 63 ปัญหา จาก 16 แชต<br><br>1. ข้อเสนอแนะและร้องเรียน — 15 ปัญหา (23.8%)<br>- อีก 12 หมวดที่เหลือ รวม 32 ปัญหา<br><br>📌 ข้อเสนอแนะและร้องเรียนเป็นปัญหาที่พบมากที่สุดเมื่อวานค่ะ</td>
+        <td style="padding: 10px; vertical-align: top; color: #5f6368; font-size: 11px;"></td>
+      </tr>
+    
+      <tr style="background-color: #f8f9fa; border-bottom: 1px solid #dadce0;">
+        <td style="padding: 10px; text-align: center; vertical-align: top; font-weight: bold; color: #5f6368;">20</td>
+        <td style="padding: 10px; vertical-align: top; font-weight: 500; color: #1a73e8;">ขอรายละเอียดดูแชตหมวด ข้อเสนอแนะและร้องเรียน ของวันนี้</td>
+        <td style="padding: 10px; vertical-align: top; font-family: monospace; font-size: 11px; color: #202124;"><code>list_chats</code></td>
+        <td style="padding: 10px; vertical-align: top; font-size: 11px; color: #5f6368;"><strong>tool:</strong> list_chats<br><strong>period:</strong> today<br><strong>categories:</strong> feedback_complaint</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-weight: bold; color: #137333;">OK</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-size: 11px; color: #5f6368;">55.1s</td>
+        <td style="padding: 10px; vertical-align: top; font-size: 12px; line-height: 1.5; color: #202124; white-space: pre-wrap;">📊 สรุปปัญหาวันนี้ (11 พ.ย. 2569)<br><br>ไม่พบหมวด "ข้อเสนอแนะและร้องเรียน" ในระบบค่ะ</td>
+        <td style="padding: 10px; vertical-align: top; color: #5f6368; font-size: 11px;"></td>
+      </tr>
+    
+      <tr style="background-color: #ffffff; border-bottom: 1px solid #dadce0;">
+        <td style="padding: 10px; text-align: center; vertical-align: top; font-weight: bold; color: #5f6368;">21</td>
+        <td style="padding: 10px; vertical-align: top; font-weight: 500; color: #1a73e8;">ขอรายละเอียดดูแชตหมวด หน้าเว็บค้าง/โหลดช้า ของเดือนที่แล้ว (กันยายน)</td>
+        <td style="padding: 10px; vertical-align: top; font-family: monospace; font-size: 11px; color: #202124;"><code>list_chats</code></td>
+        <td style="padding: 10px; vertical-align: top; font-size: 11px; color: #5f6368;"><strong>tool:</strong> list_chats<br><strong>categories:</strong> page_load_freeze</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-weight: bold; color: #137333;">DETERMINISTIC</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-size: 11px; color: #5f6368;">131.5s</td>
+        <td style="padding: 10px; vertical-align: top; font-size: 12px; line-height: 1.5; color: #202124; white-space: pre-wrap;">📋 แชตหมวดหน้าเว็บค้าง/โหลดช้า เดือนกันยายน 2569 — 41 แชต<br><br>1. `chat-alpha-017` (25 ก.ย. 2569 11:54 น., ความด่วนกลาง)<br>   หน้าโปรโมชั่นโหลดช้ามาก / แบนเนอร์บางอันไม่แสดง / ข้อความเงื่อนไขโปรโมชั่นถูกตัดออก<br>2. `chat-alpha-016` (25 ก.ย. 2569 10:48 น., ความด่วนกลาง)<br>   หน้าเว็บโหลดไม่ขึ้น / ไม่มีอีเมลยืนยันเข้ามา<br>3. `chat-alpha-015` (23 ก.ย. 2569 15:56 น., ความด่วนกลาง)<br>   กดดูรายละเอียดแล้วระบบโหลดอยู่นานมาก / บางครั้งหน้ารายละเอียดเปิดไม่ได้เลย<br>4. `chat-alpha-014` (23 ก.ย. 2569 15:52 น., ความด่วนกลาง)<br>   กดสมัครใหม่ปุ่มก็ไม่ตอบสนอง / หน้าเว็บค้าง<br>5. `chat-alpha-013` (23 ก.ย. 2569 15:46 น., ความด่วนกลาง)<br>   หน้า Payment โหลดช้ามาก<br>6. `chat-alpha-011` (23 ก.ย. 2569 15:38 น., ความด่วนกลาง)<br>   หน้าเว็บเปิดช้ามาก / กว่าจะเห็นสินค้าใช้เวลานาน / ปุ่มไม่ตอบสนอง / ต้องกดหลายครั้งกว่าจะเลือกได้ / หน้าจอค้างไปพักหนึ่ง / ต้องปิดหน้าเว็บแล้วเปิดใหม่<br>7. `chat-alpha-010` (23 ก.ย. 2569 15:37 น., ความด่วนสูง)<br>   เข้าไปดูประวัติออเดอร์ก็โหลดไม่ขึ้น<br>8. `chat-295900` (23 ก.ย. 2569 12:08 น., ความด่วนสูง)<br>   ทำไมเข้าเว็บแล้วค้าง / จอขาว / เว็บกาก<br>9. `chat-387121` (23 ก.ย. 2569 12:07 น., ความด่วนสูง)<br>   ทำไมเข้าเว็บแล้วค้าง / จอขาว / เว็บกาก<br>10. `chat-100143` (23 ก.ย. 2569 11:36 น., ความด่วนสูง)<br>   ทำไมเข้าเว็บแล้วค้าง / จอขาว / เว็บกาก<br><br>📎 แสดง 10 จาก 41 แชต รายการทั้งหมดอยู่ในไฟล์ Excel ด้านล่างค่ะ</td>
+        <td style="padding: 10px; vertical-align: top; color: #5f6368; font-size: 11px;"></td>
+      </tr>
+    
+      <tr style="background-color: #f8f9fa; border-bottom: 1px solid #dadce0;">
+        <td style="padding: 10px; text-align: center; vertical-align: top; font-weight: bold; color: #5f6368;">22</td>
+        <td style="padding: 10px; vertical-align: top; font-weight: 500; color: #1a73e8;">เคสด่วนเดือนนี้มีเคสไหนบ้าง</td>
+        <td style="padding: 10px; vertical-align: top; font-family: monospace; font-size: 11px; color: #202124;"><code>list_chats</code></td>
+        <td style="padding: 10px; vertical-align: top; font-size: 11px; color: #5f6368;"><strong>tool:</strong> list_chats<br><strong>period:</strong> this_month</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-weight: bold; color: #137333;">OK</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-size: 11px; color: #5f6368;">522.0s</td>
+        <td style="padding: 10px; vertical-align: top; font-size: 12px; line-height: 1.5; color: #202124; white-space: pre-wrap;">🚨 เคสฉุกเฉินและสูงเดือนนี้ (พฤศจิกายน 2569)<br><br>- รวม 16 เคส<br><br>1. `today055` (10 พ.ย. 2569 18:13 น., ฉุกเฉิน)<br> ปัญหาเข้าสู่ระบบและปัญหาความปลอดภัยของบัญชี<br><br>2. `today047` (10 พ.ย. 2569 16:15 น., ฉุกเฉิน)<br> ปัญหาความปลอดภัยของบัญชีและปัญหาเข้าสู่ระบบ<br><br>3. `today060` (10 พ.ย. 2569 18:16 น., สูง)<br> ปัญหาบราวเซอร์/อุปกรณ์, หน้าเว็บค้าง/โหลดช้า และข้อผิดพลาดระบบ API<br><br>4. `today059` (10 พ.ย. 2569 18:15 น., สูง)<br> ปัญหาการเงินและการชำระเงิน<br><br>5. `today057` (10 พ.ย. 2569 18:14 น., สูง)<br> ปัญหาการสมัครสมาชิก, ปัญหาการแจ้งเตือน และโปรโมชั่นและโบนัส<br><br>6. `today056` (10 พ.ย. 2569 18:14 น., สูง)<br> ปัญหาความปลอดภัยของบัญชี, สิทธิประโยชน์ระดับ VIP และปัญหากราฟิก/การแสดงผลเว็บ<br><br>7. `today054` (10 พ.ย. 2569 18:13 น., สูง)<br> ปัญหาระบบการชำระเงิน/ธนาคาร และปัญหาการเงินและการชำระเงิน<br><br>8. `today053` (10 พ.ย. 2569 18:12 น., สูง)<br> ปัญหากราฟิก/การแสดงผลเว็บ และข้อผิดพลาดระบบ API<br><br>9. `today052` (10 พ.ย. 2569 18:12 น., สูง)<br> ปัญหาประสิทธิภาพระบบช้า และปัญหาระบบการทำงานล่าช้า<br><br>10. `today051` (10 พ.ย. 2569 18:12 น., สูง)<br> ปัญหาเข้าหน้าเว็บไม่ได้/ลิงก์เสีย และปัญหาบราวเซอร์/อุปกรณ์<br><br>📌 เดือนนี้มีปัญหาฉุกเฉินและสูงเกี่ยวกับความปลอดภัยของบัญชีและปัญหาเข้าสู่ระบบค่อนข้างมากค่ะ</td>
+        <td style="padding: 10px; vertical-align: top; color: #5f6368; font-size: 11px;"></td>
+      </tr>
+    
+      <tr style="background-color: #ffffff; border-bottom: 1px solid #dadce0;">
+        <td style="padding: 10px; text-align: center; vertical-align: top; font-weight: bold; color: #5f6368;">23</td>
+        <td style="padding: 10px; vertical-align: top; font-weight: 500; color: #1a73e8;">อยากรู้กรณีฉุกเฉินคือเคสไหน</td>
+        <td style="padding: 10px; vertical-align: top; font-family: monospace; font-size: 11px; color: #202124;"><code>list_chats</code></td>
+        <td style="padding: 10px; vertical-align: top; font-size: 11px; color: #5f6368;"><strong>tool:</strong> list_chats</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-weight: bold; color: #137333;">OK</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-size: 11px; color: #5f6368;">101.4s</td>
+        <td style="padding: 10px; vertical-align: top; font-size: 12px; line-height: 1.5; color: #202124; white-space: pre-wrap;">📊 สรุปปัญหาวันนี้ (11 พ.ย. 2569)<br><br>- ไม่มีแชตฉุกเฉินในวันนี้ค่ะ<br><br>📌 วันนี้ไม่มีแชตฉุกเฉินใด ๆ ค่ะ</td>
+        <td style="padding: 10px; vertical-align: top; color: #5f6368; font-size: 11px;"></td>
+      </tr>
+    
+      <tr style="background-color: #f8f9fa; border-bottom: 1px solid #dadce0;">
+        <td style="padding: 10px; text-align: center; vertical-align: top; font-weight: bold; color: #5f6368;">24</td>
+        <td style="padding: 10px; vertical-align: top; font-weight: 500; color: #1a73e8;">เปรียบเทียบสถิติปัญหาของเดือนนี้และเดือนที่แล้ว</td>
+        <td style="padding: 10px; vertical-align: top; font-family: monospace; font-size: 11px; color: #202124;"><code>compare_periods</code></td>
+        <td style="padding: 10px; vertical-align: top; font-size: 11px; color: #5f6368;"><strong>tool:</strong> compare_periods<br><strong>period:</strong> this_month<br><strong>metric:</strong> issues</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-weight: bold; color: #137333;">DETERMINISTIC</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-size: 11px; color: #5f6368;">114.2s</td>
+        <td style="padding: 10px; vertical-align: top; font-size: 12px; line-height: 1.5; color: #202124; white-space: pre-wrap;">📅 เปรียบเทียบจำนวนปัญหา<br>- เดือนนี้ (พฤศจิกายน 2569): 89 ปัญหา (เฉลี่ย 8.1/วัน)<br>- เดือนที่แล้ว (ตุลาคม 2569): 450 ปัญหา (เฉลี่ย 14.5/วัน)<br>- เปลี่ยนแปลง: -361 ปัญหา (-80.2%)<br><br>📌 หมวดที่เปลี่ยนแปลงมากที่สุด<br>- ข้อเสนอแนะและร้องเรียน: 58 → 18<br>- ระบบการทำงานล่าช้า: 45 → 6<br>- หน้าเว็บค้าง/โหลดช้า: 43 → 5<br>- ปัญหาการแจ้งเตือน: 45 → 9<br>- ปัญหากราฟิก/การแสดงผลเว็บ: 43 → 8<br><br>📌 เดือนนี้ (พฤศจิกายน 2569) ยังไม่จบ (11 วัน) ควรเทียบที่ค่าเฉลี่ยต่อวันค่ะ</td>
+        <td style="padding: 10px; vertical-align: top; color: #5f6368; font-size: 11px;"></td>
+      </tr>
+    
+      <tr style="background-color: #ffffff; border-bottom: 1px solid #dadce0;">
+        <td style="padding: 10px; text-align: center; vertical-align: top; font-weight: bold; color: #5f6368;">25</td>
+        <td style="padding: 10px; vertical-align: top; font-weight: 500; color: #1a73e8;">เปรียบเที่ยบปัญหาวันนี้ และปัญหาเมื่อวาน</td>
+        <td style="padding: 10px; vertical-align: top; font-family: monospace; font-size: 11px; color: #202124;"><code>compare_periods</code></td>
+        <td style="padding: 10px; vertical-align: top; font-size: 11px; color: #5f6368;"><strong>tool:</strong> compare_periods<br><strong>period:</strong> today<br><strong>metric:</strong> issues</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-weight: bold; color: #137333;">DETERMINISTIC</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-size: 11px; color: #5f6368;">105.3s</td>
+        <td style="padding: 10px; vertical-align: top; font-size: 12px; line-height: 1.5; color: #202124; white-space: pre-wrap;">📅 เปรียบเทียบจำนวนปัญหา<br>- วันนี้ (11 พ.ย. 2569): 0 ปัญหา (เฉลี่ย 0/วัน)<br>- เมื่อวาน (10 พ.ย. 2569): 89 ปัญหา (เฉลี่ย 89/วัน)<br>- เปลี่ยนแปลง: -89 ปัญหา (-100%)<br><br>📌 หมวดที่เปลี่ยนแปลงมากที่สุด<br>- ข้อเสนอแนะและร้องเรียน: 18 → 0<br>- ปัญหาการแจ้งเตือน: 9 → 0<br>- ปัญหากราฟิก/การแสดงผลเว็บ: 8 → 0<br>- ประสิทธิภาพระบบช้า: 7 → 0<br>- ข้อผิดพลาดระบบ API: 6 → 0<br><br>📌 วันนี้ (11 พ.ย. 2569) ยังไม่จบ (1 วัน) ควรเทียบที่ค่าเฉลี่ยต่อวันค่ะ</td>
+        <td style="padding: 10px; vertical-align: top; color: #5f6368; font-size: 11px;"></td>
+      </tr>
+    
+      <tr style="background-color: #f8f9fa; border-bottom: 1px solid #dadce0;">
+        <td style="padding: 10px; text-align: center; vertical-align: top; font-weight: bold; color: #5f6368;">26</td>
+        <td style="padding: 10px; vertical-align: top; font-weight: 500; color: #1a73e8;">ปัญหาทั้งหมดเดือนนี้ลดลงจากเดือนที่แล้วไหม</td>
+        <td style="padding: 10px; vertical-align: top; font-family: monospace; font-size: 11px; color: #202124;"><code>compare_periods</code></td>
+        <td style="padding: 10px; vertical-align: top; font-size: 11px; color: #5f6368;"><strong>tool:</strong> compare_periods<br><strong>period:</strong> this_month<br><strong>metric:</strong> issues</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-weight: bold; color: #137333;">OK</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-size: 11px; color: #5f6368;">106.1s</td>
+        <td style="padding: 10px; vertical-align: top; font-size: 12px; line-height: 1.5; color: #202124; white-space: pre-wrap;">📊 สรุปปัญหาเดือนนี้ (พฤศจิกายน 2569)<br><br>- รวม 89 ปัญหา จาก 11 วัน<br>- เดือนที่แล้ว (ตุลาคม 2569) มี 450 ปัญหา (14.5 ปัญหาต่อวัน)<br>- เดือนนี้ (พฤศจิกายน 2569) มี 89 ปัญหา (8.1 ปัญหาต่อวัน)<br>- ลดลง 361 ปัญหา (-80.2%)<br>- หมวดที่ลดลงมากที่สุด:<br> 1. ข้อเสนอแนะและร้องเรียน: 58 → 18<br> 2. ระบบการทำงานล่าช้า: 45 → 6<br> 3. หน้าเว็บค้าง/โหลดช้า: 43 → 5<br> 4. ปัญหาการแจ้งเตือน: 45 → 9<br> 5. ปัญหากราฟิก/การแสดงผลเว็บ: 43 → 8<br><br>📌 เดือนนี้มีปัญหาน้อยลงจากเดือนที่แล้วค่ะ</td>
+        <td style="padding: 10px; vertical-align: top; color: #5f6368; font-size: 11px;"></td>
+      </tr>
+    
+      <tr style="background-color: #ffffff; border-bottom: 1px solid #dadce0;">
+        <td style="padding: 10px; text-align: center; vertical-align: top; font-weight: bold; color: #5f6368;">27</td>
+        <td style="padding: 10px; vertical-align: top; font-weight: 500; color: #1a73e8;">เปรียบเที่ยบสมาชิกใหม่เดือนนี้ และเดือนที่แล้วให้หน่อย</td>
+        <td style="padding: 10px; vertical-align: top; font-family: monospace; font-size: 11px; color: #202124;"><code>compare_periods</code></td>
+        <td style="padding: 10px; vertical-align: top; font-size: 11px; color: #5f6368;"><strong>tool:</strong> compare_periods<br><strong>period:</strong> this_month<br><strong>metric:</strong> new_customers</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-weight: bold; color: #137333;">OK</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-size: 11px; color: #5f6368;">74.7s</td>
+        <td style="padding: 10px; vertical-align: top; font-size: 12px; line-height: 1.5; color: #202124; white-space: pre-wrap;">📊 เปรียบเทียบลูกค้าใหม่เดือนนี้ และเดือนที่แล้ว<br><br>- ลูกค้าใหม่เดือนนี้ (พฤศจิกายน 2569) มี 20 คน (เฉลี่ย 1.8 คนต่อวัน)<br>- ลูกค้าใหม่เดือนที่แล้ว (ตุลาคม 2569) มี 79 คน (เฉลี่ย 2.5 คนต่อวัน)<br><br>ความแตกต่าง: -59 คน (-74.7%)<br>📌 เดือนนี้มีลูกค้าใหม่น้อยกว่าเดือนที่แล้วค่ะ</td>
+        <td style="padding: 10px; vertical-align: top; color: #5f6368; font-size: 11px;"></td>
+      </tr>
+    
+      <tr style="background-color: #f8f9fa; border-bottom: 1px solid #dadce0;">
+        <td style="padding: 10px; text-align: center; vertical-align: top; font-weight: bold; color: #5f6368;">28</td>
+        <td style="padding: 10px; vertical-align: top; font-weight: 500; color: #1a73e8;">วันนี้มีลูกค้าใหม่กี่คน</td>
+        <td style="padding: 10px; vertical-align: top; font-family: monospace; font-size: 11px; color: #202124;"><code>get_customer_stats</code></td>
+        <td style="padding: 10px; vertical-align: top; font-size: 11px; color: #5f6368;"><strong>tool:</strong> get_customer_stats<br><strong>period:</strong> today</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-weight: bold; color: #137333;">OK</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-size: 11px; color: #5f6368;">44.9s</td>
+        <td style="padding: 10px; vertical-align: top; font-size: 12px; line-height: 1.5; color: #202124; white-space: pre-wrap;">📊 สรุปปัญหาวันนี้ (11 พ.ย. 2569)<br><br>- วันนี้ไม่มีลูกค้าใหม่ค่ะ<br><br>📌 วันนี้ไม่มีการเพิ่มจำนวนลูกค้าใหม่ค่ะ</td>
+        <td style="padding: 10px; vertical-align: top; color: #5f6368; font-size: 11px;"></td>
+      </tr>
+    
+      <tr style="background-color: #ffffff; border-bottom: 1px solid #dadce0;">
+        <td style="padding: 10px; text-align: center; vertical-align: top; font-weight: bold; color: #5f6368;">29</td>
+        <td style="padding: 10px; vertical-align: top; font-weight: 500; color: #1a73e8;">วันนี้มีลูกค้าสมัครใหม่กี่คน</td>
+        <td style="padding: 10px; vertical-align: top; font-family: monospace; font-size: 11px; color: #202124;"><code>get_customer_stats</code></td>
+        <td style="padding: 10px; vertical-align: top; font-size: 11px; color: #5f6368;"><strong>tool:</strong> get_customer_stats<br><strong>period:</strong> today</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-weight: bold; color: #137333;">OK</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-size: 11px; color: #5f6368;">53.5s</td>
+        <td style="padding: 10px; vertical-align: top; font-size: 12px; line-height: 1.5; color: #202124; white-space: pre-wrap;">📊 สรุปปัญหาวันนี้ (11 พ.ย. 2569)<br>- ไม่มีลูกค้าสมัครใหม่ในวันนี้ค่ะ<br><br>📌 วันนี้ไม่มีการสมัครสมาชิกใหม่ค่ะ</td>
+        <td style="padding: 10px; vertical-align: top; color: #5f6368; font-size: 11px;"></td>
+      </tr>
+    
+      <tr style="background-color: #f8f9fa; border-bottom: 1px solid #dadce0;">
+        <td style="padding: 10px; text-align: center; vertical-align: top; font-weight: bold; color: #5f6368;">30</td>
+        <td style="padding: 10px; vertical-align: top; font-weight: 500; color: #1a73e8;">ลูกค้าทั้งหมดมีกี่คน</td>
+        <td style="padding: 10px; vertical-align: top; font-family: monospace; font-size: 11px; color: #202124;"><code>get_customer_stats</code></td>
+        <td style="padding: 10px; vertical-align: top; font-size: 11px; color: #5f6368;"><strong>tool:</strong> get_customer_stats<br><strong>metric:</strong> total</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-weight: bold; color: #137333;">OK</td>
+        <td style="padding: 10px; vertical-align: top; text-align: center; font-size: 11px; color: #5f6368;">52.6s</td>
+        <td style="padding: 10px; vertical-align: top; font-size: 12px; line-height: 1.5; color: #202124; white-space: pre-wrap;">📊 สรุปข้อมูลลูกค้าทั้งหมดที่มีในระบบ<br><br>- รวม 192 บัญชีผู้ใช้<br><br>📌 ข้อมูลนี้แสดงถึงจำนวนลูกค้าทั้งหมดที่มีอยู่ในระบบค่ะ</td>
+        <td style="padding: 10px; vertical-align: top; color: #5f6368; font-size: 11px;"></td>
+      </tr>
+    
+      </tbody>
+    </table>
+  
+  </div>
+
+  <div id="toast" class="toast">✅ คัดลอกตารางลง Clipboard เรียบร้อยแล้ว! กำลังเปิด Google Sheet ของมิกะ... ให้คลิกช่อง A1 แล้วกด Ctrl + V ได้เลยนะคะ</div>
+
+  <script>
+    const MIKA_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1q1iIP_0tkGGO6BYSAat260Sz31oY-oEj9qhI5AqQU1Q/edit?gid=953985984#gid=953985984';
+
+    async function copyAndOpenGoogleSheets() {
+      const table = document.getElementById('dataTable');
+      const html = table.outerHTML;
+      const text = table.innerText;
+
+      try {
+        if (navigator.clipboard && window.ClipboardItem) {
+          await navigator.clipboard.write([
+            new ClipboardItem({
+              'text/html': new Blob([html], { type: 'text/html' }),
+              'text/plain': new Blob([text], { type: 'text/plain' })
+            })
+          ]);
+        } else {
+          await navigator.clipboard.writeText(text);
+        }
+
+        const toast = document.getElementById('toast');
+        toast.style.display = 'block';
+        setTimeout(() => { toast.style.display = 'none'; }, 5000);
+
+        // เปิด Google Sheet ของมิกะโดยตรง
+        window.open(MIKA_SHEET_URL, '_blank');
+      } catch (err) {
+        alert('คัดลอกข้อมูลเรียบร้อยแล้วค่ะ กำลังเปิดหน้า Google Sheet ให้มิกะนะคะ');
+        window.open(MIKA_SHEET_URL, '_blank');
+      }
+    }
+  </script>
+</body>
+</html>
