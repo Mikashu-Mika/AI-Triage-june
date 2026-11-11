@@ -12,6 +12,9 @@ export const KEEP_ALIVE = process.env.OLLAMA_KEEP_ALIVE || '60m';
 // Max wait for one LLM call of the executive assistant (CPU-only machines need a generous limit)
 export const AGENT_TIMEOUT_MS = parseInt(process.env.AGENT_LLM_TIMEOUT_MS || '900000', 10); // 15 minutes
 
+let jaikaBackoffUntil = 0;
+let cfBackoffUntil = 0;
+
 /**
  * Call Ollama /api/chat (non-streaming).
  * @param {Array<{role: string, content: string}>} messages
@@ -19,17 +22,18 @@ export const AGENT_TIMEOUT_MS = parseInt(process.env.AGENT_LLM_TIMEOUT_MS || '90
  * @returns {Promise<{ content: string, promptTokens: number|null, outputTokens: number|null }>}
  */
 export async function ollamaChat(messages, { format, temperature = 0, maxTokens = 800, timeoutMs = AGENT_TIMEOUT_MS } = {}) {
-  if (isJaikaConfigured()) {
+  if (isJaikaConfigured() && Date.now() > jaikaBackoffUntil) {
     try {
-      return await jaikaChat(messages, { format, temperature, maxTokens, timeoutMs });
+      return await jaikaChat(messages, { format, temperature, maxTokens, timeoutMs: Math.min(timeoutMs, 10000) });
     } catch (jaikaErr) {
-      console.warn(`⚠️ [AI Jaika] Error (${jaikaErr.message}), falling back to alternative provider...`);
+      console.warn(`⚠️ [AI Jaika] Error (${jaikaErr.message}), backing off 10m to local Ollama...`);
+      jaikaBackoffUntil = Date.now() + 10 * 60 * 1000;
     }
   }
 
   const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID;
   const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN;
-  if (CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN) {
+  if (CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN && Date.now() > cfBackoffUntil) {
     try {
       const started = Date.now();
       const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${AGENT_MODEL}`;
@@ -44,7 +48,7 @@ export async function ollamaChat(messages, { format, temperature = 0, maxTokens 
           max_tokens: maxTokens,
           temperature
         }),
-        signal: AbortSignal.timeout(timeoutMs)
+        signal: AbortSignal.timeout(Math.min(timeoutMs, 10000))
       });
       if (res.ok) {
         const data = await res.json();
@@ -62,10 +66,12 @@ export async function ollamaChat(messages, { format, temperature = 0, maxTokens 
         };
       } else {
         const errText = await res.text();
-        console.warn(`⚠️ [Cloudflare AI] HTTP ${res.status} (${errText.slice(0, 80)}...), falling back to local Ollama...`);
+        console.warn(`⚠️ [Cloudflare AI] HTTP ${res.status} (${errText.slice(0, 80)}...), backing off 30m to local Ollama...`);
+        cfBackoffUntil = Date.now() + 30 * 60 * 1000;
       }
     } catch (cfErr) {
-      console.warn(`⚠️ [Cloudflare AI] Exception (${cfErr.message}), falling back to local Ollama...`);
+      console.warn(`⚠️ [Cloudflare AI] Exception (${cfErr.message}), backing off 10m to local Ollama...`);
+      cfBackoffUntil = Date.now() + 10 * 60 * 1000;
     }
   }
   const url = new URL('/api/chat', OLLAMA_URL);

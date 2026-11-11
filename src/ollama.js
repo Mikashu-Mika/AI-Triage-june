@@ -436,17 +436,21 @@ category_id, sub_category (Thai), intent (refund|withdraw|deposit|register|verif
  * @param {string} text - The input text to embed.
  * @returns {Promise<number[]>} - 1024 dimension vector.
  */
+let jaikaEmbBackoffUntil = 0;
+let cfEmbBackoffUntil = 0;
+
 export async function getEmbedding(text) {
   try {
-    if (isJaikaConfigured()) {
+    if (isJaikaConfigured() && Date.now() > jaikaEmbBackoffUntil) {
       try {
         return await jaikaEmbedding(text);
       } catch (jaikaErr) {
-        console.warn(`⚠️ [AI Jaika Embedding] Error (${jaikaErr.message}), falling back...`);
+        console.warn(`⚠️ [AI Jaika Embedding] Error (${jaikaErr.message}), backing off 10m...`);
+        jaikaEmbBackoffUntil = Date.now() + 10 * 60 * 1000;
       }
     }
 
-    if (IS_CLOUDFLARE) {
+    if (IS_CLOUDFLARE && Date.now() > cfEmbBackoffUntil) {
       try {
         const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${MODEL_EMBEDDING}`;
         const response = await fetch(cfUrl, {
@@ -457,7 +461,8 @@ export async function getEmbedding(text) {
           },
           body: JSON.stringify({
             text: [text]
-          })
+          }),
+          signal: AbortSignal.timeout(5000)
         });
 
         if (response.ok) {
@@ -466,9 +471,11 @@ export async function getEmbedding(text) {
             return data.result.data[0];
           }
         }
-        console.warn('⚠️ [Cloudflare Embedding] Unavailable, falling back to local Ollama bge-m3...');
+        console.warn('⚠️ [Cloudflare Embedding] Unavailable, backing off 30m to local Ollama bge-m3...');
+        cfEmbBackoffUntil = Date.now() + 30 * 60 * 1000;
       } catch (e) {
-        console.warn('⚠️ [Cloudflare Embedding] Error, falling back to local Ollama bge-m3...');
+        console.warn('⚠️ [Cloudflare Embedding] Error, backing off 10m to local Ollama bge-m3...');
+        cfEmbBackoffUntil = Date.now() + 10 * 60 * 1000;
       }
     }
 
