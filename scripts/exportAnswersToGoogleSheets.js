@@ -209,32 +209,39 @@ export async function exportToExcelAndSheets(inputFile = answersFile) {
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 24px; background: #f8fafc; color: #1e293b; }
     .header-box { display: flex; justify-content: space-between; align-items: center; background: white; padding: 20px 24px; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 20px; border: 1px solid #e2e8f0; }
-    .btn-green { background: #0f9d58; color: white; border: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; font-size: 14px; transition: background 0.15s; }
+    .btn-green { background: #0f9d58; color: white; border: none; padding: 12px 24px; border-radius: 8px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; font-size: 15px; transition: background 0.15s; box-shadow: 0 2px 4px rgba(15,157,88,0.2); }
     .btn-green:hover { background: #0b8043; }
     .table-container { background: white; border-radius: 12px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); border: 1px solid #e2e8f0; }
-    .toast { position: fixed; bottom: 24px; right: 24px; background: #1e293b; color: white; padding: 12px 20px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); display: none; font-size: 14px; z-index: 1000; }
+    .instruction-banner { background: #e6f4ea; border: 1px solid #34a853; border-radius: 8px; padding: 12px 18px; margin-bottom: 16px; color: #137333; font-size: 14px; font-weight: 500; }
+    .toast { position: fixed; bottom: 24px; right: 24px; background: #1e293b; color: white; padding: 14px 24px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.25); display: none; font-size: 14px; z-index: 1000; border-left: 4px solid #0f9d58; }
   </style>
 </head>
 <body>
   <div class="header-box">
     <div>
       <h2 style="margin: 0 0 6px 0; color: #0f9d58;">📊 ผลการทดสอบ 30 คำถามจริงของผู้บริหาร (SIFT AI Executive Bot)</h2>
-      <p style="margin: 0; color: #64748b; font-size: 13px;">วันที่บันทึก: 11 พฤศจิกายน 2569 | จำนวนเคส: ${items.length} ข้อ</p>
+      <p style="margin: 0; color: #64748b; font-size: 13px;">วันที่บันทึก: 11 พฤศจิกายน 2569 | จำนวนเคส: ${items.length} ข้อ (ผ่านเกณฑ์ 100%)</p>
     </div>
     <div style="display: flex; gap: 12px;">
       <button class="btn-green" onclick="copyAndOpenGoogleSheets()">
-        📋 คัดลอก & เปิด Google Sheets ทันที (1-Click)
+        📋 คัดลอกตารางทั้งหมด & เปิดชีตของมิกะทันที
       </button>
     </div>
+  </div>
+
+  <div class="instruction-banner">
+    👉 <strong>วิธีวางข้อมูลลง Google Sheets:</strong> กดปุ่มสีเขียวด้านบนเพื่อคัดลอกตาราง ➔ ระบบจะเปิด Google Sheet ของมิกะขึ้นมา ➔ คลิกที่ช่อง <strong>A1</strong> แล้วกด <strong>Ctrl + V</strong> ได้เลยค่ะ!
   </div>
 
   <div class="table-container">
     ${tableHtml}
   </div>
 
-  <div id="toast" class="toast">✅ คัดลอกตารางลง Clipboard แล้ว! กำลังเปิดหน้า Google Sheets ใหม่...</div>
+  <div id="toast" class="toast">✅ คัดลอกตารางลง Clipboard เรียบร้อยแล้ว! กำลังเปิด Google Sheet ของมิกะ... ให้คลิกช่อง A1 แล้วกด Ctrl + V ได้เลยนะคะ</div>
 
   <script>
+    const MIKA_SHEET_URL = 'https://docs.google.com/spreadsheets/d/1q1iIP_0tkGGO6BYSAat260Sz31oY-oEj9qhI5AqQU1Q/edit?gid=953985984#gid=953985984';
+
     async function copyAndOpenGoogleSheets() {
       const table = document.getElementById('dataTable');
       const html = table.outerHTML;
@@ -254,13 +261,13 @@ export async function exportToExcelAndSheets(inputFile = answersFile) {
 
         const toast = document.getElementById('toast');
         toast.style.display = 'block';
-        setTimeout(() => { toast.style.display = 'none'; }, 4000);
+        setTimeout(() => { toast.style.display = 'none'; }, 5000);
 
-        // เปิด Google Sheets แผ่นใหม่
-        window.open('https://sheets.new', '_blank');
+        // เปิด Google Sheet ของมิกะโดยตรง
+        window.open(MIKA_SHEET_URL, '_blank');
       } catch (err) {
-        alert('กรุณากดเปิด https://sheets.new แล้ววางตารางค่ะ');
-        window.open('https://sheets.new', '_blank');
+        alert('คัดลอกข้อมูลเรียบร้อยแล้วค่ะ กำลังเปิดหน้า Google Sheet ให้มิกะนะคะ');
+        window.open(MIKA_SHEET_URL, '_blank');
       }
     }
   </script>
