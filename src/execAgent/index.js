@@ -5,12 +5,14 @@ import { supabase } from '../supabase.js';
 import { routeQuery } from './router.js';
 import { TOOL_HANDLERS, loadCategoryContext } from './tools.js';
 import { composeAnswer, composeChitchat, unsupportedText } from './composer.js';
+import { generateMorningBriefing } from './morningBriefing.js';
 
 const HISTORY_TURNS = 3;
 const HISTORY_MAX_AGE_MS = 30 * 60 * 1000; // 30 minutes threshold for continuous context
 
 // Deterministic backstop for requests of personal contact data (the router also detects these)
 const PERSONAL_DATA_PATTERN = /(เบอร์โทร|เบอร์ลูกค้า|ขอเบอร์|เบอร์มือถือ|อีเมลลูกค้า|ขออีเมล|อีเมล์ลูกค้า|รหัสผ่านลูกค้า|password ลูกค้า|ขอรหัสผ่าน)/i;
+const MORNING_BRIEFING_PATTERN = /(สรุปเช้า|สรุปรายงานเช้า|รายงานยามเช้า|morning\s*briefing|ขอสรุปเช้า|บรีฟเช้า)/i;
 
 // In-memory conversation history cache (instant & immune to database RLS policies)
 const memoryHistory = new Map();
@@ -77,6 +79,18 @@ export async function runExecAgent({ query, companyId, chatId, history: explicit
       excelExport: null,
       slots: { calls: [], unsupported_topics: ['personal_data'] },
       auditStatus: 'BLOCKED'
+    };
+  }
+
+  if (MORNING_BRIEFING_PATTERN.test(query)) {
+    const { text, metrics } = await generateMorningBriefing({ companyId });
+    return {
+      reply: text,
+      toolUsed: 'morning_briefing',
+      rawData: [metrics],
+      excelExport: null,
+      slots: { calls: [{ tool: 'morning_briefing', args: { period: 'yesterday' } }], compose_mode: 'deterministic' },
+      auditStatus: 'OK'
     };
   }
 
