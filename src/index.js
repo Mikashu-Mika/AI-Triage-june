@@ -16,6 +16,7 @@ import { backfillEmbeddings } from './execAgent/examples.js';
 import { handleTelegramMessage, handleTelegramCallbackQuery, startTelegramPolling, initTelegramBot, setTelegramWebhook } from './telegramBot.js';
 import { enforceCompanyQuota, checkCompanyQuota, PACKAGE_CONFIG } from './quotaService.js';
 import { waitForInteractiveIdle, isInteractiveActive, getInteractiveCount, setTriageQueueStateGetter, getQueueMetrics } from './aiScheduler.js';
+import { startMorningBriefingScheduler, sendMorningBriefing, getMorningSchedulerStatus } from './morningScheduler.js';
 
 dotenv.config();
 
@@ -539,6 +540,27 @@ app.post('/api/telegram/webhook', async (req, res) => {
 // REST API: Live Priority Queue Status & Monitor (For Dashboard & QA Testers)
 app.get('/api/queue/status', (req, res) => {
   res.json(getQueueMetrics());
+});
+
+// REST API: Morning Briefing Scheduler Status
+app.get('/api/scheduler/morning-briefing/status', (req, res) => {
+  res.json(getMorningSchedulerStatus());
+});
+
+// REST API: Trigger Morning Briefing on-demand (Manual/Testing)
+app.post('/api/scheduler/morning-briefing/send', async (req, res) => {
+  try {
+    const { chatId, force, companyId } = req.body || {};
+    const result = await sendMorningBriefing({
+      chatId: chatId || process.env.TELEGRAM_EXEC_GROUP_ID || '-5495142610',
+      companyId: companyId || null,
+      force: force !== undefined ? !!force : true
+    });
+    res.json({ success: true, result });
+  } catch (error) {
+    console.error('Error triggering morning briefing API:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
 });
 
 // REST API: Get pending chats for authenticated company
@@ -1498,6 +1520,7 @@ app.listen(PORT, () => {
   console.log(`  Health Check:     http://localhost:${PORT}/health`);
   console.log(`==================================================`);
   initTelegramBot();
+  startMorningBriefingScheduler();
   // Load the LLM before the first executive question arrives, then embed router examples added by SQL
   warmUpModel().then(() => backfillEmbeddings());
 });

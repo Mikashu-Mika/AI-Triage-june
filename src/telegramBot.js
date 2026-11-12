@@ -18,6 +18,7 @@ import {
   upsertTelegramMember, 
   getTelegramMemberRole 
 } from './supabase.js';
+import { getMorningSchedulerStatus, sendMorningBriefing } from './morningScheduler.js';
 
 dotenv.config();
 
@@ -539,6 +540,20 @@ export async function handleTelegramMessage(message) {
 
     await sendMessage(chatId, restrictedReply);
     return { ok: false, error: 'Restricted: Executive Only in Groups' };
+  }
+
+    // Handle /briefing_status command
+  if (text.startsWith('/briefing_status')) {
+    const status = getMorningSchedulerStatus();
+    const reply = '⏰ *สถานะระบบสรุปเช้าอัตโนมัติ (Morning Briefing Scheduler)*\n\n' +
+      '• เวลาปัจจุบัน (ICT): *' + status.currentTimeBangkok + '*\n' +
+      '• วันที่ปัจจุบัน: *' + status.todayDateBangkok + '*\n' +
+      '• เวลาส่งอัตโนมัติ: *' + status.targetScheduledTime + '*\n' +
+      '• กลุ่มเป้าหมาย: `' + status.targetChatId + '`\n' +
+      '• สถานะส่งของวันนี้: *' + (status.isSentToday ? '✅ ส่งเรียบร้อยแล้ว' : '⏳ รอส่งตามเวลา (08:00 น.)') + '*\n' +
+      '• ระบบ Scheduler: *' + (status.isActive ? '🟢 Active' : '🔴 Inactive') + '*';
+    await sendMessage(chatId, reply);
+    return { ok: true, status };
   }
 
   // Handle /quota command or quota check queries

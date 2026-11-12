@@ -8,6 +8,7 @@
 
 import { supabase, fetchAllRows } from '../supabase.js';
 import { loadCategoryContext } from './tools.js';
+import { getDefaultCompanyId } from '../categoryHelper.js';
 import { resolvePeriod, formatThaiDate, formatThaiDateTime, thaiHour } from './timeframe.js';
 
 const PRIORITY_ORDER = { urgent: 4, high: 3, medium: 2, low: 1 };
@@ -32,20 +33,24 @@ const SENTIMENT_BADGE = {
  * ดึงข้อมูลแชตและประเด็นปัญหาทั้งหมดของเมื่อวาน
  */
 export async function getYesterdayMetrics(companyId, targetPeriod = null) {
+  const resolvedCompanyId = companyId || process.env.DEFAULT_COMPANY_ID || (await getDefaultCompanyId().catch(() => null));
   const period = targetPeriod || resolvePeriod({ type: 'yesterday' });
-  const categoryContext = await loadCategoryContext(companyId);
+  const categoryContext = await loadCategoryContext(resolvedCompanyId);
 
   // ดึงแชตทั้งหมดในช่วงเวลาเมื่อวาน
-  const { data: chats, error } = await fetchAllRows(() =>
-    supabase
+  const { data: chats, error } = await fetchAllRows(() => {
+    let q = supabase
       .from('chats')
       .select('id, created_at, customer_id, customer_name, category_id, priority, sentiment, summary, chat_issues(id, category_id, priority, summary)')
-      .eq('company_id', companyId)
       .eq('is_test', false)
       .gte('created_at', period.start.toISOString())
       .lt('created_at', period.end.toISOString())
-      .order('created_at', { ascending: false })
-  );
+      .order('created_at', { ascending: false });
+    if (resolvedCompanyId) {
+      q = q.eq('company_id', resolvedCompanyId);
+    }
+    return q;
+  });
 
   if (error) {
     throw new Error(`Failed to fetch yesterday chats: ${error.message}`);
