@@ -2,7 +2,7 @@
  * src/morningScheduler.js
  * 
  * โมดูลตั้งเวลาส่งสรุปเช้าอัตโนมัติ (Morning Executive Briefing Scheduler)
- * - ตั้งเวลาส่งเข้ากลุ่มผู้บริหารทุกวันเวลา 08:00 น. ตามเวลาประเทศไทย (ICT / UTC+7)
+ * - ตั้งเวลาส่งเข้ากลุ่มผู้บริหารทุกวันเวลา 11:00 น. ตามเวลาประเทศไทย (ICT / UTC+7)
  * - มี Idempotent Guard กันส่งซ้ำ: ตรวจสอบทั้ง In-Memory Cache และ Supabase `activity_logs`
  *   ป้องกันบอทส่งเบิ้ลหาก Server รีสตาร์ทหรือมีการ Deploy ใหม่ระหว่างวัน
  * - รองรับการยิง Trigger แบบแมนนวลสำหรับทดสอบ (Manual Trigger / On-Demand)
@@ -120,7 +120,7 @@ export async function recordBriefingSent({ companyId, chatId, targetDateStr, met
       company_id: companyId,
       chat_id: chatId,
       sender_name: 'Morning Scheduler',
-      user_query: '[AUTO_SCHEDULE] 08:00 สรุปรายงานเช้าประจำวัน (Morning Executive Briefing)',
+      user_query: '[AUTO_SCHEDULE] 11:00 สรุปรายงานเช้าประจำวัน (Morning Executive Briefing)',
       bot_reply: `สรุปเช้าส่งสำเร็จ (สถิติแชตเมื่อวาน: ${metrics?.totalChats || 0} แชต, ${metrics?.totalIssues || 0} ปัญหา)`,
       tool_used: 'morning_briefing'
     }]);
@@ -180,11 +180,11 @@ export async function sendMorningBriefing({
 }
 
 /**
- * สตาร์ท Cron/Interval ตรวจสอบเวลาทุกๆ 30 วินาที เพื่อส่งสรุปเช้าเวลา 08:00 น.
+ * สตาร์ท Cron/Interval ตรวจสอบเวลาทุกๆ 30 วินาที เพื่อส่งสรุปเช้าเวลา 11:00 น.
  */
 export function startMorningBriefingScheduler({
-  targetHour = 8,
-  targetMinute = 0,
+  targetHour = parseInt(process.env.BRIEFING_TARGET_HOUR || '11', 10),
+  targetMinute = parseInt(process.env.BRIEFING_TARGET_MINUTE || '0', 10),
   checkIntervalMs = 30000
 } = {}) {
   if (schedulerInterval) {
@@ -198,7 +198,7 @@ export function startMorningBriefingScheduler({
 
     const { hour, minute } = getBangkokTime();
 
-    // เช็คว่าอยู่ในช่วงเวลา 08:00 - 08:05 น.
+    // เช็คว่าอยู่ในช่วงเวลาเป้าหมาย (เช่น 11:00 - 11:05 น.)
     if (hour === targetHour && minute >= targetMinute && minute <= targetMinute + 5) {
       isExecutionLock = true;
       try {
@@ -232,12 +232,15 @@ export function getMorningSchedulerStatus() {
   const todayDateStr = getBangkokDateString();
   const targetChatId = process.env.TELEGRAM_EXEC_GROUP_ID || '-5495142610';
   const isSentToday = sentBriefingsCache.has(`${todayDateStr}:${targetChatId}`);
+  const configuredHour = parseInt(process.env.BRIEFING_TARGET_HOUR || '11', 10);
+  const configuredMinute = parseInt(process.env.BRIEFING_TARGET_MINUTE || '0', 10);
+  const targetScheduledTime = `${String(configuredHour).padStart(2, '0')}:${String(configuredMinute).padStart(2, '0')} ICT`;
 
   return {
     isActive: !!schedulerInterval,
     currentTimeBangkok: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:${String(second).padStart(2, '0')}`,
     todayDateBangkok: todayDateStr,
-    targetScheduledTime: '08:00 ICT',
+    targetScheduledTime,
     targetChatId,
     isSentToday,
     cachedKeys: Array.from(sentBriefingsCache)

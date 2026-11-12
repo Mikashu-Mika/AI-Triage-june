@@ -550,7 +550,7 @@ export async function handleTelegramMessage(message) {
       '• วันที่ปัจจุบัน: *' + status.todayDateBangkok + '*\n' +
       '• เวลาส่งอัตโนมัติ: *' + status.targetScheduledTime + '*\n' +
       '• กลุ่มเป้าหมาย: `' + status.targetChatId + '`\n' +
-      '• สถานะส่งของวันนี้: *' + (status.isSentToday ? '✅ ส่งเรียบร้อยแล้ว' : '⏳ รอส่งตามเวลา (08:00 น.)') + '*\n' +
+      '• สถานะส่งของวันนี้: *' + (status.isSentToday ? '✅ ส่งเรียบร้อยแล้ว' : `⏳ รอส่งตามเวลา (${status.targetScheduledTime})`) + '*\n' +
       '• ระบบ Scheduler: *' + (status.isActive ? '🟢 Active' : '🔴 Inactive') + '*';
     await sendMessage(chatId, reply);
     return { ok: true, status };
