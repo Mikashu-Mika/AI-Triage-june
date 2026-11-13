@@ -8,8 +8,7 @@
  * - รองรับการยิง Trigger แบบแมนนวลสำหรับทดสอบ (Manual Trigger / On-Demand)
  */
 
-import { supabase } from './supabase.js';
-import { getDefaultCompanyId } from './categoryHelper.js';
+import { supabase, getCompanyByTelegramChatId } from './supabase.js';
 import { generateMorningBriefing } from './execAgent/morningBriefing.js';
 import { sendTelegramMessage } from './telegramBot.js';
 
@@ -143,7 +142,20 @@ export async function sendMorningBriefing({
   force = false
 } = {}) {
   const targetDateStr = getBangkokDateString();
-  const resolvedCompanyId = companyId || process.env.DEFAULT_COMPANY_ID || (await getDefaultCompanyId().catch(() => null));
+
+  // ใช้บริษัทที่ "ผูกกับกลุ่ม Telegram นี้" ใน BO (ตาราง telegram_groups) เท่านั้น
+  // ถ้ากลุ่มยังไม่ผูกบริษัทหรือถูกปิดใช้งาน จะไม่ส่ง — กันส่งข้อมูลผิดบริษัทเข้ากลุ่ม
+  let resolvedCompanyId = companyId;
+  let companyName = null;
+  if (!resolvedCompanyId) {
+    const group = await getCompanyByTelegramChatId(chatId);
+    resolvedCompanyId = group?.companyId || null;
+    companyName = group?.companyName || null;
+  }
+  if (!resolvedCompanyId) {
+    console.warn(`⚠️ [MorningScheduler] Telegram group ${chatId} is not linked to an active company in BO (telegram_groups). Briefing NOT sent.`);
+    return { skipped: true, reason: 'GROUP_NOT_LINKED_TO_COMPANY', targetDate: targetDateStr, chatId };
+  }
 
   // ตรวจสอบ Idempotent Guard
   if (!force) {
@@ -155,7 +167,7 @@ export async function sendMorningBriefing({
   }
 
   console.log(`🌅 [MorningScheduler] Generating Morning Briefing for ${targetDateStr} (Chat: ${chatId})...`);
-  const { text, metrics } = await generateMorningBriefing({ companyId: resolvedCompanyId });
+  const { text, metrics } = await generateMorningBriefing({ companyId: resolvedCompanyId, companyName });
 
   // ส่งข้อความเข้ากลุ่ม Telegram
   const sendRes = await sendTelegramMessage(chatId, text, 'Markdown');

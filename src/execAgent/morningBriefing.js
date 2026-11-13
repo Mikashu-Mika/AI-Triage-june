@@ -11,8 +11,9 @@ import { loadCategoryContext } from './tools.js';
 import { getDefaultCompanyId } from '../categoryHelper.js';
 import { resolvePeriod, formatThaiDate, formatThaiDateTime, thaiHour } from './timeframe.js';
 
-const PRIORITY_ORDER = { urgent: 4, high: 3, medium: 2, low: 1 };
+const PRIORITY_ORDER = { critical: 4, urgent: 4, high: 3, medium: 2, low: 1 };
 const PRIORITY_BADGE = {
+  critical: '🚨 ฉุกเฉิน',
   urgent: '🚨 ฉุกเฉิน',
   high: '🔥 ความด่วนสูง',
   medium: '⚡ ปานกลาง',
@@ -41,7 +42,7 @@ export async function getYesterdayMetrics(companyId, targetPeriod = null) {
   const { data: chats, error } = await fetchAllRows(() => {
     let q = supabase
       .from('chats')
-      .select('id, created_at, customer_id, customer_name, category_id, priority, sentiment, summary, chat_issues(id, category_id, priority, summary)')
+      .select('id, created_at, customer_id, customer_name, category_id, priority, urgency, sentiment, summary, chat_issues(id, category_id, priority, summary)')
       .eq('is_test', false)
       .gte('created_at', period.start.toISOString())
       .lt('created_at', period.end.toISOString())
@@ -59,7 +60,12 @@ export async function getYesterdayMetrics(companyId, targetPeriod = null) {
   const allChats = chats || [];
   const totalChats = allChats.length;
 
-  // รวบรวมปัญหาทั้งหมด (ไม่รวม other)
+  // รวบรวมสถิติ — ใช้กติกาเดียวกับหน้า BO (siftai-bo src/lib/dashboardMetrics.ts)
+  // เพื่อให้ผู้บริหารเปิด BO เทียบแล้วตัวเลขตรงกัน
+  //  • ด่วนวิกฤต = priority urgent/critical หรือ urgency urgent
+  //  • ความด่วนสูง = priority/urgency high (ที่ไม่ใช่ urgent)
+  //  • อันดับหมวด = นับจาก "ทุกประเด็นปัญหา" ในแชต (1 แชตมีได้หลายประเด็น หลายหมวด)
+  //    เหมือนกราฟ "จำนวนเคสแยกตามประเภทปัญหา" ใน BO (นับจาก chat_issues)
   const categoryCounts = new Map();
   let totalIssues = 0;
   let urgentCount = 0;
@@ -67,29 +73,42 @@ export async function getYesterdayMetrics(companyId, targetPeriod = null) {
   let negativeCount = 0;
 
   for (const c of allChats) {
-    const p = (c.priority || 'medium').toLowerCase();
-    if (p === 'urgent') urgentCount++;
-    if (p === 'high') highCount++;
+    const p = (c.priority || '').toLowerCase();
+    const u = (c.urgency || '').toLowerCase();
+    const isUrgent = p === 'urgent' || p === 'critical' || u === 'urgent';
+    if (isUrgent) urgentCount++;
+    else if (p === 'high' || u === 'high') highCount++;
 
     const s = c.sentiment || '';
     if (/โกรธ|ไม่พอใจ|หงุดหงิด|รำคาญ|กังวล|ผิดหวัง/i.test(s)) {
       negativeCount++;
     }
 
-    const issues = (c.chat_issues || []).filter(iss => {
+    const rawIssues = c.chat_issues || [];
+    const issues = rawIssues.filter(iss => {
       const key = (iss.category_id || '').split(':').pop().toLowerCase();
       return key !== 'other';
     });
 
-    for (const iss of issues) {
-      totalIssues++;
-      const catKey = (iss.category_id || '').split(':').pop().toLowerCase();
-      const catName = categoryContext.get(catKey)?.name || catKey;
-      categoryCounts.set(catName, (categoryCounts.get(catName) || 0) + 1);
+    if (rawIssues.length > 0) {
+      for (const iss of issues) {
+        totalIssues++;
+        const catKey = (iss.category_id || '').split(':').pop().toLowerCase();
+        const catName = categoryContext.get(catKey)?.name || catKey;
+        categoryCounts.set(catName, (categoryCounts.get(catName) || 0) + 1);
+      }
+    } else {
+      // แชตที่ยังไม่มีประเด็นย่อย: ใช้หมวดหลักของแชต (กติกาเดียวกับ BO)
+      const mainKey = (c.category_id || 'other').split(':').pop().toLowerCase();
+      if (mainKey !== 'other') {
+        totalIssues++;
+        const mainName = categoryContext.get(mainKey)?.name || mainKey;
+        categoryCounts.set(mainName, (categoryCounts.get(mainName) || 0) + 1);
+      }
     }
   }
 
-  // จัดอันดับ Top Categories
+  // จัดอันดับ Top Categories (เปอร์เซ็นต์คิดจากจำนวนปัญหาทั้งหมด เหมือน BO)
   const topCategories = [...categoryCounts.entries()]
     .map(([name, count]) => ({
       name,
@@ -161,17 +180,19 @@ export function formatMorningBriefing(metrics, options = {}) {
   const now = options.now || new Date();
   const todayLabel = formatThaiDate(now);
   const yesterdayLabel = period.label;
+  const companyLine = options.companyName ? `🏢 บริษัท: ${options.companyName}\n` : '';
 
   // กรณีเมื่อวานไม่มีแชตเลย
   if (totalChats === 0) {
     return `🌅 *สรุปรายงานยามเช้า (Morning Briefing)*\n` +
-      `📅 ประจำวันที่ ${todayLabel} (${yesterdayLabel})\n\n` +
+      `📅 ประจำวันที่ ${todayLabel} (${yesterdayLabel})\n` + companyLine + `\n` +
       `✨ เมื่อวานนี้ระบบทำงานราบรื่น ไม่พบรายการแจ้งปัญหาจากลูกค้าเข้ามาค่ะ`;
   }
 
   // 1. ส่วนหัวและสถิติภาพรวม
   let msg = `🌅 *สรุปรายงานยามเช้า (Morning Briefing)*\n`;
-  msg += `📅 ประจำวันที่ ${todayLabel} — ข้อมูลของ${yesterdayLabel}\n\n`;
+  msg += `📅 ประจำวันที่ ${todayLabel} — ข้อมูลของ${yesterdayLabel}\n`;
+  msg += companyLine + `\n`;
 
   msg += `📊 *ภาพรวมการติดต่อเมื่อวาน:*\n`;
   msg += `• แชตทั้งหมด: *${totalChats}* แชต\n`;
@@ -225,9 +246,9 @@ export function formatMorningBriefing(metrics, options = {}) {
 /**
  * เรียกใช้งานครบวงจร (ดึงข้อมูล + ฟอร์แมตข้อความ)
  */
-export async function generateMorningBriefing({ companyId, targetPeriod = null, now = new Date() } = {}) {
+export async function generateMorningBriefing({ companyId, companyName = null, targetPeriod = null, now = new Date() } = {}) {
   const metrics = await getYesterdayMetrics(companyId, targetPeriod);
-  const text = formatMorningBriefing(metrics, { now });
+  const text = formatMorningBriefing(metrics, { now, companyName });
   return {
     text,
     metrics
