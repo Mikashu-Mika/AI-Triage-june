@@ -68,179 +68,6 @@ function cosineSimilarity(vecA, vecB) {
 }
 
 /**
- * Apply the deterministic rule guards only when the LLM did not find a real problem
- * (missing / unknown / "other" category). A concrete LLM category is never overridden.
- * @param {string} text
- * @param {string} rawCategoryId
- * @param {any[]} categories
- * @returns {{ category_id: string, priority?: string, department?: string, isGuarded: boolean }}
- */
-export function applyRuleGuardIfUnclassified(text, rawCategoryId, categories = []) {
-  const normalized = normalizeCategoryId(rawCategoryId, categories);
-  const isUnclassified = !normalized || normalized.split(':').pop().toLowerCase() === 'other';
-  if (!isUnclassified) {
-    return { category_id: normalized, isGuarded: false };
-  }
-  return sanitizeAndValidateIssueCategory(text, rawCategoryId, categories);
-}
-
-/**
- * Deterministic Semantic Guard & Normalizer
- * Enforces critical business rules and prevents misclassification for known edge cases.
- * @param {string} text - Sentence or summary text.
- * @param {string} rawCategoryId - Raw category ID from LLM.
- * @param {any[]} categories - Available categories for the company.
- * @returns {{ category_id: string, priority?: string, department?: string, isGuarded: boolean }}
- */
-export function sanitizeAndValidateIssueCategory(text, rawCategoryId, categories = []) {
-  if (!text) {
-    return {
-      category_id: normalizeCategoryId(rawCategoryId, categories),
-      isGuarded: false
-    };
-  }
-
-  const cleanText = text.trim();
-  const lower = cleanText.toLowerCase();
-
-  // Guard 1: OTP / SMS / Missing Confirmation Email failure rule
-  const isOtpOrEmailIssue = /(otp|โอทีพี|sms).*(ไม่มา|ไม่เข้า|ไม่ส่ง|ไม่ได้|ไม่ได้รับ|ช้า)|(ไม่ได้รับ|ไม่ส่ง|ไม่ได้).*(otp|โอทีพี|sms)/i.test(cleanText) ||
-    /(ไม่ได้รับ|ยังไม่ได้รับ|ไม่มี).*(อีเมลยืนยัน|อีเมล์ยืนยัน|email ยืนยัน|การแจ้งเตือน|sms|otp)/i.test(cleanText) ||
-    /(อีเมล|อีเมล์|email).*(ไม่เข้า|ไม่ส่ง|ไม่มา|ไม่ได้รับ)/i.test(cleanText);
-  if (isOtpOrEmailIssue) {
-    const notifCat = categories.find(c => c.id.endsWith(':notification_issue') || c.id === 'notification_issue');
-    if (notifCat) {
-      return { category_id: notifCat.id, priority: 'medium', department: 'Support', isGuarded: true };
-    }
-  }
-
-  // Guard 2: Login failure / blocked account / unverified status on login attempt
-  const isLoginIssue = /(พอลองเข้าสู่ระบบ|ลองเข้าสู่ระบบ|เข้าสู่ระบบ|ล็อกอิน|login).*(ยังไม่สามารถใช้งาน|ใช้งานไม่ได้|เข้าไม่ได้|ไม่ได้ยืนยัน|เซสชันหมดอายุ|รหัสผ่านผิด|โดนระงับ|ถูกระงับ|ถูกบล็อก|วนกลับไปหน้า)/i.test(cleanText);
-  if (isLoginIssue) {
-    const loginCat = categories.find(c => c.id.endsWith(':login_issue') || c.id === 'login_issue');
-    if (loginCat) {
-      return { category_id: loginCat.id, priority: 'high', department: 'Support', isGuarded: true };
-    }
-  }
-
-  // Guard 2b: Feature request & function additions
-  const isFeatureRequest = /(เพิ่มฟังก์ชัน|ขอเพิ่มฟังก์ชัน|อยากให้มีฟังก์ชัน|อยากให้มีระบบ|เพิ่มระบบ|ขอเพิ่มระบบ|ฟังก์ชันเปรียบเทียบ|ระบบเปรียบเทียบ|ขอให้มีปุ่ม|อยากให้ทำฟีเจอร์|ขอฟีเจอร์|เพิ่มตัวเลือก)/i.test(cleanText);
-  if (isFeatureRequest) {
-    const featCat = categories.find(c => c.id.endsWith(':feature_request') || c.id === 'feature_request');
-    if (featCat) {
-      return { category_id: featCat.id, priority: 'medium', department: 'Developer', isGuarded: true };
-    }
-  }
-
-  // Guard 3: Customer feedback, complaints, and service improvement suggestions
-  const isFeedbackOrComplaint = /(ปัญหาแบบนี้ทำให้|ทำให้การเริ่มใช้งาน|ยุ่งยากมาก|เกือบจะเปลี่ยน|บริการแย่|ไม่โอเคมาก|เสียเวลา|ลองซ้ำ|จนไม่สามารถตัดสินใจซื้อได้|รู้สึกผิดหวัง|ผิดหวัง|ท้อ|ไม่ประทับใจ|ปัญหาแบบนี้ไม่ควรเกิดขึ้น|อยากให้ปรับปรุง|ช่วยปรับปรุงระบบ|ปรับปรุงข้อความแจ้งข้อผิดพลาด)/i.test(cleanText);
-  if (isFeedbackOrComplaint) {
-    const feedbackCat = categories.find(c => c.id.endsWith(':feedback_complaint') || c.id === 'feedback_complaint');
-    if (feedbackCat) {
-      return { category_id: feedbackCat.id, priority: 'medium', department: 'Support', isGuarded: true };
-    }
-  }
-
-  // Guard 4: Registration errors / email already registered
-  const isRegistrationIssue = /(สมัครสมาชิก|กดสมัคร|ปุ่มสมัคร).*(เกิดข้อผิดพลาด|ผิดพลาด|ไม่ได้|ล้มเหลว)|(อีเมลนี้|อีเมล์นี้|เบอร์นี้).*(ถูกใช้งานแล้ว|ถูกใช้แล้ว|ซ้ำ)/i.test(cleanText);
-  if (isRegistrationIssue) {
-    const regCat = categories.find(c => c.id.endsWith(':registration') || c.id === 'registration');
-    if (regCat) {
-      return { category_id: regCat.id, priority: 'high', department: 'Support', isGuarded: true };
-    }
-  }
-
-  // Guard 5: Account security / change sensitive info / unauthorized access / suspected hack
-  const isAccountSecurity = /(เปลี่ยน|แก้|ย้าย|อัปเดต|ขอเปลี่ยน|ขอแก้).*(บัญชีธนาคาร|เลขบัญชี|สมุดบัญชี|เบอร์โทร|เบอร์ศัพท์)|(ขอเปลี่ยน|ขอแก้).*(บัญชี|เบอร์)|(มีใครเข้าใช้บัญชี|มีคนเข้าใช้บัญชี|มีคนอื่นเข้าใช้|มีคนแอบเข้า|โดนแฮก|ถูกแฮก|สงสัยว่าโดนแฮก|ตรวจสอบการเข้าถึง)/i.test(cleanText);
-  if (isAccountSecurity) {
-    const secCat = categories.find(c => c.id.endsWith(':account_security') || c.id === 'account_security');
-    if (secCat) {
-      return { category_id: secCat.id, priority: 'urgent', department: 'Support', isGuarded: true };
-    }
-  }
-
-  // Guard 6: Access blocked / broken links / 403 / 404 / 500 / outage
-  const isAccessBlocked = /(ขอลิงก์|ขอลิ้ง|ขอเว็บ).*(ใหม่|สำรอง|เดิม|ไม่ได้|เข้าไม่ได้)|(ลิงก์|ลิ้ง|link).*(เป็นอะไร|เข้าไม่ได้|เสีย|พัง|เปิดไม่ติด|โหลดไม่ขึ้น|error)|(เข้าเว็บ|เข้าเว็บไซต์|เข้าหน้าเว็บ|เข้า web|เปิดเว็บ|เปิดเว็บไซต์).*(ไม่ได้|ไม่สำเร็จ|ไม่ติด| error| 403| 404)|(?:error|เออเร่อ|ข้อผิดพลาด|http)\s*:?\s*(403|404)\b|forbidden|access denied/i.test(cleanText);
-  if (isAccessBlocked) {
-    const accessCat = categories.find(c => c.id.endsWith(':access_blocked') || c.id === 'access_blocked');
-    if (accessCat) {
-      return { category_id: accessCat.id, priority: 'high', department: 'Support', isGuarded: true };
-    }
-  }
-
-  // Guard 7a: Page load freeze / screen freeze / infinite spinning / refresh
-  const isPageFreeze = /(รีเฟรช|refresh).*(ถึงจะเห็น|ถึงจะขึ้น|ถึงจะอัปเดต)|(หน้าเว็บ|เว็บ|หน้าจอ|จอ|ระบบ|แอป|แอพ).*(ค้าง|หมุนติ้ว|หมุนค้าง|หมุนอยู่นานมาก|นิ่งไปเลย|ค้างตลอด|ค้างบ่อย)|(ค้างไปเลย|ค้างสนิท|หมุนค้าง|หมุนติ้ว|หมุนไม่หยุด|ค้างตลอด|หน้าประวัติค้าง)/i.test(cleanText);
-  if (isPageFreeze) {
-    const freezeCat = categories.find(c => c.id.endsWith(':page_load_freeze') || c.id === 'page_load_freeze') ||
-      categories.find(c => c.id.endsWith(':performance_issue') || c.id === 'performance_issue');
-    if (freezeCat) {
-      return { category_id: freezeCat.id, priority: 'medium', department: 'Support', isGuarded: true };
-    }
-  }
-
-  // Guard 7b: System performance / slow loading / delay (without freeze/hang)
-  const isPerformanceIssue = /(เข้าได้ช้า|โหลดช้ามาก|โหลดนานมาก|รอโหลดนาน|โหลดนาน|เข้าช้ามาก|เข้าช้า|ระบบช้า|ทำงานช้า|อืดมาก|อืด|ประสิทธิภาพระบบ|ความเร็วตก|หมุนอยู่นานมาก|หมุนอยู่นาน|หมุนนานมาก|หมุนนาน|ช้ามาก|ต้องรอนาน|กว่าจะ.*ได้ต้องรอ)/i.test(cleanText);
-  if (isPerformanceIssue) {
-    const perfCat = categories.find(c => c.id.endsWith(':performance_issue') || c.id === 'performance_issue') ||
-      categories.find(c => c.id.endsWith(':page_load_freeze') || c.id === 'page_load_freeze');
-    if (perfCat) {
-      return { category_id: perfCat.id, priority: 'medium', department: 'Support', isGuarded: true };
-    }
-  }
-
-  // Guard 8: Button response lag / multiple clicks / freeze
-  const isButtonLag = /(กดหลายครั้ง|กดซ้ำ|กดแล้วไม่ไป|ปุ่มไม่ตอบสนอง|ตอบสนองช้า|ไม่ตอบสนอง|ไม่มีการตอบสนอง|กว่าจะเลือกได้|กว่าจะติด|ระบบถึงเลือกให้|ปุ่ม.*ค้าง|ระบบยังตอบสนองช้า|เลือก.*(สี|ขนาด|รุ่น|ตัวเลือก).*ไม่ได้|ไม่มีการเปลี่ยนแปลง|ไม่มีอะไรเกิดขึ้น|กด.*ไม่เปลี่ยน|กดแต่ละสีแล้ว|ปุ่มกดไม่ไป)/i.test(cleanText);
-  if (isButtonLag) {
-    const lagCat = categories.find(c => c.id.endsWith(':interaction_lag') || c.id === 'interaction_lag');
-    if (lagCat) {
-      return { category_id: lagCat.id, priority: 'medium', department: 'Support', isGuarded: true };
-    }
-  }
-
-  // Guard 9: Graphics / UI Rendering Issue
-  const isUiRendering = /(แสดงผลผิดปกติ|แสดงผลเพี้ยน|ตัดทอน|ถูกตัด|ไม่จบประโยค|ตกขอบ|ล้นขอบ|เลยขอบ|ล้นจอ|เลยขอบหน้าจอ|ตัวหนังสือซ้อน|ฟอนต์เละ|ปุ่มอยู่เลย|ปุ่มล้น|หลุดกรอบ|รูป.*(ไม่ขึ้น|หาย|ว่าง|ถูกตัด|แตก|เป็นพื้นที่ว่าง|กลายเป็นพื้นที่ว่าง)|(รายละเอียด|ข้อมูล|สเปก|ราคา|ข้อความ).*(หาย|หายไป|ไม่ขึ้น|แสดงไม่ครบ|ทับกัน|ซ้อนกัน)|(ข้อความ|ตัวหนังสือ|ฟอนต์|ตัวอักษร).*(ทับกัน|ซ้อนกัน)|อ่านไม่รู้เรื่อง|การแสดงผล.*(ผิดปกติ|เพี้ยน|ไม่สมบูรณ์|ไม่ตรง)|หน้าเว็บ.*แสดงผลผิดปกติ)/i.test(cleanText);
-  if (isUiRendering) {
-    const uiCat = categories.find(c => c.id.endsWith(':ui_rendering_issue') || c.id === 'ui_rendering_issue');
-    if (uiCat) {
-      return { category_id: uiCat.id, priority: 'low', department: 'Support', isGuarded: true };
-    }
-  }
-
-  // Guard 10: Device / Browser compatibility
-  const isDeviceComp = /(เบราว์เซอร์อื่น|บราวเซอร์อื่น|browser อื่น|ลองเปิดผ่าน|เปิดผ่านเบราว์เซอร์|เปิดผ่านบราวเซอร์|ลองเปลี่ยนเบราว์เซอร์|chrome|safari|firefox|\bedge\b|อุปกรณ์อื่น|ลองเครื่องอื่น|มือถือกับคอม|เปิดในคอม|เปิดในมือถือ|บนคอมพิวเตอร์|สลับไปใช้คอม|สลับไปใช้มือถือ|ไม่รองรับมือถือ|หน้าจอมือถือ|เฉพาะในมือถือ|สั่งซื้อผ่านมือถือ)/i.test(cleanText);
-  if (isDeviceComp) {
-    const devCat = categories.find(c => c.id.endsWith(':device_compatibility') || c.id === 'device_compatibility');
-    if (devCat) {
-      return { category_id: devCat.id, priority: 'medium', department: 'Support', isGuarded: true };
-    }
-  }
-
-  // Guard 11: Deposit / Withdrawal issue
-  const isDepositWithdrawal = /(ถอน|ฝาก(?!ดู|บอก|ข้อความ|ตรวจ|แก้)|โอน).*(ไม่เข้า|ช้า|ดีเลย์|ยังไม่ได้|หาย|ไม่อัปเดต|ค้าง)/i.test(cleanText);
-  if (isDepositWithdrawal) {
-    const depCat = categories.find(c => c.id.endsWith(':deposit_withdrawal') || c.id === 'deposit_withdrawal');
-    if (depCat) {
-      return { category_id: depCat.id, priority: 'high', department: 'Support', isGuarded: true };
-    }
-  }
-
-  // Guard 12: General context or inquiries without problems -> other
-  const isGenericGreeting = /^(สวัสดี(ครับ|ค่ะ)?|ขอบคุณ(ครับ|ค่ะ)?|หวัดดี(ครับ|ค่ะ)?|ขอสอบถามหน่อย(ครับ|ค่ะ)?)$/i.test(lower);
-  const isShoppingContext = /^(ผม|ดิฉัน|หนู)?\s*(กำลัง|จะ|กำลังจะ|ลอง)\s*(ซื้อ|เลือก|ดู|หา|สั่งซื้อ|สั่ง)/i.test(cleanText);
-  if (isGenericGreeting || isShoppingContext) {
-    const otherCat = categories.find(c => c.id.endsWith(':other') || c.id === 'other');
-    if (otherCat) {
-      return { category_id: otherCat.id, priority: 'low', department: 'Support', isGuarded: true };
-    }
-  }
-
-  return {
-    category_id: normalizeCategoryId(rawCategoryId, categories),
-    isGuarded: false
-  };
-}
-
-/**
  * Layer 1: Dynamic Thai Discourse & Clause Segmenter
  * Splits raw customer conversation (multi-line or single-paragraph) into atomic semantic clauses
  * based on speaker turns, Thai sentence-boundary spaces, and contrasting/additive discourse markers.
@@ -356,17 +183,6 @@ export async function classifySentenceSemantic(text, categories = [], mainCatego
   }
 
   const cleanText = text.trim();
-
-  // Deterministic rule check
-  const ruleCheck = sanitizeAndValidateIssueCategory(cleanText, null, categories);
-  if (ruleCheck && ruleCheck.isGuarded) {
-    return {
-      category_id: ruleCheck.category_id,
-      similarity: 1.0,
-      vectorSimilarity: 1.0,
-      source: 'Deterministic Rule Guard'
-    };
-  }
 
   try {
     // Generate embedding for the clause using local BGE-M3 model
@@ -514,15 +330,6 @@ export async function ensureCompleteSentenceCoverage(
       finalDepartment = 'Support';
     }
 
-    // Rule guards only fill in clauses that are still unclassified ("other")
-    const guarded = applyRuleGuardIfUnclassified(clause, finalCategoryId, categories);
-    if (guarded.isGuarded) {
-      finalCategoryId = guarded.category_id;
-      if (guarded.priority) finalPriority = guarded.priority;
-      if (guarded.department) finalDepartment = guarded.department;
-      matchSource = 'Deterministic Rule Guard';
-    }
-
     resolvedClauseIssues.push({
       chat_id: chatId,
       category_id: finalCategoryId,
@@ -609,15 +416,14 @@ export async function classifyChat(chat, context = {}) {
   }
   aiRecommendation = formatMultiIssuesRecommendation(triage, aiRecommendation);
 
-  // 3. Layer 3: keep the LLM category; rule guards only fill in when the LLM found no real problem
+  // 3. Layer 3: use the LLM category as-is (no keyword rule overrides; classification stays fully AI-driven)
   let issues = (triage.detected_issues || []).map(iss => {
     const text = iss.problem_summary || iss.summary || '';
-    const validated = applyRuleGuardIfUnclassified(text, iss.category_id, categories);
     return {
       chat_id: chat.id,
-      category_id: validated.category_id,
-      priority: (validated.isGuarded && validated.priority) || iss.urgency || iss.priority || triage.priority || 'medium',
-      department: (validated.isGuarded && validated.department) || iss.department || triage.department || 'Support',
+      category_id: normalizeCategoryId(iss.category_id, categories),
+      priority: iss.urgency || iss.priority || triage.priority || 'medium',
+      department: iss.department || triage.department || 'Support',
       summary: text || triage.summary || 'ไม่มีบทสรุป',
       recommended_reply: ''
     };
