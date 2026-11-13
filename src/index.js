@@ -441,22 +441,44 @@ mcpServer.setRequestHandler(CallToolRequestSchema, async (request) => {
 let sseTransport = null;
 
 // Endpoint to initiate SSE connection
+// mcpServer can only hold one transport at a time, so a new client replaces the
+// previous one instead of throwing "Already connected to a transport".
 app.get('/sse', async (req, res) => {
   console.log('Client requested SSE connection for MCP');
-  sseTransport = new SSEServerTransport('/messages', res);
-  await mcpServer.connect(sseTransport);
-  
-  req.on('close', () => {
-    console.log('SSE connection closed');
-  });
+  try {
+    if (sseTransport) {
+      console.log('Replacing existing SSE connection');
+      sseTransport = null;
+      await mcpServer.close().catch(() => {});
+    }
+
+    const transport = new SSEServerTransport('/messages', res);
+    sseTransport = transport;
+    await mcpServer.connect(transport);
+
+    req.on('close', async () => {
+      console.log('SSE connection closed');
+      if (sseTransport === transport) {
+        sseTransport = null;
+        await mcpServer.close().catch(() => {});
+      }
+    });
+  } catch (error) {
+    console.error('❌ [MCP] Failed to establish SSE connection:', error.message);
+    if (!res.headersSent) res.status(500).json({ error: 'Failed to establish SSE connection' });
+  }
 });
 
 // Endpoint to receive client messages
 app.post('/messages', async (req, res) => {
-  if (sseTransport) {
+  if (!sseTransport) {
+    return res.status(400).json({ error: 'SSE connection not established' });
+  }
+  try {
     await sseTransport.handleMessage(req, res);
-  } else {
-    res.status(400).json({ error: 'SSE connection not established' });
+  } catch (error) {
+    console.error('❌ [MCP] Failed to handle message:', error.message);
+    if (!res.headersSent) res.status(500).json({ error: 'Failed to handle message' });
   }
 });
 
