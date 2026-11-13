@@ -5,7 +5,7 @@
  */
 import { supabase, getCategories, getCompanyCustomers, findSimilarChats, fetchAllRows } from '../supabase.js';
 import { getEmbedding } from '../ollama.js';
-import { resolvePeriod, previousPeriod, inPeriod, thaiHour, thaiDay, formatThaiDateTime } from './timeframe.js';
+import { resolvePeriod, previousPeriod, inPeriod, thaiHour, thaiDay, formatThaiDate, formatThaiDateTime } from './timeframe.js';
 
 const PRIORITY_RANK = { urgent: 4, high: 3, medium: 2, low: 1 };
 const PRIORITY_TH = { urgent: 'ฉุกเฉิน', high: 'สูง', medium: 'กลาง', low: 'ต่ำ' };
@@ -804,6 +804,145 @@ export async function getResolutionAdvice(ctx, args) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// 9. Emerging issues: categories rising sharply versus the previous 4 weeks
+// ---------------------------------------------------------------------------
+const EMERGING_BASELINE_WINDOWS = 4;   // compare with the average of the 4 previous windows
+const EMERGING_MIN_INCREASE_PCT = 50;  // flagged when more than +50% versus that average
+const EMERGING_MIN_CHATS = 5;          // ... and at least 5 chats in the current window
+const EMERGING_EXAMPLES = 3;
+const EMERGING_MAX_SHOWN = 5;          // categories listed with examples; the rest are summarized in one line
+const DAY_MS_EMERGING = 24 * 60 * 60 * 1000;
+
+/** Problem category keys of one chat (each counted once per chat); falls back to the chat's main category */
+function chatProblemCategories(chat) {
+  const issues = (chat.chat_issues || []).filter(isProblem);
+  if (issues.length > 0) return [...new Set(issues.map(i => keyOf(i.category_id)))];
+  const main = keyOf(chat.category_id);
+  return main && main !== 'other' ? [main] : [];
+}
+
+/**
+ * Categories whose chat count in the current window is more than 50% above the average of the
+ * 4 previous windows of the same length, with at least 5 chats, plus 2-3 example chats each.
+ * Default window: the last 7 days. A partial window (e.g. "this week" on Friday) is compared with
+ * previous windows of the same elapsed length, so the comparison stays fair.
+ */
+export async function detectEmergingIssues(ctx, args, now = new Date()) {
+  const period = resolvePeriod(args.period || { type: 'last_n_days', n: 7 }, now);
+  const effectiveEnd = period.end > now ? now : period.end;
+  // Each baseline window covers the same elapsed length one step earlier: weeks step by 7 days, months by one
+  // calendar month, other periods by their own length. So "this week until Friday noon" is compared with
+  // Monday-Friday noon of each of the 4 previous weeks, and "1-13 Nov" with 1-13 of each of the 4 previous months.
+  const windowMs = Math.max(60 * 60 * 1000, effectiveEnd - period.start);
+  const unit = ['this_week', 'last_week'].includes(period.type) ? 'week'
+    : ['this_month', 'last_month', 'month'].includes(period.type) ? 'month' : 'length';
+  const windowStart = k => {
+    if (unit === 'week') return new Date(period.start.getTime() - k * 7 * DAY_MS_EMERGING);
+    if (unit === 'month') {
+      const d = new Date(period.start.getTime() + 7 * 60 * 60 * 1000); // Thai wall-clock (UTC+7, no DST)
+      d.setUTCMonth(d.getUTCMonth() - k);
+      return new Date(d.getTime() - 7 * 60 * 60 * 1000);
+    }
+    return new Date(period.start.getTime() - k * (period.end - period.start));
+  };
+  const windows = Array.from({ length: EMERGING_BASELINE_WINDOWS }, (_, i) => {
+    const start = windowStart(i + 1);
+    const nextStart = i === 0 ? period.start : windowStart(i);
+    return { start, end: new Date(Math.min(start.getTime() + windowMs, nextStart.getTime())) };
+  });
+  const baselineStart = windows[windows.length - 1].start;
+  const inBaselineWindow = t => windows.some(w => t >= w.start && t < w.end);
+  const { keys: onlyKeys } = resolveCategoryKeys(args.categories, ctx.categories);
+
+  // One query for the whole range, then bucket each chat into the current window or one of the 4 baseline windows
+  const fullRange = { ...period, start: baselineStart, end: effectiveEnd };
+  const chats = await fetchChatsInPeriod(ctx.companyId, fullRange,
+    'id, created_at, category_id, priority, summary, chat_issues(id, category_id, priority, summary)');
+
+  const current = new Map();   // key -> chats[]
+  const baseline = new Map();  // key -> count over the 4 windows
+  let currentChats = 0;
+  let baselineChats = 0;
+  for (const chat of chats) {
+    const t = new Date(chat.created_at);
+    const isCurrent = t >= period.start;
+    if (!isCurrent && !inBaselineWindow(t)) continue;
+    if (isCurrent) currentChats++; else baselineChats++;
+    for (const key of chatProblemCategories(chat)) {
+      if (onlyKeys.length && !onlyKeys.includes(key)) continue;
+      if (isCurrent) {
+        if (!current.has(key)) current.set(key, []);
+        current.get(key).push(chat);
+      } else {
+        baseline.set(key, (baseline.get(key) || 0) + 1);
+      }
+    }
+  }
+
+  const round1 = n => Math.round(n * 10) / 10;
+  const rows = [...new Set([...current.keys(), ...baseline.keys()])].map(key => {
+    const now_ = (current.get(key) || []).length;
+    const avg = (baseline.get(key) || 0) / EMERGING_BASELINE_WINDOWS;
+    return {
+      key,
+      category: categoryName(key, ctx.categories),
+      current_chats: now_,
+      baseline_avg: round1(avg),
+      diff: round1(now_ - avg),
+      pct_change: avg > 0 ? Math.round(((now_ - avg) / avg) * 100) : null,
+      is_new: avg === 0 && now_ > 0
+    };
+  });
+
+  const isEmerging = r => r.current_chats >= EMERGING_MIN_CHATS &&
+    (r.is_new || (r.pct_change !== null && r.pct_change > EMERGING_MIN_INCREASE_PCT));
+  const byIncrease = (a, b) => b.diff - a.diff || b.current_chats - a.current_chats;
+
+  const examplesOf = key => (current.get(key) || [])
+    .map(chat => {
+      const issues = (chat.chat_issues || []).filter(i => isProblem(i) && keyOf(i.category_id) === key);
+      const priority = issues.length ? topChatPriority(issues) : (chat.priority || 'medium');
+      return { chat, priority, summary: issues.find(i => i.summary)?.summary || chat.summary || '-' };
+    })
+    .sort((a, b) => (PRIORITY_RANK[b.priority] || 0) - (PRIORITY_RANK[a.priority] || 0) || new Date(b.chat.created_at) - new Date(a.chat.created_at))
+    .slice(0, EMERGING_EXAMPLES)
+    .map(e => ({ chat_id: e.chat.id, time: formatThaiDateTime(e.chat.created_at), priority: PRIORITY_TH[e.priority] || e.priority, summary: e.summary }));
+
+  // Keep the reply readable on a phone: the top N rising categories get examples, the rest are only counted
+  const allEmerging = rows.filter(isEmerging).sort(byIncrease);
+  const emerging = allEmerging.slice(0, EMERGING_MAX_SHOWN)
+    .map(({ key, ...r }) => ({ ...r, examples: examplesOf(key) }));
+  const rest = allEmerging.slice(EMERGING_MAX_SHOWN);
+  const moreEmerging = rest.length
+    // No chat total here: one chat can sit in several categories, so a sum would overcount
+    ? { categories: rest.length, names: rest.map(r => r.category) }
+    : null;
+  // Rising, but below the alert rules: shown as "worth watching" so a quiet week still gets an answer
+  const watchList = rows.filter(r => !isEmerging(r) && r.diff > 0).sort(byIncrease).slice(0, 3)
+    .map(({ key, ...r }) => r);
+
+  const lastBaselineDay = new Date(period.start.getTime() - 1);
+  return {
+    tool: 'detect_emerging_issues',
+    period: periodFacts(period),
+    baseline: {
+      label: `${unit === 'week' || Math.round((period.end - period.start) / DAY_MS_EMERGING) === 7 ? `ค่าเฉลี่ยช่วงเดียวกันของ ${EMERGING_BASELINE_WINDOWS} สัปดาห์ก่อน`
+        : unit === 'month' ? `ค่าเฉลี่ยช่วงเดียวกันของ ${EMERGING_BASELINE_WINDOWS} เดือนก่อน`
+          : `ค่าเฉลี่ย ${EMERGING_BASELINE_WINDOWS} ช่วงก่อนหน้าที่ยาวเท่ากัน`} (${formatThaiDate(baselineStart)} - ${formatThaiDate(lastBaselineDay)})`,
+      windows: EMERGING_BASELINE_WINDOWS,
+      avg_chats_per_window: round1(baselineChats / EMERGING_BASELINE_WINDOWS)
+    },
+    rules: { min_increase_pct: EMERGING_MIN_INCREASE_PCT, min_chats: EMERGING_MIN_CHATS },
+    counting: 'แชต (1 แชตนับครั้งเดียวต่อหมวด)',
+    total_chats_current: currentChats,
+    emerging,
+    more_emerging: moreEmerging,
+    no_emerging: emerging.length === 0,
+    watch_list: watchList
+  };
+}
+
 export const TOOL_HANDLERS = {
   get_issue_stats: getIssueStats,
   list_chats: listChats,
@@ -812,5 +951,6 @@ export const TOOL_HANDLERS = {
   search_chats: searchChats,
   get_sentiment: getSentiment,
   get_category_info: getCategoryInfo,
-  get_resolution_advice: getResolutionAdvice
+  get_resolution_advice: getResolutionAdvice,
+  detect_emerging_issues: detectEmergingIssues
 };

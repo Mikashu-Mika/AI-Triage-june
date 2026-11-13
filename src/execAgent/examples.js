@@ -65,13 +65,44 @@ async function loadExamples(companyId) {
 }
 
 /**
+ * Verified examples shipped with the code, used for every company in addition to the database rows.
+ * New tools get their examples here, so they work before anyone adds rows to training_examples.
+ */
+const LAST_7_DAYS = { type: 'last_n_days', n: 7 };
+const emergingPlan = period => ({ reply_mode: 'data', continues_previous: false, calls: [{ tool: 'detect_emerging_issues', args: { period } }], unsupported_topics: [], focus: '' });
+export const BUILTIN_EXAMPLES = [
+  { question: 'ช่วงนี้มีปัญหาอะไรเพิ่มขึ้นบ้าง', output: { plan: emergingPlan(LAST_7_DAYS) } },
+  { question: 'สัปดาห์นี้มีปัญหาอะไรพุ่งขึ้นผิดปกติไหม', output: { plan: emergingPlan({ type: 'this_week' }) } },
+  { question: 'ปัญหาไหนกำลังมาแรง', output: { plan: emergingPlan(LAST_7_DAYS) } },
+  { question: 'มีเรื่องไหนน่าจับตาเป็นพิเศษช่วงนี้', output: { plan: emergingPlan(LAST_7_DAYS) } },
+  { question: 'เดือนนี้ปัญหาหมวดไหนเพิ่มขึ้นเยอะ', output: { plan: emergingPlan({ type: 'this_month' }) } }
+];
+const builtinEmbeddings = new Map(); // question -> vector (computed once per process)
+
+async function builtinExamplesWithEmbeddings() {
+  const out = [];
+  for (const e of BUILTIN_EXAMPLES) {
+    if (!builtinEmbeddings.has(e.question)) {
+      const vector = await getEmbedding(e.question).catch(() => null);
+      if (!vector) continue; // retry next time; embeddings may be temporarily unavailable
+      builtinEmbeddings.set(e.question, vector);
+    }
+    out.push({ ...e, embedding: builtinEmbeddings.get(e.question) });
+  }
+  return out;
+}
+
+/**
  * The k verified examples most similar to the question (empty when embeddings are unavailable).
  * @param {string} query
  * @param {string} companyId
  * @param {number} [k]
  */
 export async function findSimilarExamples(query, companyId, k = 5) {
-  const examples = (await loadExamples(companyId)).filter(e => e.embedding);
+  const fromDb = (await loadExamples(companyId)).filter(e => e.embedding);
+  const dbQuestions = new Set(fromDb.map(e => e.question));
+  const builtin = (await builtinExamplesWithEmbeddings()).filter(e => !dbQuestions.has(e.question));
+  const examples = [...fromDb, ...builtin];
   if (examples.length === 0) return [];
   const queryVector = await getEmbedding(query);
   if (!queryVector) return [];

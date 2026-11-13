@@ -61,6 +61,7 @@ function collectChatIds(results) {
     (r.negative_examples || []).forEach(e => e.chat_id && ids.push(e.chat_id));
     (r.positive_examples || []).forEach(e => e.chat_id && ids.push(e.chat_id));
     (r.repeat_customers || []).forEach(rc => (rc.chat_ids || []).forEach(id => ids.push(id)));
+    (r.emerging || []).forEach(e => (e.examples || []).forEach(x => x.chat_id && ids.push(x.chat_id)));
   }
   return [...new Set(ids)].slice(0, 50);
 }

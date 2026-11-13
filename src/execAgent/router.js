@@ -8,7 +8,7 @@ import { findSimilarExamples, formatExamples } from './examples.js';
 
 export const TOOL_NAMES = [
   'get_issue_stats', 'list_chats', 'compare_periods', 'get_customer_stats',
-  'search_chats', 'get_sentiment', 'get_category_info', 'get_resolution_advice'
+  'search_chats', 'get_sentiment', 'get_category_info', 'get_resolution_advice', 'detect_emerging_issues'
 ];
 export const UNSUPPORTED_TOPICS = ['money_amounts', 'slips', 'campaigns', 'admin_response_time', 'personal_data', 'out_of_scope'];
 const PRIORITIES = ['urgent', 'high', 'medium', 'low'];
@@ -17,6 +17,11 @@ const METRICS = ['issues', 'chats', 'new_customers', 'total', 'new', 'new_list',
 const SORTS = ['newest', 'oldest', 'priority'];
 const MAX_CALLS = 3;
 const EXPLICIT_TIME_PATTERN = /(วันนี้|เมื่อวาน|เดือนนี้|เดือนหน้า|สัปดาห์นี้|สัปดาห์ที่แล้ว|เดือนที่แล้ว|ช่วงนี้|มกราคม|กุมภาพันธ์|มีนาคม|เมษายน|พฤษภาคม|มิถุนายน|กรกฎาคม|สิงหาคม|กันยายน|ตุลาคม|พฤศจิกายน|ธันวาคม|\d{1,2}\s*(ม\.ค\.|ก\.พ\.|มี\.ค\.|เม\.ย\.|พ\.ค\.|มิ\.ย\.|ก\.ค\.|ส\.ค\.|ก\.ย\.|ต\.ค\.|พ\.ย\.|ธ\.ค\.)|\d{4}|\d{2}\/\d{2})/i;
+
+// "Which problems are rising / spiking lately" (task 2.4)
+export const EMERGING_PATTERN = /(เพิ่มขึ้น|เพิ่มผิดปกติ|พุ่ง|มาแรง|ผิดปกติ|ขึ้นเยอะ|เยอะขึ้น|มากขึ้น|น่าจับตา|น่ากังวล|ระบาด|trending|emerging|spike)/i;
+const NOT_EMERGING_PATTERN = /(ลูกค้าใหม่|สมัคร|จำนวนแชต|แชตทั้งหมด|อารมณ์|พอใจ)/i;
+const TWO_PERIOD_PATTERN = /(เทียบ|เปรียบเทียบ|กับเดือน|กับสัปดาห์|กับเมื่อวาน|vs\.?)/i;
 
 const periodSchema = {
   type: 'object',
@@ -99,6 +104,7 @@ TOOLS (args in parentheses; every tool also takes "period"):
 - get_sentiment(): customer mood / satisfaction, and chats where customers praised or thanked the service (positive_examples) and negative examples. DO NOT pair with list_chats unless the user explicitly asks for full chat listings ("ขอดูแชต", "ขอรายการแชต").
 - get_category_info(category): what a category means.
 - get_resolution_advice(category?): how to fix / root cause / what to do about a problem (omit category to use the top problem).
+- detect_emerging_issues(): which problems are RISING / spiking / unusual lately ("ช่วงนี้มีปัญหาอะไรเพิ่มขึ้น", "ปัญหาไหนพุ่ง", "มีอะไรผิดปกติไหม", "ปัญหามาแรง", "เรื่องไหนน่าจับตา"). It compares the period with the average of the 4 previous periods by itself, so give only "period" (default last_n_days 7) and never use compare_periods for these questions. Use compare_periods only when the user names two periods or asks for an overall total comparison.
 
 CATEGORIES (use the key in "categories"/"category"):
 ${categoryLines}
@@ -231,6 +237,16 @@ export function sanitizePlan(raw, previousCalls = [], userQuery = '') {
     }
   }
 
+  // Backstop: "what is rising lately" questions always go to detect_emerging_issues, unless the user named two periods to compare
+  // Only problem-count plans are replaced: customer counts, total chats, sentiment etc. keep their own tool.
+  const isProblemCountCall = c => c.tool === 'get_issue_stats' || (c.tool === 'compare_periods' && (!c.args.metric || c.args.metric === 'issues'));
+  if (EMERGING_PATTERN.test(userQuery) && !TWO_PERIOD_PATTERN.test(userQuery) && !NOT_EMERGING_PATTERN.test(userQuery) &&
+      !continues && mode === 'data' && cleanedCalls.every(isProblemCountCall)) {
+    const period = cleanedCalls.find(c => c.args?.period && c.args.period.type !== 'all_time')?.args.period
+      || { type: 'last_n_days', n: 7 };
+    cleanedCalls = [{ tool: 'detect_emerging_issues', args: { period } }];
+  }
+
   const unsupported = (Array.isArray(raw?.unsupported_topics) ? raw.unsupported_topics : []).filter(t => UNSUPPORTED_TOPICS.includes(t));
   // Nothing to fetch and nothing to refuse except "out of scope" = small talk, answered conversationally
   const onlySmallTalk = cleanedCalls.length === 0 && unsupported.every(t => t === 'out_of_scope');
@@ -241,6 +257,16 @@ export function sanitizePlan(raw, previousCalls = [], userQuery = '') {
     focus: (typeof raw?.focus === 'string' && raw.focus !== 'ตอบเรื่องเดียว' ? raw.focus.slice(0, 200) : ''),
     clarify_question: typeof raw?.clarify_question === 'string' ? raw.clarify_question.slice(0, 300) : ''
   };
+}
+
+/** Fixed plan for "which problems are rising" questions, or null when the question is not one of them */
+export function emergingFallbackPlan(query) {
+  if (!EMERGING_PATTERN.test(query) || TWO_PERIOD_PATTERN.test(query) || NOT_EMERGING_PATTERN.test(query)) return null;
+  const period = /สัปดาห์นี้/.test(query) ? { type: 'this_week' }
+    : /เดือนนี้/.test(query) ? { type: 'this_month' }
+      : /วันนี้/.test(query) ? { type: 'today' }
+        : { type: 'last_n_days', n: 7 };
+  return { reply_mode: 'data', calls: [{ tool: 'detect_emerging_issues', args: { period } }], unsupported_topics: [], focus: '', clarify_question: '' };
 }
 
 /**
@@ -280,6 +306,12 @@ export async function routeQuery({ query, companyId, categories, history }) {
       failures.push(`attempt ${i + 1}: ${err.message} (output ${outputTokens ?? '?'} tokens${truncated ? ', hit token cap' : ''}, starts with ${JSON.stringify((content || '').slice(0, 80))})`);
       console.warn(`⚠️ [Router] ${failures[failures.length - 1]}`);
     }
+  }
+  // The LLM gave no usable plan, but "what is rising lately" questions have only one sensible plan
+  const fallback = emergingFallbackPlan(query);
+  if (fallback) {
+    console.warn(`⚠️ [Router] LLM failed (${failures.join(' | ')}); using the detect_emerging_issues fallback plan.`);
+    return { ...fallback, examples_used: [], timing: { attempts: attempts.length, fallback: 'emerging_pattern' } };
   }
   const error = new Error(`Router returned no usable plan: ${failures.join(' | ')}`);
   error.code = 'ROUTER_BAD_OUTPUT';

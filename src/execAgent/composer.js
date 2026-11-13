@@ -196,6 +196,27 @@ function formatAdvice(f) {
   return lines.join('\n');
 }
 
+function formatEmerging(f) {
+  const lines = [`📈 ปัญหาที่กำลังเพิ่มขึ้น ${f.period.label}`, `- เทียบกับ${f.baseline.label}`];
+  if (f.no_emerging) {
+    lines.push('', `✅ ยังไม่พบหมวดที่เพิ่มขึ้นผิดปกติ (เกิน ${f.rules.min_increase_pct}% และอย่างน้อย ${f.rules.min_chats} แชต) ค่ะ`);
+  } else {
+    lines.push('');
+    f.emerging.forEach((e, i) => {
+      const change = e.is_new ? 'หมวดใหม่ ไม่มีในช่วงก่อนหน้า' : `${signed(e.pct_change)}%`;
+      lines.push(`${i + 1}. ${e.category} — ${e.current_chats} แชต (เฉลี่ยเดิม ${e.baseline_avg}, ${change})`);
+      e.examples.forEach(x => lines.push(`   • \`${x.chat_id}\` (${x.time}, ความด่วน${x.priority}) ${clip(x.summary, 100)}`));
+    });
+    if (f.more_emerging) lines.push('', `- อีก ${f.more_emerging.categories} หมวดที่เพิ่มขึ้นเกินเกณฑ์: ${f.more_emerging.names.join(', ')}`);
+  }
+  if (f.watch_list?.length) {
+    lines.push('', '👀 เพิ่มขึ้นแต่ยังไม่ถึงเกณฑ์');
+    f.watch_list.forEach(w => lines.push(`- ${w.category}: ${w.baseline_avg} → ${w.current_chats} แชต`));
+  }
+  if (f.period.is_partial && !f.period.label.startsWith('ย้อนหลัง')) lines.push('', '📌 ช่วงนี้ยังไม่จบ ระบบเทียบกับช่วงเวลาที่ยาวเท่ากันของช่วงก่อนหน้าค่ะ');
+  return lines.join('\n').trim();
+}
+
 const FORMATTERS = {
   get_issue_stats: formatIssueStats,
   list_chats: formatChatList,
@@ -204,7 +225,8 @@ const FORMATTERS = {
   get_customer_stats: formatCustomers,
   get_sentiment: formatSentiment,
   get_category_info: formatCategoryInfo,
-  get_resolution_advice: formatAdvice
+  get_resolution_advice: formatAdvice,
+  detect_emerging_issues: formatEmerging
 };
 
 export function formatDeterministic(results, unsupportedTopics = []) {
@@ -279,6 +301,15 @@ function buildGroundingMaps(facts) {
         }
       }
     }
+
+    // 4b. Emerging issues (current chats, baseline average, change) and their example chat ids
+    for (const e of [...(r.emerging || []), ...(r.watch_list || [])]) {
+      if (!e.category) continue;
+      for (const n of [e.current_chats, e.baseline_avg, e.diff, Math.abs(e.diff ?? 0), e.pct_change, Math.abs(e.pct_change ?? 0)]) addNumberToMap(categoryMap, e.category, n);
+      for (const x of e.examples || []) numbersIn(x.chat_id).forEach(n => addNumberToMap(categoryMap, e.category, n));
+    }
+    // "อีก N หมวด: a, b, c" line names the remaining rising categories next to their count
+    for (const name of r.more_emerging?.names || []) addNumberToMap(categoryMap, name, r.more_emerging.categories);
 
     // 5. Periods (period_a & period_b in compare_periods)
     if (r.period_a?.label) {
@@ -435,6 +466,7 @@ FORMAT
   Format for each item: "1. ชื่อหมวด — N ปัญหา (x%)"
   If no N is specified, show at most the top 5. Add a line about the rest ONLY when "remaining_groups_after_top5" is not null, using exactly its numbers (e.g. "- อีก 9 หมวดที่เหลือ รวม 14 ปัญหา").
 - Comparisons (compare_periods): show both periods with their value and per_day, then diff and pct_change. "biggest_category_changes" are CHANGES, written "ชื่อหมวด: previous → current"; never present them as a ranking and never add percentages to them.
+- Emerging issues (detect_emerging_issues): title "📈 ปัญหาที่กำลังเพิ่มขึ้น" + period.label, then one line with baseline.label. For each item of "emerging" in order: "1. ชื่อหมวด — current_chats แชต (เฉลี่ยเดิม baseline_avg, +pct_change%)" (write "หมวดใหม่" instead of the percentage when is_new is true), then its examples indented: "\`chat_id\` (time) summary". When "more_emerging" is not null, add one line: "- อีก <categories> หมวดที่เพิ่มขึ้นเกินเกณฑ์: <names joined by comma>" (never add a chat total for them). If "no_emerging" is true, say clearly that no category rose above the rules (more than rules.min_increase_pct% and at least rules.min_chats chats) and you may mention "watch_list" as "baseline_avg → current_chats". These counts are CHATS, not issues.
 - Chat lists: numbered, one chat per item: "\`chat_id\` (เวลา, ความด่วน<priority>)" then the customer's problem summarized on the next line indented by 3 spaces; list higher-priority chats first.
 - Do not repeat the same phrase on every line (e.g. "จากการสนทนา X ครั้ง"). Never output an empty bullet, a lone "-" or a line containing only "ค่ะ".
 - You may end with ONE short line: an observation grounded in the facts (📌) or a follow-up suggestion (💡). The last sentence ends with ค่ะ/นะคะ.
