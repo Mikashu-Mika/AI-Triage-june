@@ -1,4 +1,4 @@
-import { isJaikaConfigured, jaikaChat } from '../jaika.js';
+import { isJaikaAvailable, isJaikaOnly, jaikaChat, JAIKA_BACKOFF_MS } from '../jaika.js';
 import http from 'http';
 import https from 'https';
 import dotenv from 'dotenv';
@@ -12,6 +12,9 @@ export const KEEP_ALIVE = process.env.OLLAMA_KEEP_ALIVE || '60m';
 // Max wait for one LLM call of the executive assistant (CPU-only machines need a generous limit)
 export const AGENT_TIMEOUT_MS = parseInt(process.env.AGENT_LLM_TIMEOUT_MS || '900000', 10); // 15 minutes
 
+// Jaika runs on a GPU, so 60 s covers a long agent prompt; 10 s fell back to slow Ollama too eagerly.
+const JAIKA_AGENT_TIMEOUT_MS = parseInt(process.env.JAIKA_AGENT_TIMEOUT_MS || '60000', 10);
+
 let jaikaBackoffUntil = 0;
 let cfBackoffUntil = 0;
 
@@ -22,12 +25,15 @@ let cfBackoffUntil = 0;
  * @returns {Promise<{ content: string, promptTokens: number|null, outputTokens: number|null }>}
  */
 export async function ollamaChat(messages, { format, temperature = 0, maxTokens = 800, timeoutMs = AGENT_TIMEOUT_MS } = {}) {
-  if (isJaikaConfigured() && Date.now() > jaikaBackoffUntil) {
+  if (isJaikaOnly()) {
+    return jaikaChat(messages, { format, temperature, maxTokens, timeoutMs: Math.min(timeoutMs, JAIKA_AGENT_TIMEOUT_MS) });
+  }
+  if (isJaikaAvailable() && Date.now() > jaikaBackoffUntil) {
     try {
-      return await jaikaChat(messages, { format, temperature, maxTokens, timeoutMs: Math.min(timeoutMs, 10000) });
+      return await jaikaChat(messages, { format, temperature, maxTokens, timeoutMs: Math.min(timeoutMs, JAIKA_AGENT_TIMEOUT_MS) });
     } catch (jaikaErr) {
-      console.warn(`⚠️ [AI Jaika] Error (${jaikaErr.message}), backing off 10m to local Ollama...`);
-      jaikaBackoffUntil = Date.now() + 10 * 60 * 1000;
+      console.warn(`⚠️ [AI Jaika] Error (${jaikaErr.message}), backing off to the fallback model...`);
+      jaikaBackoffUntil = Date.now() + JAIKA_BACKOFF_MS;
     }
   }
 
@@ -70,7 +76,7 @@ export async function ollamaChat(messages, { format, temperature = 0, maxTokens 
         cfBackoffUntil = Date.now() + 30 * 60 * 1000;
       }
     } catch (cfErr) {
-      console.warn(`⚠️ [Cloudflare AI] Exception (${cfErr.message}), backing off 10m to local Ollama...`);
+      console.warn(`⚠️ [Cloudflare AI] Exception (${cfErr.message}), backing off to the fallback model...`);
       cfBackoffUntil = Date.now() + 10 * 60 * 1000;
     }
   }

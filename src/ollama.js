@@ -1,9 +1,12 @@
-import { isJaikaConfigured, jaikaEmbedding, jaikaChat } from './jaika.js';
+import { isJaikaAvailable, isJaikaOnly, jaikaEmbedding, jaikaChat, JAIKA_BACKOFF_MS } from './jaika.js';
 import dotenv from 'dotenv';
 import http from 'http';
 dotenv.config();
 
 const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
+
+// After a Jaika triage failure, skip it for a while instead of waiting on every chat.
+let jaikaTriageBackoffUntil = 0;
 
 /**
  * Attempt to repair and parse potentially malformed JSON from LLM output.
@@ -254,7 +257,8 @@ category_id, sub_category (Thai), intent (refund|withdraw|deposit|register|verif
     let outputTokens = null;
     let contextOverflow = false;
 
-    if (isJaikaConfigured()) {
+    let usedJaika = false;
+    if (isJaikaOnly() || (isJaikaAvailable() && Date.now() > jaikaTriageBackoffUntil)) {
       try {
         const jaikaRes = await jaikaChat([
           { role: 'system', content: systemPrompt },
@@ -268,8 +272,12 @@ category_id, sub_category (Thai), intent (refund|withdraw|deposit|register|verif
         result = repairAndParseJSON(jaikaRes.content);
         promptTokens = jaikaRes.promptTokens;
         outputTokens = jaikaRes.outputTokens;
+        usedJaika = true;
       } catch (jaikaErr) {
-        console.warn(`⚠️ [AI Jaika Triage] Error (${jaikaErr.message}), falling back...`);
+        if (isJaikaOnly()) throw jaikaErr;
+        console.warn(`⚠️ [AI Jaika Triage] Error (${jaikaErr.message}), backing off, falling back...`);
+        result = undefined;
+        jaikaTriageBackoffUntil = Date.now() + JAIKA_BACKOFF_MS;
       }
     }
 
@@ -418,7 +426,7 @@ category_id, sub_category (Thai), intent (refund|withdraw|deposit|register|verif
       ai_recommendation: sanitizeChinese(result.ai_recommendation || 'แนะนำตรวจสอบปัญหาระบบทั่วไป'),
       detected_issues: sanitizedIssues,
       _meta: {
-        model: isJaikaConfigured() ? (process.env.JAIKA_MODEL_CHAT || 'qwen2.5-14b') : MODEL_LLM,
+        model: usedJaika ? (process.env.JAIKA_MODEL_CHAT || 'qwen2.5-14b') : MODEL_LLM,
         num_ctx: OLLAMA_NUM_CTX,
         prompt_tokens: promptTokens,
         output_tokens: outputTokens,
@@ -441,12 +449,13 @@ let cfEmbBackoffUntil = 0;
 
 export async function getEmbedding(text) {
   try {
-    if (isJaikaConfigured() && Date.now() > jaikaEmbBackoffUntil) {
+    if (isJaikaOnly()) return await jaikaEmbedding(text);
+    if (isJaikaAvailable() && Date.now() > jaikaEmbBackoffUntil) {
       try {
         return await jaikaEmbedding(text);
       } catch (jaikaErr) {
-        console.warn(`⚠️ [AI Jaika Embedding] Error (${jaikaErr.message}), backing off 10m...`);
-        jaikaEmbBackoffUntil = Date.now() + 10 * 60 * 1000;
+        console.warn(`⚠️ [AI Jaika Embedding] Error (${jaikaErr.message}), backing off...`);
+        jaikaEmbBackoffUntil = Date.now() + JAIKA_BACKOFF_MS;
       }
     }
 
