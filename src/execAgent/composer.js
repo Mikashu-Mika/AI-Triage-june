@@ -4,6 +4,7 @@
  * deterministic formatter below is used, so the bot never presents invented figures.
  */
 import { ollamaChat, stripForeignScripts } from './llm.js';
+import { todayContext } from './timeframe.js';
 
 const UNSUPPORTED_REPLIES = {
   money_amounts: 'ระบบยังไม่มีข้อมูลยอดเงิน/ยอดฝาก-ถอน/ธุรกรรมทางการเงิน จึงตอบส่วนนี้ไม่ได้ค่ะ',
@@ -11,6 +12,8 @@ const UNSUPPORTED_REPLIES = {
   campaigns: 'ระบบยังไม่มีข้อมูลแคมเปญหรือช่องทางการตลาด จึงตอบส่วนนี้ไม่ได้ค่ะ',
   admin_response_time: 'ระบบยังไม่มีข้อมูลเวลาที่แอดมินตอบแชต (SLA) จึงตอบส่วนนี้ไม่ได้ค่ะ',
   personal_data: 'ขออภัยค่ะ ไม่สามารถเปิดเผยข้อมูลติดต่อส่วนตัวของลูกค้า (เบอร์โทร/อีเมล/รหัสผ่าน) ตามนโยบายความปลอดภัยค่ะ',
+  customer_tier: 'ระบบยังไม่มีข้อมูลระดับสมาชิกของลูกค้า (เช่น ใครเป็น VIP) จึงนับลูกค้า VIP ไม่ได้ค่ะ',
+  holidays: 'ระบบยังไม่มีข้อมูลปฏิทินวันหยุด/เทศกาล จึงเทียบช่วงเทศกาลกับวันปกติไม่ได้ค่ะ ถ้าระบุวันที่มา ช่วยดูให้ได้นะคะ',
   out_of_scope: 'เรื่องนี้อยู่นอกขอบเขตข้อมูลของระบบค่ะ'
 };
 
@@ -40,13 +43,13 @@ function formatIssueStats(f, query = '') {
     }
     return lines.join('\n');
   }
-  const isRemainingQuery = /(ที่เหลือ|หมวดที่เหลือ|อีก \d+ หมวด)/i.test(query);
+  const unit = f.group_unit || GROUP_UNIT[f.group_by] || 'หมวด';
+  const isRemainingQuery = f.remaining_only || /(ที่เหลือ|หมวดที่เหลือ|อีก \d+ (หมวด|ช่วงเวลา|ระดับ))/i.test(query);
   if (isRemainingQuery && f.remaining_groups_after_top5?.list) {
-    const lines = [`📊 รายละเอียด ${f.remaining_groups_after_top5.groups} หมวดที่เหลือ (${f.period.label})`, `- รวม ${f.remaining_groups_after_top5.issues} ปัญหา`, ''];
-    f.remaining_groups_after_top5.list.forEach((g, i) => {
-      lines.push(`${i + 6}. ${g.group} — ${g.issues} ปัญหา (${g.pct_of_matched_issues}%)`);
-    });
-    lines.push('', '💡 พิมพ์ชื่อหมวดเพื่อดูรายการแชตได้ค่ะ');
+    const rest = f.remaining_groups_after_top5;
+    const lines = [`📊 อีก ${rest.groups} ${unit}ที่เหลือ ${f.period.label}`, `- รวม ${rest.issues} ปัญหา`, ''];
+    rest.list.forEach((g, i) => lines.push(`${i + 6}. ${g.group} — ${g.issues} ปัญหา (${g.pct_of_all_problems}%)`));
+    if (f.group_by === 'category') lines.push('', '💡 พิมพ์ชื่อหมวดเพื่อดูรายการแชตได้ค่ะ');
     return lines.join('\n').trim();
   }
   const cats = f.filters.categories;
@@ -65,9 +68,9 @@ function formatIssueStats(f, query = '') {
   const showList = f.groups.length > 1 || f.group_by !== 'category';
   if (showList) {
     lines.push('', GROUP_TITLE[f.group_by] || GROUP_TITLE.category);
-    f.groups.slice(0, 5).forEach((g, i) => lines.push(`${i + 1}. ${g.group} — ${g.issues} ปัญหา (${g.pct_of_matched_issues}%)`));
+    f.groups.slice(0, 5).forEach((g, i) => lines.push(`${i + 1}. ${g.group} — ${g.issues} ปัญหา (${g.pct_of_all_problems}%)`));
     const rest = f.remaining_groups_after_top5;
-    if (rest) lines.push(`- อีก ${rest.groups} ${GROUP_UNIT[f.group_by] || 'หมวด'}ที่เหลือ รวม ${rest.issues} ปัญหา`);
+    if (rest) lines.push(`- อีก ${rest.groups} ${unit}ที่เหลือ รวม ${rest.issues} ปัญหา`);
   }
   lines.push('');
   if (f.period.is_partial) lines.push('📌 ช่วงเวลานี้ยังไม่จบ ตัวเลขนับถึงปัจจุบันค่ะ');
@@ -129,13 +132,29 @@ function formatCompare(f) {
     f.biggest_category_changes.forEach(c => lines.push(`- ${c.category}: ${c.previous} → ${c.current}`));
   }
   if (f.period_a.is_partial) {
-    lines.push('', `📌 ${f.period_a.label} ยังไม่จบ (${f.period_a.days} วัน) ควรเทียบที่ค่าเฉลี่ยต่อวันค่ะ`);
+    // A running month is shorter: the total can be lower while the daily rate is higher
+    const totalWord = f.diff < 0 ? 'ยอดรวมยังน้อยกว่า' : f.diff > 0 ? 'ยอดรวมมากกว่า' : 'ยอดรวมเท่ากับ';
+    const rateWord = f.period_a.per_day > f.period_b.per_day ? 'สูงกว่า' : f.period_a.per_day < f.period_b.per_day ? 'ต่ำกว่า' : 'เท่ากับ';
+    lines.push('', `📌 ${f.period_a.label} ยังไม่จบ (${f.period_a.days} วัน): ${totalWord}${f.period_b.label} แต่ค่าเฉลี่ยต่อวัน${rateWord} (${f.period_a.per_day} กับ ${f.period_b.per_day}/วัน) ค่ะ`);
   }
   return lines.join('\n');
 }
 
-function formatCustomers(f) {
-  const lines = [`👥 ข้อมูลลูกค้า ${f.period.label}`, `- ลูกค้าใหม่: ${f.new_customers_in_period} คน`, `- ลูกค้าทั้งหมดในระบบ: ${f.total_customers} คน`];
+function formatCustomers(f, query = '') {
+  const allTime = f.period.label.includes('ทั้งหมด');
+  const lines = [`👥 ข้อมูลลูกค้า ${f.period.label}`];
+  if (f.metric === 'total') {
+    lines.push(allTime
+      ? `- ลูกค้าทั้งหมดในระบบ: ${f.total_customers_now} คน`
+      : `- ลูกค้าทั้งหมด ณ สิ้นช่วงนี้: ${f.total_customers_at_period_end} คน`);
+    if (!allTime) lines.push(`- สมัครใหม่ในช่วงนี้: ${f.new_customers_in_period} คน`);
+  } else {
+    lines.push(`- ลูกค้าใหม่: ${f.new_customers_in_period} คน`, `- ลูกค้าทั้งหมดในระบบตอนนี้: ${f.total_customers_now} คน`);
+  }
+  if (f.top_customers_by_problems?.length && /(มากที่สุด|เยอะที่สุด|มากสุด|เยอะสุด|อันดับ)/.test(query)) {
+    lines.push('', '🏆 ลูกค้าที่มีปัญหามากที่สุด');
+    f.top_customers_by_problems.forEach((c, i) => lines.push(`${i + 1}. ${c.name} (\`${c.customer_id}\`) ${c.problems} ปัญหา จาก ${c.chats} แชต · แชต ${c.chat_ids.map(id => `\`${id}\``).join(', ')}`));
+  }
   if (f.new_customers?.length) {
     lines.push('', '🆕 ลูกค้าที่สมัครใหม่');
     f.new_customers.forEach((c, i) => lines.push(`${i + 1}. ${c.name} (\`${c.customer_id}\`) สมัคร ${c.registered_at}`));
@@ -157,12 +176,16 @@ function formatCustomers(f) {
 function formatSentiment(f) {
   const lines = [`😊 อารมณ์ลูกค้า ${f.period.label}`, `- จาก ${f.total_chats} แชต`];
   f.polarity.forEach(p => lines.push(`- เชิง${p.group}: ${p.count} แชต (${p.pct}%)`));
+  if (f.key_moods && f.total_chats) {
+    lines.push(`- โกรธ ${f.key_moods['โกรธ']} แชต · ไม่พอใจ ${f.key_moods['ไม่พอใจ']} แชต · พอใจ ${f.key_moods['พอใจ']} แชต`);
+  }
   const examples = (title, list) => {
     if (!list?.length) return;
     lines.push('', title);
     list.forEach((e, i) => lines.push(`${i + 1}. \`${e.chat_id}\` (${e.time}, ${e.sentiment})`, `   ${clip(e.summary, 140)}`));
   };
-  examples('💖 แชตที่ลูกค้าชม/พอใจ', f.positive_examples);
+  if (f.praise_examples?.length) examples(`💖 แชตที่ลูกค้าชม/ขอบคุณ (${f.praise_chats} แชต)`, f.praise_examples);
+  else if (f.total_chats) lines.push('', `💖 ยังไม่พบแชตที่ลูกค้าชมหรือขอบคุณการบริการโดยตรงค่ะ${f.positive_label_note ? ` (${f.positive_label_note})` : ''}`);
   examples('📌 ตัวอย่างแชตเชิงลบ', f.negative_examples);
   return lines.join('\n');
 }
@@ -229,8 +252,8 @@ const FORMATTERS = {
   detect_emerging_issues: formatEmerging
 };
 
-export function formatDeterministic(results, unsupportedTopics = []) {
-  const parts = results.map(r => r.error ? `⚠️ ดึงข้อมูลส่วนนี้ไม่สำเร็จ: ${r.error}` : (FORMATTERS[r.tool]?.(r) || ''));
+export function formatDeterministic(results, unsupportedTopics = [], query = '') {
+  const parts = results.map(r => r.error ? `⚠️ ดึงข้อมูลส่วนนี้ไม่สำเร็จ: ${r.error}` : (FORMATTERS[r.tool]?.(r, query) || ''));
   if (unsupportedTopics.length) parts.push(unsupportedText(unsupportedTopics));
   return parts.filter(Boolean).join('\n\n');
 }
@@ -268,7 +291,7 @@ function buildGroundingMaps(facts) {
         if (g.group) {
           addNumberToMap(categoryMap, g.group, g.issues);
           addNumberToMap(categoryMap, g.group, g.chats);
-          addNumberToMap(categoryMap, g.group, g.pct_of_matched_issues);
+          addNumberToMap(categoryMap, g.group, g.pct_of_all_problems);
         }
       }
     }
@@ -277,7 +300,7 @@ function buildGroundingMaps(facts) {
       for (const g of r.remaining_groups_after_top5.list) {
         if (g.group) {
           addNumberToMap(categoryMap, g.group, g.issues);
-          addNumberToMap(categoryMap, g.group, g.pct_of_matched_issues);
+          addNumberToMap(categoryMap, g.group, g.pct_of_all_problems);
         }
       }
     }
@@ -464,7 +487,12 @@ FORMAT
 - Line 2: the overall total first (e.g. "- รวม 48 ปัญหา จาก 10 แชต").
 - Ranked groups: MUST strictly take items in the exact order of the "groups" array starting from the FIRST item (index 0). NEVER skip, reorder, or filter out any item from "groups" (every item in "groups" is an official problem category, including "ข้อเสนอแนะและร้องเรียน"). If the user asks for top N (e.g. 3 อันดับแรก), you MUST output ALL requested N items as a numbered list (1., 2., 3...) and NEVER output only 1 item!
   Format for each item: "1. ชื่อหมวด — N ปัญหา (x%)"
-  If no N is specified, show at most the top 5. Add a line about the rest ONLY when "remaining_groups_after_top5" is not null, using exactly its numbers (e.g. "- อีก 9 หมวดที่เหลือ รวม 14 ปัญหา").
+  If no N is specified, show at most the top 5. Add a line about the rest ONLY when "remaining_groups_after_top5" is not null, using exactly its numbers and its "unit" (e.g. "- อีก 9 หมวดที่เหลือ รวม 14 ปัญหา", or "- อีก 3 ช่วงเวลาที่เหลือ รวม 70 ปัญหา" when grouped by hour).
+  Percentages are "pct_of_all_problems": the share of ALL problems in the period. Write the category names exactly as in the facts, character for character.
+- Total line: the issue count is the value of matched_problem_issues and the chat count is the value of matched_chats (write the numbers, never the field names). Never use any other chat count there.
+- Title by topic: problems "📊 สรุปปัญหา…", customers "👥 ข้อมูลลูกค้า…", mood "😊 อารมณ์ลูกค้า…", chat lists "📋 …", comparisons "📅 เปรียบเทียบ…". Never call customer or mood data "สรุปปัญหา".
+- If the question asks WHY something changed, answer it: name the categories that changed most (from biggest_category_changes) as the main reasons, and if a period is_partial, say whether the per-day average went up or down. Do not claim causes the facts do not show.
+- If remaining_only is true, list ONLY the groups after the top 5 (from rank 6), never the top 5 again.
 - Comparisons (compare_periods): show both periods with their value and per_day, then diff and pct_change. "biggest_category_changes" are CHANGES, written "ชื่อหมวด: previous → current"; never present them as a ranking and never add percentages to them.
 - Emerging issues (detect_emerging_issues): title "📈 ปัญหาที่กำลังเพิ่มขึ้น" + period.label, then one line with baseline.label. For each item of "emerging" in order: "1. ชื่อหมวด — current_chats แชต (เฉลี่ยเดิม baseline_avg, +pct_change%)" (write "หมวดใหม่" instead of the percentage when is_new is true), then its examples indented: "\`chat_id\` (time) summary". When "more_emerging" is not null, add one line: "- อีก <categories> หมวดที่เพิ่มขึ้นเกินเกณฑ์: <names joined by comma>" (never add a chat total for them). If "no_emerging" is true, say clearly that no category rose above the rules (more than rules.min_increase_pct% and at least rules.min_chats chats) and you may mention "watch_list" as "baseline_avg → current_chats". These counts are CHATS, not issues.
 - Chat lists: numbered, one chat per item: "\`chat_id\` (เวลา, ความด่วน<priority>)" then the customer's problem summarized on the next line indented by 3 spaces; list higher-priority chats first.
@@ -494,10 +522,57 @@ FOR RESOLUTION ADVICE (get_resolution_advice facts):
  * Compose the reply for a data answer.
  * @returns {Promise<{ reply: string, mode: 'llm'|'deterministic' }>}
  */
+// Answers that are lists or simple counts read best in the fixed format: the LLM only adds risk there
+// (renamed categories, stray markdown, "สรุปปัญหา" titles on customer data).
+const DETERMINISTIC_TOOLS = new Set(['get_customer_stats', 'get_sentiment', 'list_chats', 'search_chats', 'get_category_info', 'compare_periods']);
+const WHY_PATTERN = /(ทำไม|เพราะอะไร|สาเหตุ|อธิบาย|วิเคราะห์|ควรแก้|แก้ยังไง|แก้ไขอย่างไร)/;
+
+/** The LLM reply must keep the facts' wording: no foreign leftovers and no invented category names */
+export function wordingIsClean(reply, facts) {
+  // Markdown leftovers and JSON field names are not part of a Thai answer
+  const text = reply.replace(/`[^`\n]*`/g, '');
+  if (/```|\*\*|ชื่อหมวด\s*:|[a-z]+_[a-z_]+/i.test(text)) return false;
+  // English words the facts never contain are leftovers ("สรุปปัญหายesterday"); words from the data (API, SMS) are fine
+  const factText = JSON.stringify(facts).toLowerCase();
+  const strayWord = (text.match(/[a-z]{4,}/gi) || []).find(w => !factText.includes(w.toLowerCase()));
+  if (strayWord) {
+    console.warn(`⚠️ [Composer] Stray English word in reply: "${strayWord}"`);
+    return false;
+  }
+  // The total line must use the matched counts, not the period's overall total
+  for (const m of text.matchAll(/รวม\s*(\d+)\s*ปัญหา\s*จาก\s*(\d+)\s*แชต/g)) {
+    const ok = facts.some(r => (String(r.matched_problem_issues) === m[1] && String(r.matched_chats) === m[2]) ||
+      (String(r.issues_in_period) === m[1] && String(r.chats_in_period) === m[2]));
+    if (!ok) {
+      console.warn(`⚠️ [Composer] Total line does not match the facts: "${m[0]}"`);
+      return false;
+    }
+  }
+  const known = new Set();
+  for (const r of facts) {
+    for (const g of [...(r.groups || []), ...(r.remaining_groups_after_top5?.list || [])]) known.add(g.group);
+    for (const c of r.biggest_category_changes || []) known.add(c.category);
+    for (const e of [...(r.emerging || []), ...(r.watch_list || [])]) known.add(e.category);
+    if (r.category?.name) known.add(r.category.name);
+  }
+  // Every ranked line "N. <name> — ..." must name a group exactly as the facts spell it
+  for (const m of String(reply).matchAll(/^\s*\d{1,2}\.\s+([^—\n]+?)\s+—/gm)) {
+    if (!known.has(m[1].trim())) {
+      console.warn(`⚠️ [Composer] Unknown group name in reply: "${m[1].trim()}"`);
+      return false;
+    }
+  }
+  return true;
+}
+
 export async function composeAnswer({ query, focus, results, unsupportedTopics }) {
   const deterministic = formatDeterministic(results, unsupportedTopics, query);
   const facts = compactFacts(results);
   const needsAdvice = results.some(r => r.tool === 'get_resolution_advice' && !r.error);
+  const isWhy = WHY_PATTERN.test(query);
+  if (!isWhy && (results.every(r => r.error || DETERMINISTIC_TOOLS.has(r.tool)) || results.some(r => r.remaining_only))) {
+    return { reply: deterministic, mode: 'deterministic' };
+  }
 
   try {
     const { content, truncated } = await ollamaChat([
@@ -516,6 +591,10 @@ export async function composeAnswer({ query, focus, results, unsupportedTopics }
     }
     if (!numbersAreGrounded(reply, facts, query + ' ' + unsupportedText(unsupportedTopics))) {
       console.warn('⚠️ [Composer] LLM reply contains numbers not present in the facts; using deterministic format.');
+      return { reply: deterministic, mode: 'deterministic' };
+    }
+    if (!wordingIsClean(reply, facts)) {
+      console.warn('⚠️ [Composer] LLM reply changed names or left markup; using deterministic format.');
       return { reply: deterministic, mode: 'deterministic' };
     }
     // Safeguard: Ensure Line 1 period matches facts period (prevent LLM few-shot hallucination of 'เมื่อวาน' vs 'วันนี้')
@@ -543,6 +622,10 @@ export async function composeAnswer({ query, focus, results, unsupportedTopics }
  */
 export async function composeChitchat(query, history = []) {
   const fallback = `สวัสดีค่ะ Sift AI ช่วยตอบเรื่อง${CAPABILITIES}ได้ค่ะ ลองถามได้เลยนะคะ เช่น "สรุปปัญหาเดือนนี้" หรือ "เคสด่วนสัปดาห์นี้มีอะไรบ้าง"`;
+  // The date is a fact, not small talk: never let the LLM re-spell it (it once wrote พ.ย. as พฤษภาคม)
+  if (/(วันนี้วันอะไร|วันนี้วันที่|วันนี้วันที่เท่าไหร่|วันนี้คือวันอะไร)/.test(query)) {
+    return `วันนี้คือ${todayContext().thai} ค่ะ 😊 อยากดูสรุปปัญหาของวันนี้หรือช่วงไหนบอกได้เลยนะคะ`;
+  }
   const lastTurn = history[history.length - 1];
   const context = lastTurn ? `Previous question: ${lastTurn.user_query}\nPrevious answer (excerpt): ${(lastTurn.reply || '').replace(/\s+/g, ' ').slice(0, 200)}` : 'No previous turn.';
   try {
@@ -552,13 +635,18 @@ export async function composeChitchat(query, history = []) {
         content: `You are "Sift AI", a friendly, polite Thai assistant for business executives about customer-chat analytics. Reply in Thai only (ค่ะ/นะคะ), 1-3 short sentences, warm and a little playful when the user is casual.
 - Greetings / thanks / compliments ("ทำไมเก่งจัง"): respond naturally and modestly, then offer help.
 - Small talk or anything outside the business ("วันนี้กินอะไรดี", weather): play along lightly in one sentence, say you don't have data on that, and suggest a business question you CAN answer (${CAPABILITIES}).
-- The user is unhappy with a previous answer ("ตอบมั่ว", "ผิด"): apologize briefly without arguing, and ask which part was wrong or invite them to ask again with the period/category.
+- The user is unhappy with a previous answer ("ตอบมั่ว", "ผิด", "ทำไมตอบผิด", "ทำไมเป็น 100%"): apologize briefly without arguing, say plainly what in the previous answer may have been unclear if you can see it, and invite them to ask again with the period/category.
+- Thanks in any spelling ("แต้งกิ้ว", "ขอบคุณคับ", "thx"): accept warmly; never apologize for thanks.
+- Test messages ("เทส", "test") or instructions that are not questions ("งั้นถามใหม่", "ต่อไปรอบคอบหน่อย", "..."): acknowledge in one short sentence and say you are ready for the question. Never apologize for a test.
+- The user asks what a word or phrase in the previous answer means: explain it plainly from the previous answer. Common ones: "ช่วงเวลานี้ยังไม่จบ / ยังไม่สมบูรณ์" = the period is still running, so numbers count up to now; "ปัญหายอดมาก/วันที่มีปัญหามากที่สุด" = the day or time with the highest number of problems; "อีก N หมวดที่เหลือ" = categories after the top 5; a strange date range in an earlier answer = a system error in that answer, apologize.
+- The current date is ${todayContext().thai}. Use it when asked "วันนี้วันอะไร".
 - Never invent statistics, numbers or business facts in this reply. Do not start every reply with "สวัสดี".`
       },
       { role: 'user', content: `${context}\n\nMessage: ${query}` }
     ], { temperature: 0.6, maxTokens: 512 });
     const reply = tidyReply(stripForeignScripts(content));
-    return reply && numbersIn(reply).every(n => parseInt(n, 10) <= 24) ? reply : fallback;
+    const dateNumbers = new Set(numbersIn(todayContext().thai));
+    return reply && numbersIn(reply).every(n => parseInt(n, 10) <= 24 || dateNumbers.has(n)) ? reply : fallback;
   } catch {
     return fallback;
   }

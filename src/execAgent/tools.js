@@ -231,8 +231,11 @@ export async function getIssueStats(ctx, args) {
     : groupBy === 'priority' ? `ระดับ${PRIORITY_TH[g] || g}`
     : groupBy === 'hour' ? `${g.padStart(2, '0')}:00-${g.padStart(2, '0')}:59 น.`
     : g;
+  // Percentages are always a share of ALL problems in the period, so a one-category answer reads
+  // "21 ปัญหา (6.4%)" instead of a meaningless "100%" of itself.
+  const pctOfAll = n => (allProblems.length ? Math.round((n / allProblems.length) * 1000) / 10 : 0);
   const groupList = [...groups.entries()]
-    .map(([g, v]) => ({ group: label(g), issues: v.issues, chats: v.chats, pct_of_matched_issues: matchedIssues ? Math.round((v.issues / matchedIssues) * 1000) / 10 : 0 }))
+    .map(([g, v]) => ({ group: label(g), issues: v.issues, chats: v.chats, pct_of_all_problems: pctOfAll(v.issues) }))
     .sort((a, b) => b.issues - a.issues);
   const limit = args.limit ? Math.max(1, parseInt(args.limit, 10)) : groupList.length;
 
@@ -241,17 +244,19 @@ export async function getIssueStats(ctx, args) {
     period: periodFacts(period),
     filters: { categories: keys.map(k => categoryName(k, ctx.categories)), priorities: priorities.map(p => PRIORITY_TH[p]), unknown_categories: unknown },
     group_by: groupBy,
-    total_chats_in_period: chats.length,
+    group_unit: { category: 'หมวด', priority: 'ระดับ', day: 'วัน', hour: 'ช่วงเวลา' }[groupBy],
     total_problem_issues_in_period: allProblems.length,
+    // The chat count shown with the issue total: chats that have at least one matching problem
     matched_chats: matchedChats,
     matched_problem_issues: matchedIssues,
-    pct_of_all_problems: allProblems.length ? Math.round((matchedIssues / allProblems.length) * 1000) / 10 : 0,
+    pct_of_all_problems: pctOfAll(matchedIssues),
     groups: groupList.slice(0, limit),
     // Exact numbers for "the rest" so the writer never has to invent them
     remaining_groups_after_top5: groupList.length > 5 ? {
       groups: groupList.length - 5,
+      unit: { category: 'หมวด', priority: 'ระดับ', day: 'วัน', hour: 'ช่วงเวลา' }[groupBy],
       issues: groupList.slice(5).reduce((sum, g) => sum + g.issues, 0),
-      list: groupList.slice(5).map(g => ({ group: g.group, issues: g.issues, pct_of_matched_issues: g.pct_of_matched_issues })),
+      list: groupList.slice(5).map(g => ({ group: g.group, issues: g.issues, pct_of_all_problems: g.pct_of_all_problems })),
       min_issues_per_group: Math.min(...groupList.slice(5).map(g => g.issues)),
       max_issues_per_group: Math.max(...groupList.slice(5).map(g => g.issues))
     } : null,
@@ -415,11 +420,14 @@ export async function getCustomerStats(ctx, args) {
   if (error) throw new Error(`Failed to load customers: ${error.message}`);
   const newCustomers = (customers || []).filter(c => c.created_at && inPeriod(c.created_at, period));
 
+  // "How many customers did we have in August" = registered up to the end of August, not today's total
+  const totalAtEnd = (customers || []).filter(c => c.created_at && new Date(c.created_at) < period.end).length;
   const result = {
     tool: 'get_customer_stats',
     metric,
     period: periodFacts(period),
-    total_customers: (customers || []).length,
+    total_customers_now: (customers || []).length,
+    total_customers_at_period_end: totalAtEnd,
     new_customers_in_period: newCustomers.length
   };
 
@@ -447,7 +455,7 @@ export async function getCustomerStats(ctx, args) {
   }
   if (metric === 'repeat_customers') {
     // Customers who contacted more than once in the period, and those who repeated the same problem category
-    const chats = await fetchChatsInPeriod(ctx.companyId, period, 'id, created_at, customer_id, chat_issues(category_id)');
+    const chats = await fetchChatsInPeriod(ctx.companyId, period, 'id, created_at, customer_id, chat_issues(category_id, priority)');
     const byCustomer = new Map();
     chats.filter(c => c.customer_id).forEach(c => {
       if (!byCustomer.has(c.customer_id)) byCustomer.set(c.customer_id, []);
@@ -463,6 +471,14 @@ export async function getCustomerStats(ctx, args) {
     result.customers_with_multiple_chats = repeaters.length;
     result.customers_repeating_same_problem = repeaters.filter(r => r.repeated_problems.length > 0).length;
     result.repeat_customers = repeaters.slice(0, LIST_LIMIT_MAX);
+    // "Which customer has the most problems": rank by problem issues, not only by number of chats
+    result.top_customers_by_problems = [...byCustomer.entries()].map(([customerId, list]) => ({
+      customer_id: customerId,
+      name: names.get(customerId) || '-',
+      problems: list.reduce((s, chat) => s + (chat.chat_issues || []).filter(isProblem).length, 0),
+      chats: list.length,
+      chat_ids: list.map(c => c.id).slice(0, 5)
+    })).filter(c => c.problems > 0).sort((a, b) => b.problems - a.problems || b.chats - a.chats).slice(0, 5);
   }
   return result;
 }
@@ -668,7 +684,9 @@ export async function searchChats(ctx, args) {
 // ---------------------------------------------------------------------------
 export async function getSentiment(ctx, args) {
   const period = resolvePeriod(args.period);
-  const chats = await fetchChatsInPeriod(ctx.companyId, period, 'id, created_at, sentiment, summary');
+  const chats = (await fetchChatsInPeriod(ctx.companyId, period, 'id, created_at, sentiment, summary, conversation'))
+    // Failed test triages ("Triage failed: ...") carry no real mood
+    .filter(c => !/^triage failed/i.test(c.summary || ''));
   const counts = {};
   for (const c of chats) counts[c.sentiment || 'ไม่ระบุ'] = (counts[c.sentiment || 'ไม่ระบุ'] || 0) + 1;
   // Stored sentiment is free text from the LLM; bucket it into a polarity for a stable overview
@@ -693,14 +711,24 @@ export async function getSentiment(ctx, args) {
   chats.forEach(c => { polarity[polarityOf(c.sentiment)]++; });
   const negative = chats.filter(c => polarityOf(c.sentiment) === 'ลบ');
   const positive = chats.filter(c => polarityOf(c.sentiment) === 'บวก');
+  // A positive mood label is not praise: only chats whose text actually thanks or compliments the service count
+  // (a polite "ขอบคุณค่ะ" at the end of a complaint is not praise, and an unhappy chat never is)
+  const PRAISE = /(ขอบคุณมาก|ขอบคุณที่ช่วย|ขอบคุณแอดมิน|ประทับใจ|บริการดี|แอดมินน่ารัก|ชื่นชม|ชมเชย|เยี่ยมมาก|ช่วยได้มาก|แก้ไขให้เร็ว)/;
+  const praised = chats.filter(c => polarityOf(c.sentiment) !== 'ลบ' && (PRAISE.test(c.conversation || '') || PRAISE.test(c.summary || '')));
+  const byLabel = label => chats.filter(c => (c.sentiment || '').includes(label) && !(label === 'พอใจ' && /ไม่พอใจ/.test(c.sentiment))).length;
   return {
     tool: 'get_sentiment',
     period: periodFacts(period),
     total_chats: chats.length,
     polarity: Object.entries(polarity).map(([group, count]) => ({ group, count, pct: chats.length ? Math.round((count / chats.length) * 1000) / 10 : 0 })),
     distribution: Object.entries(counts).map(([sentiment, count]) => ({ sentiment, count, pct: chats.length ? Math.round((count / chats.length) * 1000) / 10 : 0 })).sort((a, b) => b.count - a.count),
+    key_moods: { โกรธ: byLabel('โกรธ'), ไม่พอใจ: byLabel('ไม่พอใจ'), พอใจ: byLabel('พอใจ') },
     negative_examples: negative.slice(0, 5).map(c => ({ chat_id: c.id, time: formatThaiDateTime(c.created_at), sentiment: c.sentiment, summary: c.summary })),
-    positive_examples: positive.slice(0, 5).map(c => ({ chat_id: c.id, time: formatThaiDateTime(c.created_at), sentiment: c.sentiment, summary: c.summary }))
+    praise_chats: praised.length,
+    praise_examples: praised.slice(0, 5).map(c => ({ chat_id: c.id, time: formatThaiDateTime(c.created_at), sentiment: c.sentiment, summary: c.summary })),
+    positive_label_note: positive.length && !praised.length
+      ? `มี ${positive.length} แชตที่ระบบประเมินอารมณ์เป็นเชิงบวก แต่ไม่พบคำชมหรือคำขอบคุณในเนื้อหาแชต`
+      : null
   };
 }
 

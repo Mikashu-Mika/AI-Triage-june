@@ -59,8 +59,9 @@ function collectChatIds(results) {
     (r.items || []).forEach(it => it.chat_id && ids.push(it.chat_id));
     (r.example_chats || []).forEach(id => ids.push(id));
     (r.negative_examples || []).forEach(e => e.chat_id && ids.push(e.chat_id));
-    (r.positive_examples || []).forEach(e => e.chat_id && ids.push(e.chat_id));
+    (r.praise_examples || []).forEach(e => e.chat_id && ids.push(e.chat_id));
     (r.repeat_customers || []).forEach(rc => (rc.chat_ids || []).forEach(id => ids.push(id)));
+    (r.top_customers_by_problems || []).forEach(rc => (rc.chat_ids || []).forEach(id => ids.push(id)));
     (r.emerging || []).forEach(e => (e.examples || []).forEach(x => x.chat_id && ids.push(x.chat_id)));
   }
   return [...new Set(ids)].slice(0, 50);
@@ -132,7 +133,10 @@ export async function runExecAgent({ query, companyId, chatId, history: explicit
   const results = [];
   for (const call of plan.calls) {
     try {
-      results.push(await TOOL_HANDLERS[call.tool](ctx, call.args));
+      const result = await TOOL_HANDLERS[call.tool](ctx, call.args);
+      // "อีก 13 หมวดที่เหลือมีอะไรบ้าง": the answer starts after the top 5 shown before
+      if (call.args.remaining && result) result.remaining_only = true;
+      results.push(result);
     } catch (err) {
       console.error(`❌ [Exec Agent] Tool ${call.tool} failed:`, err.message);
       results.push({ tool: call.tool, error: 'ดึงข้อมูลไม่สำเร็จ' });
