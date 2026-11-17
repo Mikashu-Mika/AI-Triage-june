@@ -163,7 +163,7 @@ async function withRateLimit(estTokens, call) {
  */
 export const isJaikaOnly = () => process.env.JAIKA_ONLY === '1';
 
-const isRetryable = (err) => [429, 500, 502, 503, 504].includes(err?.status) ||
+const isRetryable = (err) => [429, 500, 502, 503, 504, 530].includes(err?.status) ||
   /timed? ?out|rate limit|ECONNRESET|fetch failed|connection error/i.test(err?.message || '');
 
 async function withJaikaOnlyRetry(call) {

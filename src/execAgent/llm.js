@@ -54,7 +54,8 @@ export async function ollamaChat(messages, { format, temperature = 0, maxTokens 
           max_tokens: maxTokens,
           temperature
         }),
-        signal: AbortSignal.timeout(Math.min(timeoutMs, 10000))
+        // 10 s by default so the bot falls back quickly; test scripts may allow longer
+        signal: AbortSignal.timeout(Math.min(timeoutMs, parseInt(process.env.CLOUDFLARE_AGENT_TIMEOUT_MS || '10000', 10)))
       });
       if (res.ok) {
         const data = await res.json();
@@ -62,6 +63,7 @@ export async function ollamaChat(messages, { format, temperature = 0, maxTokens 
         const content = typeof rawResp === 'object' ? JSON.stringify(rawResp) : (rawResp || '');
         const outputTokens = data.result?.usage?.completion_tokens ?? null;
         const truncated = (outputTokens !== null && outputTokens >= maxTokens);
+        console.log(`🟠 [Cloudflare AI] ${AGENT_MODEL}: ${data.result?.usage?.prompt_tokens ?? '?'} prompt + ${outputTokens ?? '?'} output tokens, ${Date.now() - started} ms`);
         return {
           content: content.trim(),
           truncated,
@@ -109,6 +111,7 @@ export async function ollamaChat(messages, { format, temperature = 0, maxTokens 
         }
         try {
           const data = JSON.parse(raw);
+          console.log(`🔵 [Ollama] ${JSON.parse(body).model}: ${data.prompt_eval_count ?? '?'} prompt + ${data.eval_count ?? '?'} output tokens, ${data.total_duration ? Math.round(data.total_duration / 1e6) : '?'} ms`);
           resolve({
             content: (data.message?.content || '').trim(),
             truncated: data.done_reason === 'length',

@@ -134,6 +134,9 @@ RULES
 - reply_mode "data" when at least one tool call or a missing-data topic applies; "chitchat" for greetings, thanks (also "แต้งกิ้ว", "ขอบคุณคับ"), test messages ("เทส", "test"), compliments or complaints about the bot itself, instructions to the bot that are not questions ("ต่อไปรอบคอบหน่อย", "งั้นถามใหม่", "..."), questions about the bot's own previous answer ("ทำไมตอบผิด", "ทำไมเป็น 100%", "คำว่า X หมายความว่าอะไร", "ช่วงเวลานี้ยังไม่จบ คืออะไร"), jokes, small talk, the current date ("วันนี้วันอะไร") and anything unrelated to the business (out_of_scope); "clarify" only if the question is impossible to interpret (ask in Thai in clarify_question).
 - When the user asks WHAT the problems are inside one category ("ร้องเรียนเรื่องอะไร", "สมัครสมาชิกมีปัญหาอะไร"), call get_issue_stats for the count AND list_chats (limit 5) for that category so the answer shows the actual problems.
 - "ทำไมปัญหา...ลดลง/เพิ่มขึ้น" (why did problems change): compare_periods between that period and the previous comparable period; the answer explains with the category changes.
+- "ช่วงเวลาไหน/ช่วงเวลาใด/เวลาไหน/กี่โมง" asks for the time of day: get_issue_stats group_by=hour. Use group_by=day only for "วันไหน/วันที่เท่าไหร่".
+- "ร้องเรียน/คอมเพลน" (complaints) means category feedback_complaint unless the user names another topic.
+- "<category name> คืออะไร / หมายถึงอะไร" with no time and no counting words asks what the category means: ONLY get_category_info(category), no statistics.
 - "ปัญหาฉุกเฉิน/เคสด่วน" means priority urgent (and high for เคสด่วน); list them with list_chats sort=priority.
 - Ranking questions ("อันดับแรก", "มากที่สุด", "เยอะสุด", "ภาพรวม") use get_issue_stats group_by=category WITHOUT category filters, even after a question about one category.
 - At most ${MAX_CALLS} calls. A question mixing supported and unsupported data gets both calls and unsupported_topics.
@@ -166,7 +169,15 @@ function fixThaiMonth(period, userQuery) {
   return named.length === 1 && named[0] !== period.month ? { ...period, month: named[0] } : period;
 }
 
-const TOOLS_WITH_CATEGORY_LIST = ['get_issue_stats', 'list_chats', 'compare_periods'];
+// Time-of-day questions ("ช่วงเวลาใด", "กี่โมง"); "ช่วงเวลานี้" alone names a period and does not match
+const HOUR_QUESTION_PATTERN = /(ช่วงเวลา\s*(ใด|ไหน)|เวลา\s*(ใด|ไหน)|กี่โมง|ชั่วโมง\s*(ใด|ไหน)|ช่วงไหนของวัน)/;
+const COMPLAINT_PATTERN = /(ร้องเรียน|คอมเพลน|complain)/i;
+const RANKING_PATTERN = /(อันดับ|มากที่สุด|เยอะที่สุด|เยอะสุด|มากสุด|ภาพรวม)/;
+// "X คืออะไร" at the end of the question; counting words mean the user wants statistics instead
+const DEFINITION_PATTERN = /(คืออะไร|หมายถึงอะไร|หมายความว่าอะไร|คือปัญหาแบบไหน)\s*(คะ|ค่ะ|ครับ|คับ|นะคะ)?\s*[?？]?\s*$/;
+const COUNT_WORDS_PATTERN = /(กี่|เท่าไหร่|เท่าไร|บ้าง|สถิติ|จำนวน)/;
+
+const TOOLS_WITH_CATEGORY_LIST =['get_issue_stats', 'list_chats', 'compare_periods'];
 const TOOLS_WITH_SINGLE_CATEGORY = ['get_category_info', 'get_resolution_advice'];
 
 /**
@@ -175,7 +186,7 @@ const TOOLS_WITH_SINGLE_CATEGORY = ['get_category_info', 'get_resolution_advice'
  * @param {object} raw - Parsed LLM output
  * @param {any[]} [previousCalls] - Calls of the previous successful turn
  */
-export function sanitizePlan(raw, previousCalls = [], userQuery = '', knownChatIds = null) {
+export function sanitizePlan(raw, previousCalls = [], userQuery = '', knownChatIds = null, categoryKeys = null) {
   const previousPeriod = previousCalls.find(c => c.args?.period)?.args.period || null;
   const previousGroupBy = previousCalls.find(c => c.args?.group_by)?.args.group_by || null;
   // "แล้ว" only marks a follow-up at the start ("แล้วเดือนนี้ล่ะ"); "เดือนที่แล้ว" / "สัปดาห์ที่แล้ว" name a period
@@ -308,6 +319,37 @@ export function sanitizePlan(raw, previousCalls = [], userQuery = '', knownChatI
     cleanedCalls = [{ tool: 'detect_emerging_issues', args: { period } }];
   }
 
+  // Backstop: "ช่วงเวลาไหน" asks for the time of day, not the day ("ฝากถอนแจ้งมาช่วงเวลาใด" was once grouped by day)
+  if (HOUR_QUESTION_PATTERN.test(userQuery) && !/(วันไหน|วันใด|วันที่เท่า)/.test(userQuery)) {
+    for (const c of cleanedCalls) {
+      if (c.tool === 'get_issue_stats' && !c.args.remaining && c.args.group_by !== 'priority') c.args.group_by = 'hour';
+    }
+  }
+
+  // Backstop: complaints are a category; a plan with no topic filter would list every problem instead
+  const complaintKey = 'feedback_complaint';
+  if (mode === 'data' && COMPLAINT_PATTERN.test(userQuery) && (!categoryKeys || categoryKeys.has(complaintKey)) &&
+      !RANKING_PATTERN.test(userQuery) && !cleanedCalls.some(c => c.tool === 'search_chats')) {
+    const unfiltered = cleanedCalls.filter(c => ['get_issue_stats', 'list_chats'].includes(c.tool) && !c.args.categories?.length && !c.args.query && !c.args.chat_ids);
+    for (const c of unfiltered) {
+      c.args.categories = [complaintKey];
+      if (c.tool === 'get_issue_stats' && c.args.group_by === 'category') delete c.args.group_by;
+    }
+    // "ร้องเรียนเรื่องอะไร": show the actual complaints, not only their count
+    const stats = unfiltered.find(c => c.tool === 'get_issue_stats');
+    if (stats && /(อะไร|ไหน|บ้าง)/.test(userQuery) && !cleanedCalls.some(c => c.tool === 'list_chats') && cleanedCalls.length < MAX_CALLS) {
+      cleanedCalls.push({ tool: 'list_chats', args: { period: stats.args.period, categories: [complaintKey], sort: 'newest', limit: 5 } });
+    }
+  }
+
+  // Backstop: "<category> คืออะไร" asks for the meaning of one category, not its statistics
+  if (mode === 'data' && DEFINITION_PATTERN.test(userQuery) && !hasExplicitTime && !COUNT_WORDS_PATTERN.test(userQuery) && !continues) {
+    const named = [...new Set(cleanedCalls.flatMap(c => c.args.category ? [c.args.category] : (c.args.categories || [])))];
+    if (named.length === 1 && cleanedCalls.every(c => ['get_issue_stats', 'list_chats', 'get_category_info'].includes(c.tool))) {
+      cleanedCalls = [{ tool: 'get_category_info', args: { category: named[0] } }];
+    }
+  }
+
   const unsupported = (Array.isArray(raw?.unsupported_topics) ? raw.unsupported_topics : []).filter(t => UNSUPPORTED_TOPICS.includes(t));
   for (const [topic, pattern] of UNSUPPORTED_PATTERNS) {
     if (pattern.test(userQuery) && !unsupported.includes(topic)) unsupported.push(topic);
@@ -372,7 +414,7 @@ export async function routeQuery({ query, companyId, categories, history }) {
     try {
       const previousCalls = [...(history || [])].reverse().find(h => h.slots?.calls?.length)?.slots.calls || [];
       const shownIds = (history || []).flatMap(h => h.slots?.result_chat_ids || []);
-      const plan = sanitizePlan(parseJsonObject(content), previousCalls, query, shownIds.length ? new Set(shownIds) : null);
+      const plan = sanitizePlan(parseJsonObject(content), previousCalls, query, shownIds.length ? new Set(shownIds) : null, new Set(categories?.keys?.() || []));
       return {
         ...plan,
         examples_used: examples.map(e => ({ question: e.question, similarity: Math.round(e.similarity * 1000) / 1000 })),

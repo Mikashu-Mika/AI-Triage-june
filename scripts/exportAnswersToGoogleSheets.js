@@ -10,10 +10,15 @@ import path from 'path';
 import ExcelJS from 'exceljs';
 
 const answersFile = path.resolve('data/agent_answers_2026-11-11.json');
-const xlsxOutFile = path.resolve('data/agent_answers_30_questions_2026-11-11.xlsx');
-const htmlOutFile = path.resolve('data/agent_answers_sheets_preview.html');
+const XLSX_OUT_DEFAULT = path.resolve('data/agent_answers_30_questions_2026-11-11.xlsx');
+const HTML_OUT_DEFAULT = path.resolve('data/agent_answers_sheets_preview.html');
 
 export async function exportToExcelAndSheets(inputFile = answersFile) {
+  // Other runs get files named after their input, so they never overwrite the 11 Nov report
+  const isDefaultInput = path.resolve(inputFile) === answersFile;
+  const base = path.basename(inputFile, '.json');
+  const xlsxOutFile = isDefaultInput ? XLSX_OUT_DEFAULT : path.resolve(path.dirname(inputFile), `${base}.xlsx`);
+  const htmlOutFile = isDefaultInput ? HTML_OUT_DEFAULT : path.resolve(path.dirname(inputFile), `${base}_preview.html`);
   if (!fs.existsSync(inputFile)) {
     console.error(`❌ Input file not found: ${inputFile}`);
     return;
