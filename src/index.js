@@ -17,6 +17,7 @@ import { handleTelegramMessage, handleTelegramCallbackQuery, startTelegramPollin
 import { enforceCompanyQuota, checkCompanyQuota, PACKAGE_CONFIG } from './quotaService.js';
 import { waitForInteractiveIdle, isInteractiveActive, getInteractiveCount, setTriageQueueStateGetter, getQueueMetrics } from './aiScheduler.js';
 import { startMorningBriefingScheduler, sendMorningBriefing, getMorningSchedulerStatus } from './morningScheduler.js';
+import { startWeeklySummaryScheduler, sendWeeklySummary, getWeeklySchedulerStatus } from './weeklyScheduler.js';
 
 dotenv.config();
 
@@ -581,6 +582,31 @@ app.post('/api/scheduler/morning-briefing/send', async (req, res) => {
     res.json({ success: true, result });
   } catch (error) {
     console.error('Error triggering morning briefing API:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// REST API: Weekly Summary Scheduler Status
+app.get('/api/scheduler/weekly-summary/status', (req, res) => {
+  res.json(getWeeklySchedulerStatus());
+});
+
+// REST API: Build or send the weekly summary on demand.
+// Body: { chatId?, companyId?, startDate?, endDate? ('YYYY-MM-DD'), force? (default true), dryRun? (preview only) }
+app.post('/api/scheduler/weekly-summary/send', async (req, res) => {
+  try {
+    const { chatId, companyId, startDate, endDate, force, dryRun } = req.body || {};
+    const result = await sendWeeklySummary({
+      chatId: chatId || process.env.TELEGRAM_EXEC_GROUP_ID || '-5495142610',
+      companyId: companyId || null,
+      startDate,
+      endDate,
+      force: force !== undefined ? !!force : true,
+      dryRun: !!dryRun
+    });
+    res.json({ success: true, result });
+  } catch (error) {
+    console.error('Error triggering weekly summary API:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -1543,6 +1569,7 @@ app.listen(PORT, () => {
   console.log(`==================================================`);
   initTelegramBot();
   startMorningBriefingScheduler();
+  startWeeklySummaryScheduler();
   // Load the LLM before the first executive question arrives, then embed router examples added by SQL
   warmUpModel().then(() => backfillEmbeddings());
 });
