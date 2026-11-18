@@ -18,6 +18,14 @@ import path from 'path';
 
 // CLI args parsing (before the bot modules load, so --jaika-only can configure them)
 const args = process.argv.slice(2);
+// --rules off: turn off the router's keyword rules (ROUTER_RULES=off) to see the model's own tool choices
+const rulesIdx = args.indexOf('--rules');
+const rulesOff = rulesIdx !== -1 && String(args[rulesIdx + 1]).toLowerCase() === 'off';
+if (rulesIdx !== -1 && !['on', 'off'].includes(String(args[rulesIdx + 1]).toLowerCase())) {
+  console.error(`Unknown --rules "${args[rulesIdx + 1]}" (use on or off)`);
+  process.exit(1);
+}
+if (rulesOff) process.env.ROUTER_RULES = 'off';
 const modelIdx = args.indexOf('--model');
 // --model jaika|cloudflare|ollama pins one model so runs can be compared; --jaika-only = --model jaika
 const pinnedModel = args.includes('--jaika-only') ? 'jaika' : (modelIdx !== -1 ? args[modelIdx + 1] : null);
@@ -57,7 +65,7 @@ const cases = JSON.parse(fs.readFileSync(casesFile, 'utf8'));
 
 // Today's date in Thailand for the file name: YYYY-MM-DD
 const todayStr = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Bangkok' });
-const defaultOutFile = path.resolve(`data/agent_answers_${todayStr}${pinnedModel ? `_${pinnedModel}` : ''}.json`);
+const defaultOutFile = path.resolve(`data/agent_answers_${todayStr}${pinnedModel ? `_${pinnedModel}` : ''}${rulesOff ? '_norules' : ''}.json`);
 
 const limitIdx = args.indexOf('--limit');
 const defaultTotal = cases.length; // ทั้งชุด (62 ข้อ); ใช้ --limit เพื่อรันบางส่วน
@@ -89,6 +97,7 @@ async function main() {
   console.log(`📁 Source cases: ${casesFile} (Total: ${cases.length} cases)`);
   console.log(`💾 Output file:  ${outFile}`);
   console.log(`🏢 Company ID:   ${companyId}`);
+  console.log(`📏 Router rules: ${rulesOff ? 'OFF (model choices only)' : 'on'}`);
   console.log(`🔢 Running cases: ${startCase} to ${endCase} (Target: ${defaultTotal} cases)`);
   console.log(`🧠 Model:        ${pinnedModel ? `${pinnedModel} only (no fallback)` : 'normal bot routing (Jaika in its hours, then fallbacks)'}`);
   console.log(`============================================================\n`);

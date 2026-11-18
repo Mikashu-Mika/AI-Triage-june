@@ -27,6 +27,14 @@ const SORTS = ['newest', 'oldest', 'priority'];
 const MAX_CALLS = 3;
 const EXPLICIT_TIME_PATTERN = /(วันนี้|เมื่อวาน|เดือนนี้|เดือนหน้า|สัปดาห์นี้|สัปดาห์ที่แล้ว|อาทิตย์นี้|อาทิตย์ที่แล้ว|เดือนที่แล้ว|เดือนก่อน|ช่วงนี้|ล่าสุด|ย้อนหลัง|วันที่|ตุลา|กันยา|สิงหา|กรกฎา|พฤศจิ|มกราคม|กุมภาพันธ์|มีนาคม|เมษายน|พฤษภาคม|มิถุนายน|กรกฎาคม|สิงหาคม|กันยายน|ตุลาคม|พฤศจิกายน|ธันวาคม|\d{1,2}\s*(ม\.ค\.|ก\.พ\.|มี\.ค\.|เม\.ย\.|พ\.ค\.|มิ\.ย\.|ก\.ค\.|ส\.ค\.|ก\.ย\.|ต\.ค\.|พ\.ย\.|ธ\.ค\.)|\d{4}|\d{2}\/\d{2})/i;
 
+/**
+ * Keyword rules that overwrite the LLM's tool choice (customer chat history, "the remaining N", rising problems,
+ * time of day, complaints, "<category> คืออะไร", and the rising-problems plan when the LLM gives no usable plan).
+ * ROUTER_RULES=off turns them all off so a model can be measured on its own choices. Default: on.
+ * Read on every call so a test script can flip it without reloading the module.
+ */
+export const routerRulesEnabled = () => (process.env.ROUTER_RULES || 'on').trim().toLowerCase() !== 'off';
+
 // "Which problems are rising / spiking lately" (task 2.4)
 export const EMERGING_PATTERN = /(เพิ่มขึ้น|เพิ่มผิดปกติ|พุ่ง|มาแรง|ผิดปกติ|ขึ้นเยอะ|เยอะขึ้น|มากขึ้น|น่าจับตา|น่ากังวล|ระบาด|trending|emerging|spike)/i;
 const NOT_EMERGING_PATTERN = /(ลูกค้าใหม่|สมัคร|จำนวนแชต|แชตทั้งหมด|อารมณ์|พอใจ)/i;
@@ -202,6 +210,10 @@ export function sanitizePlan(raw, previousCalls = [], userQuery = '', knownChatI
   }
   const previousCategory = previousCalls.find(c => c.args?.category)?.args.category || previousFilters.categories?.[0] || null;
   const mode = ['data', 'chitchat', 'clarify'].includes(raw?.reply_mode) ? raw.reply_mode : 'data';
+  const rulesOn = routerRulesEnabled();
+  // Which keyword rules changed the plan, and the tools the LLM picked before they did (kept in slots for evaluation)
+  const rulesFired = new Set();
+  const llmTools = (Array.isArray(raw?.calls) ? raw.calls : []).filter(c => c && TOOL_NAMES.includes(c.tool)).slice(0, MAX_CALLS).map(c => c.tool);
   const calls = (Array.isArray(raw?.calls) ? raw.calls : [])
     .filter(c => c && TOOL_NAMES.includes(c.tool))
     .slice(0, MAX_CALLS)
@@ -231,7 +243,8 @@ export function sanitizePlan(raw, previousCalls = [], userQuery = '', knownChatI
         if (!args.chat_ids.length) {
           delete args.chat_ids;
           // "ขอประวัติแชตของลูกค้าอันดับ 1": the customer ranking already carries each customer's chat ids
-          if (c.tool === 'list_chats' && /ลูกค้า/.test(userQuery) && !args.categories?.length && !args.query) {
+          if (rulesOn && c.tool === 'list_chats' && /ลูกค้า/.test(userQuery) && !args.categories?.length && !args.query) {
+            rulesFired.add('customer_history');
             c.tool = 'get_customer_stats';
             args.metric = 'repeat_customers';
           }
@@ -271,7 +284,8 @@ export function sanitizePlan(raw, previousCalls = [], userQuery = '', knownChatI
         args.period = { type: 'last_n_days', n: 7 };
       }
       const isRemainingQuery = /(ที่เหลือ|หมวดที่เหลือ|อีก \d+ (หมวด|ช่วงเวลา|ระดับ)|อันดับที่เหลือ)/i.test(userQuery);
-      if (isRemainingQuery && previousCalls.length) {
+      if (rulesOn && isRemainingQuery && previousCalls.length) {
+        rulesFired.add('remaining');
         if (previousPeriod && !hasExplicitTime) args.period = previousPeriod;
         c.tool = 'get_issue_stats';
         delete args.categories;
@@ -312,25 +326,30 @@ export function sanitizePlan(raw, previousCalls = [], userQuery = '', knownChatI
   // Backstop: "what is rising lately" questions always go to detect_emerging_issues, unless the user named two periods to compare
   // Only problem-count plans are replaced: customer counts, total chats, sentiment etc. keep their own tool.
   const isProblemCountCall = c => c.tool === 'get_issue_stats' || (c.tool === 'compare_periods' && (!c.args.metric || c.args.metric === 'issues'));
-  if (EMERGING_PATTERN.test(userQuery) && !TWO_PERIOD_PATTERN.test(userQuery) && !NOT_EMERGING_PATTERN.test(userQuery) &&
+  if (rulesOn && EMERGING_PATTERN.test(userQuery) && !TWO_PERIOD_PATTERN.test(userQuery) && !NOT_EMERGING_PATTERN.test(userQuery) &&
       !continues && mode === 'data' && cleanedCalls.every(isProblemCountCall)) {
     const period = cleanedCalls.find(c => c.args?.period && c.args.period.type !== 'all_time')?.args.period
       || { type: 'last_n_days', n: 7 };
     cleanedCalls = [{ tool: 'detect_emerging_issues', args: { period } }];
+    rulesFired.add('emerging');
   }
 
   // Backstop: "ช่วงเวลาไหน" asks for the time of day, not the day ("ฝากถอนแจ้งมาช่วงเวลาใด" was once grouped by day)
-  if (HOUR_QUESTION_PATTERN.test(userQuery) && !/(วันไหน|วันใด|วันที่เท่า)/.test(userQuery)) {
+  if (rulesOn && HOUR_QUESTION_PATTERN.test(userQuery) && !/(วันไหน|วันใด|วันที่เท่า)/.test(userQuery)) {
     for (const c of cleanedCalls) {
-      if (c.tool === 'get_issue_stats' && !c.args.remaining && c.args.group_by !== 'priority') c.args.group_by = 'hour';
+      if (c.tool === 'get_issue_stats' && !c.args.remaining && c.args.group_by !== 'priority' && c.args.group_by !== 'hour') {
+        c.args.group_by = 'hour';
+        rulesFired.add('hour');
+      }
     }
   }
 
   // Backstop: complaints are a category; a plan with no topic filter would list every problem instead
   const complaintKey = 'feedback_complaint';
-  if (mode === 'data' && COMPLAINT_PATTERN.test(userQuery) && (!categoryKeys || categoryKeys.has(complaintKey)) &&
+  if (rulesOn && mode === 'data' && COMPLAINT_PATTERN.test(userQuery) && (!categoryKeys || categoryKeys.has(complaintKey)) &&
       !RANKING_PATTERN.test(userQuery) && !cleanedCalls.some(c => c.tool === 'search_chats')) {
     const unfiltered = cleanedCalls.filter(c => ['get_issue_stats', 'list_chats'].includes(c.tool) && !c.args.categories?.length && !c.args.query && !c.args.chat_ids);
+    if (unfiltered.length) rulesFired.add('complaint');
     for (const c of unfiltered) {
       c.args.categories = [complaintKey];
       if (c.tool === 'get_issue_stats' && c.args.group_by === 'category') delete c.args.group_by;
@@ -343,9 +362,10 @@ export function sanitizePlan(raw, previousCalls = [], userQuery = '', knownChatI
   }
 
   // Backstop: "<category> คืออะไร" asks for the meaning of one category, not its statistics
-  if (mode === 'data' && DEFINITION_PATTERN.test(userQuery) && !hasExplicitTime && !COUNT_WORDS_PATTERN.test(userQuery) && !continues) {
+  if (rulesOn && mode === 'data' && DEFINITION_PATTERN.test(userQuery) && !hasExplicitTime && !COUNT_WORDS_PATTERN.test(userQuery) && !continues) {
     const named = [...new Set(cleanedCalls.flatMap(c => c.args.category ? [c.args.category] : (c.args.categories || [])))];
     if (named.length === 1 && cleanedCalls.every(c => ['get_issue_stats', 'list_chats', 'get_category_info'].includes(c.tool))) {
+      if (!cleanedCalls.every(c => c.tool === 'get_category_info')) rulesFired.add('definition');
       cleanedCalls = [{ tool: 'get_category_info', args: { category: named[0] } }];
     }
   }
@@ -370,6 +390,8 @@ export function sanitizePlan(raw, previousCalls = [], userQuery = '', knownChatI
   return {
     reply_mode: mode === 'data' && onlySmallTalk ? 'chitchat' : mode,
     calls: cleanedCalls,
+    llm_tools: llmTools,
+    rules_fired: [...rulesFired],
     unsupported_topics: [...new Set(unsupported)],
     focus: (typeof raw?.focus === 'string' && raw.focus !== 'ตอบเรื่องเดียว' ? raw.focus.slice(0, 200) : ''),
     clarify_question: typeof raw?.clarify_question === 'string' ? raw.clarify_question.slice(0, 300) : ''
@@ -426,10 +448,10 @@ export async function routeQuery({ query, companyId, categories, history }) {
     }
   }
   // The LLM gave no usable plan, but "what is rising lately" questions have only one sensible plan
-  const fallback = emergingFallbackPlan(query);
+  const fallback = routerRulesEnabled() ? emergingFallbackPlan(query) : null;
   if (fallback) {
     console.warn(`⚠️ [Router] LLM failed (${failures.join(' | ')}); using the detect_emerging_issues fallback plan.`);
-    return { ...fallback, examples_used: [], timing: { attempts: attempts.length, fallback: 'emerging_pattern' } };
+    return { ...fallback, llm_tools: [], rules_fired: ['emerging_fallback'], examples_used: [], timing: { attempts: attempts.length, fallback: 'emerging_pattern' } };
   }
   const error = new Error(`Router returned no usable plan: ${failures.join(' | ')}`);
   error.code = 'ROUTER_BAD_OUTPUT';
