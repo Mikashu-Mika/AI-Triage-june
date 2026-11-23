@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import dotenv from 'dotenv';
 import { CATEGORY_BILINGUAL_MAP } from './categoryConstants.js';
+import { hashPassword, isBcryptHash, verifyPassword } from './password.js';
 dotenv.config();
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
@@ -518,16 +519,26 @@ const ROLE_HIERARCHY = { system_admin: 4, super_admin: 3, admin: 2, agent: 1 };
  * @returns {Promise<object|null>} User object with company info, or null
  */
 export async function authenticateUser(email, password) {
+  if (!email || !password) return null;
   const { data, error } = await supabase
     .from('users')
-    .select('id, email, name, role, company_id, is_active, permissions')
-    .eq('email', email)
-    .eq('password', password)
+    .select('id, email, name, role, company_id, is_active, permissions, password')
+    .eq('email', String(email).trim())
     .limit(1);
 
   if (error || !data || data.length === 0) return null;
-  const user = data[0];
-  if (!user.is_active) return null;
+  const { password: storedPassword, ...user } = data[0];
+  const { valid, needsRehash } = await verifyPassword(password, storedPassword);
+  if (!valid || !user.is_active) return null;
+
+  // A legacy plaintext password matched: store it as a bcrypt hash from now on
+  if (needsRehash) {
+    const { error: rehashErr } = await supabase
+      .from('users')
+      .update({ password: await hashPassword(String(password).trim()) })
+      .eq('id', user.id);
+    if (rehashErr) console.warn(`[Auth] Could not hash legacy password for user ${user.id}: ${rehashErr.message}`);
+  }
 
   // Fetch company info if user belongs to one
   let company = null;
@@ -549,10 +560,13 @@ export async function authenticateUser(email, password) {
  * @param {string} [companyId]
  * @returns {Promise<any[]>}
  */
+// Columns safe to return from user APIs (never the password hash)
+const USER_PUBLIC_FIELDS = 'id, email, name, role, company_id, is_active, created_at, permissions';
+
 export async function getAllUsers(companyId) {
   let query = supabase
     .from('users')
-    .select('id, email, name, role, company_id, is_active, created_at, permissions')
+    .select(USER_PUBLIC_FIELDS)
     .order('created_at', { ascending: true });
 
   if (companyId) {
@@ -610,11 +624,11 @@ export async function createUser({ email, name, role, company_id, password, perm
       name,
       role: role || 'agent',
       company_id: cleanCompanyId,
-      password: password || '123456',
+      password: await hashPassword(String(password || '123456').trim()),
       is_active: true,
       permissions: userPermissions
     })
-    .select()
+    .select(USER_PUBLIC_FIELDS)
     .single();
 
   if (error) throw new Error('Failed to create user: ' + error.message);
@@ -652,11 +666,18 @@ export async function updateUser(id, updates) {
     }
   }
 
+  // Never store a new password as plaintext
+  if (safeUpdates.password !== undefined) {
+    const plain = String(safeUpdates.password || '').trim();
+    if (!plain) throw new Error('Password cannot be empty');
+    safeUpdates.password = isBcryptHash(plain) ? plain : await hashPassword(plain);
+  }
+
   const { data, error } = await supabase
     .from('users')
     .update(safeUpdates)
     .eq('id', id)
-    .select()
+    .select(USER_PUBLIC_FIELDS)
     .single();
 
   if (error) throw new Error('Failed to update user: ' + error.message);
@@ -673,7 +694,7 @@ export async function deleteUser(id) {
     .from('users')
     .delete()
     .eq('id', id)
-    .select()
+    .select(USER_PUBLIC_FIELDS)
     .single();
 
   if (error) throw new Error('Failed to delete user: ' + error.message);

@@ -254,7 +254,10 @@ async function authAdminOrKey(req, res, next) {
   if (email && password) {
     try {
       const user = await authenticateUser(email, password);
-      if (user && (user.role === 'system_admin' || user.role === 'super_admin')) {
+      if (!user) {
+        return res.status(401).json({ error: 'Unauthorized: Invalid email or password.' });
+      }
+      if (user.role === 'system_admin' || user.role === 'super_admin') {
         req.user = user;
         req.isAdmin = true;
         return next();
