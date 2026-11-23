@@ -241,7 +241,8 @@ if (!ADMIN_API_KEY || ADMIN_API_KEY.length < 32) {
 
 // Middleware: Authenticate admin using X-Admin-Key or user credentials (system_admin / super_admin)
 async function authAdminOrKey(req, res, next) {
-  const adminKey = req.headers['x-admin-key'] || req.query.admin_key || req.body?.admin_key;
+  // Admin key is accepted from the X-Admin-Key header only (query strings end up in logs and history)
+  const adminKey = req.headers['x-admin-key'];
   if (adminKey && adminKey === ADMIN_API_KEY) {
     req.isAdmin = true;
     return next();
@@ -269,7 +270,8 @@ async function authAdminOrKey(req, res, next) {
 
 // Middleware: Authenticate either Company (Client ID/Secret) or Admin (X-Admin-Key / User credentials)
 async function authCompanyOrAdmin(req, res, next) {
-  const adminKey = req.headers['x-admin-key'] || req.query.admin_key || req.body?.admin_key;
+  // Admin key is accepted from the X-Admin-Key header only (query strings end up in logs and history)
+  const adminKey = req.headers['x-admin-key'];
   if (adminKey && adminKey === ADMIN_API_KEY) {
     req.isAdmin = true;
     req.company = { id: req.body?.company_id || req.query?.company_id || null, name: 'Admin Override' };
@@ -1051,8 +1053,8 @@ app.delete('/api/categories/:id', authCompany, async (req, res) => {
 // REST API: Company Registration Endpoint
 // ==========================================
 
-// Register a new company/tenant (Unauthenticated Seam)
-app.post('/api/companies/register', async (req, res) => {
+// Register a new company/tenant (admin only: X-Admin-Key header or admin credentials)
+app.post('/api/companies/register', authAdminOrKey, async (req, res) => {
   const { name, domain } = req.body;
   if (!name || !domain) {
     return res.status(400).json({ error: 'Missing parameters: name, domain' });
