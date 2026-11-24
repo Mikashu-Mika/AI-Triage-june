@@ -1,7 +1,8 @@
 # Sift AI: บอตจัดกลุ่มแชตลูกค้า (API + Telegram)
 
 รับแชตลูกค้าจากระบบภายนอก ให้ AI จัดหมวดปัญหา ความเร่งด่วน และสรุป แล้วเก็บผลใน Supabase
-ผลจะแสดงใน Back Office (repo `siftai-bo`) และส่งสรุปเข้ากลุ่ม Telegram ของแต่ละบริษัท
+ผลจะแสดงใน Back Office (repo `siftai-bo`) และถามบอตเรื่องแชตของบริษัทได้ในกลุ่ม Telegram ที่ผูกไว้
+ขั้นตอนเปิดใช้ให้บริษัทใหม่ดูที่ [docs/onboarding.md](docs/onboarding.md)
 
 ```
 ระบบลูกค้า ──POST /api/chats/ingest──▶ บอตนี้ (port 4000) ──▶ คิว AI ──▶ Supabase ──▶ Back Office / Telegram
@@ -97,7 +98,7 @@
 
 | งาน | เวลา (ไทย) | ค่าที่ตั้งได้ |
 |---|---|---|
-| สรุปประจำวันเข้ากลุ่ม Telegram | ทุกวัน 11:00 | `BRIEFING_TARGET_HOUR`, `BRIEFING_TARGET_MINUTE` |
+| สรุปประจำวันเข้ากลุ่มผู้บริหาร (`TELEGRAM_EXEC_GROUP_ID`) | ทุกวัน 11:00 | `BRIEFING_TARGET_HOUR`, `BRIEFING_TARGET_MINUTE` |
 | สรุปรายสัปดาห์ให้กลุ่มผู้บริหาร | วันจันทร์ 11:15 | `WEEKLY_SUMMARY_ENABLED`, `WEEKLY_SUMMARY_HOUR`, `WEEKLY_SUMMARY_MINUTE`, `TELEGRAM_EXEC_GROUP_ID` |
 
 ทดลองดูผลโดยไม่ส่งจริง: `POST /api/scheduler/weekly-summary/send` กับ body `{"dryRun": true}`
