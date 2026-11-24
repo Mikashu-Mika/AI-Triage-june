@@ -705,7 +705,7 @@ app.post('/api/chats/ingest', authCompany, enforceCompanyQuota, async (req, res)
 
     const { data: existingChat, error: lookupErr } = await supabase
       .from('chats')
-      .select('company_id, conversation')
+      .select('company_id, conversation, customer_id, status')
       .eq('id', id)
       .maybeSingle();
     if (lookupErr) throw lookupErr;
@@ -714,6 +714,32 @@ app.post('/api/chats/ingest', authCompany, enforceCompanyQuota, async (req, res)
     if (existingChat) {
       if (existingChat.company_id !== req.company.id) {
         return conflictResponse();
+      }
+      // Same conversation already classified: keep the result and skip another AI call
+      // (a resend after a timeout or a retry must not re-triage the chat)
+      if (existingChat.conversation === finalConversation && existingChat.status === 'completed') {
+        let unchanged = existingChat;
+        if (existingChat.customer_id !== customer_id) {
+          const { data: moved, error: moveErr } = await supabase
+            .from('chats')
+            .update({ customer_id })
+            .eq('id', id)
+            .eq('company_id', req.company.id)
+            .select()
+            .single();
+          if (moveErr) throw moveErr;
+          unchanged = moved;
+        } else {
+          const { data: current, error: readErr } = await supabase
+            .from('chats').select().eq('id', id).single();
+          if (readErr) throw readErr;
+          unchanged = current;
+        }
+        return res.json({
+          message: 'Chat unchanged and already classified; not queued again',
+          triage_queued: false,
+          data: unchanged
+        });
       }
       // A changed conversation invalidates earlier human verification, so the AI may re-classify it
       if (existingChat.conversation !== finalConversation) {
@@ -743,7 +769,7 @@ app.post('/api/chats/ingest', authCompany, enforceCompanyQuota, async (req, res)
     // 2. Enqueue the triage in the background to process sequentially!
     enqueueTriage(id);
 
-    res.json({ message: 'Chat ingested successfully and queued for real-time Sift AI classification', data });
+    res.json({ message: 'Chat ingested successfully and queued for real-time Sift AI classification', triage_queued: true, data });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

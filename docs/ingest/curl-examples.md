@@ -64,6 +64,9 @@ curl -X POST "$BASE_URL/api/chats/ingest" \
 - ตั้งสถานะกลับเป็น `pending` แล้วให้ AI จัดกลุ่มใหม่
 - **ไม่นับโควตาซ้ำ**
 
+ถ้าส่งซ้ำด้วยข้อความเดิมทุกตัวอักษร (เช่น retry หลัง timeout) และ AI จัดกลุ่มเสร็จไปแล้ว ระบบจะไม่จัดกลุ่มซ้ำ
+response จะมี `"triage_queued": false` ส่วนกรณีที่ส่งเข้าคิวจะเป็น `"triage_queued": true`
+
 ```bash
 curl -X POST "$BASE_URL/api/chats/ingest" \
   -H "Content-Type: application/json" \
