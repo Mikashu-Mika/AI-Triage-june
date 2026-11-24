@@ -1,0 +1,184 @@
+{
+  "info": {
+    "name": "Sift AI - Chat Ingest API",
+    "description": "ทดสอบส่งแชตเข้า Sift AI ผ่าน POST /api/chats/ingest\n\nก่อนใช้: ตั้งค่า Collection variables ให้ครบ\n- base_url: ที่อยู่ API ที่ได้รับจากทีม Sift AI\n- client_id / client_secret: ที่ได้ตอนสร้างบริษัท (ห้าม commit หรือส่งต่อในแชต)\n\nลำดับที่แนะนำ: 1 → 2 → 3 แล้วค่อยลอง 4-6 เพื่อดู error\nคำขอที่ 1 จะสร้าง chat_id ใหม่ทุกครั้งที่กด Send แล้วคำขอที่ 3 ใช้ chat_id เดิมนั้นส่งซ้ำ",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base_url", "value": "https://YOUR_SIFT_AI_HOST" },
+    { "key": "client_id", "value": "YOUR_CLIENT_ID" },
+    { "key": "client_secret", "value": "YOUR_CLIENT_SECRET" },
+    { "key": "customer_id", "value": "cust-test-001" },
+    { "key": "chat_id", "value": "chat-test-001" }
+  ],
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      { "key": "key", "value": "x-client-id", "type": "string" },
+      { "key": "value", "value": "{{client_id}}", "type": "string" },
+      { "key": "in", "value": "header", "type": "string" }
+    ]
+  },
+  "item": [
+    {
+      "name": "1. ส่งแชตใหม่ (conversation เป็นข้อความ)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "// chat_id ใหม่ทุกครั้ง เพื่อไม่ทับแชตทดสอบเดิม",
+              "pm.collectionVariables.set('chat_id', 'chat-test-' + Date.now());"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('สถานะ pending', () => pm.expect(pm.response.json().data.status).to.eql('pending'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "x-client-secret", "value": "{{client_secret}}" }
+        ],
+        "url": "{{base_url}}/api/chats/ingest",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"{{chat_id}}\",\n  \"customer_id\": \"{{customer_id}}\",\n  \"conversation\": \"ลูกค้า: สั่งของไปตั้งแต่วันจันทร์ ยังไม่ได้รับเลยค่ะ\\nแอดมิน: ขอเลขคำสั่งซื้อหน่อยนะคะ\\nลูกค้า: ORD-12345 ค่ะ\"\n}"
+        }
+      }
+    },
+    {
+      "name": "2. ส่งแชตใหม่ (conversation เป็น array)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('array ถูกต่อเป็นข้อความเดียว', () => pm.expect(pm.response.json().data.conversation).to.include('\\n'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "x-client-secret", "value": "{{client_secret}}" }
+        ],
+        "url": "{{base_url}}/api/chats/ingest",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"{{chat_id}}-array\",\n  \"customer_id\": \"{{customer_id}}\",\n  \"conversation\": [\n    \"ลูกค้า: เข้าแอปไม่ได้ ขึ้นว่ารหัสผ่านผิด\",\n    \"แอดมิน: ลองกดลืมรหัสผ่านได้เลยค่ะ\",\n    \"ลูกค้า: กดแล้วอีเมลไม่มาค่ะ\"\n  ]\n}"
+        }
+      }
+    },
+    {
+      "name": "3. ส่งซ้ำ id เดิม (มีข้อความเพิ่ม)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('id เดิม', () => pm.expect(pm.response.json().data.id).to.eql(pm.collectionVariables.get('chat_id')));",
+              "pm.test('กลับไปรอ AI จัดกลุ่มใหม่', () => pm.expect(pm.response.json().data.status).to.eql('pending'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "description": "ส่งบทสนทนาทั้งหมดตั้งแต่ต้นทุกครั้ง ระบบจะแทนที่ของเดิม (ไม่ต่อท้าย) และไม่นับโควตาซ้ำ",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "x-client-secret", "value": "{{client_secret}}" }
+        ],
+        "url": "{{base_url}}/api/chats/ingest",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"{{chat_id}}\",\n  \"customer_id\": \"{{customer_id}}\",\n  \"conversation\": \"ลูกค้า: สั่งของไปตั้งแต่วันจันทร์ ยังไม่ได้รับเลยค่ะ\\nแอดมิน: ขอเลขคำสั่งซื้อหน่อยนะคะ\\nลูกค้า: ORD-12345 ค่ะ\\nแอดมิน: ตรวจสอบแล้ว พัสดุตกค้างที่ศูนย์ จะได้รับพรุ่งนี้ค่ะ\\nลูกค้า: ขอบคุณค่ะ\"\n}"
+        }
+      }
+    },
+    {
+      "name": "4. Error 400 - ขาดฟิลด์ที่ต้องมี",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('400 Bad Request', () => pm.response.to.have.status(400));"]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "x-client-secret", "value": "{{client_secret}}" }
+        ],
+        "url": "{{base_url}}/api/chats/ingest",
+        "body": { "mode": "raw", "raw": "{\n  \"id\": \"{{chat_id}}\",\n  \"customer_id\": \"{{customer_id}}\"\n}" }
+      }
+    },
+    {
+      "name": "5. Error 401 - client_secret ผิด",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('401 Unauthorized', () => pm.response.to.have.status(401));"]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          { "key": "x-client-secret", "value": "wrong-secret" }
+        ],
+        "url": "{{base_url}}/api/chats/ingest",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"{{chat_id}}\",\n  \"customer_id\": \"{{customer_id}}\",\n  \"conversation\": \"ทดสอบ\"\n}"
+        }
+      }
+    },
+    {
+      "name": "6. Error 401 - ไม่ส่ง credentials",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": ["pm.test('401 Unauthorized', () => pm.response.to.have.status(401));"]
+          }
+        }
+      ],
+      "request": {
+        "auth": { "type": "noauth" },
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "url": "{{base_url}}/api/chats/ingest",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"id\": \"{{chat_id}}\",\n  \"customer_id\": \"{{customer_id}}\",\n  \"conversation\": \"ทดสอบ\"\n}"
+        }
+      }
+    }
+  ]
+}
