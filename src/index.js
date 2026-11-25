@@ -2,6 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
@@ -150,15 +151,9 @@ async function scanAndEnqueuePendingChats(isStartup = false) {
   }
 }
 
-// 1. Initial scan on server startup
-scanAndEnqueuePendingChats(true);
+// Startup scan, 10-second polling and the realtime listener start in startServer() at the end of this file
 
-// 2. Continuous background polling safeguard (every 10 seconds)
-setInterval(() => {
-  scanAndEnqueuePendingChats(false);
-}, 10000);
-
-// 3. Supabase Realtime event listener for instant 0-second detection
+// Supabase Realtime event listener for instant 0-second detection
 function initRealtimeListener() {
   try {
     supabase
@@ -196,8 +191,6 @@ function initRealtimeListener() {
     console.warn('⚠️ [Realtime] Failed to initialize Supabase realtime listener:', err.message);
   }
 }
-
-initRealtimeListener();
 
 const app = express();
 app.use(cors());
@@ -1632,16 +1625,37 @@ app.use((err, req, res, next) => {
   return res.status(err.status || 500).json({ error: 'Internal server error.' });
 });
 
-// Start Express Server
-app.listen(PORT, () => {
-  console.log(`==================================================`);
-  console.log(`  Sift AI MCP Server & API is running on port ${PORT}`);
-  console.log(`  MCP SSE Endpoint: http://localhost:${PORT}/sse`);
-  console.log(`  Health Check:     http://localhost:${PORT}/health`);
-  console.log(`==================================================`);
-  initTelegramBot();
-  startMorningBriefingScheduler();
-  startWeeklySummaryScheduler();
-  // Load the LLM before the first executive question arrives, then embed router examples added by SQL
-  warmUpModel().then(() => backfillEmbeddings());
-});
+export { app };
+
+/** Starts the HTTP server and the background work: pending-chat scan, polling, realtime, Telegram and schedulers. */
+export function startServer() {
+  // 1. Initial scan on server startup
+  scanAndEnqueuePendingChats(true);
+
+  // 2. Continuous background polling safeguard (every 10 seconds)
+  setInterval(() => {
+    scanAndEnqueuePendingChats(false);
+  }, 10000);
+
+  // 3. Supabase Realtime event listener for instant 0-second detection
+  initRealtimeListener();
+
+  return app.listen(PORT, () => {
+    console.log(`==================================================`);
+    console.log(`  Sift AI MCP Server & API is running on port ${PORT}`);
+    console.log(`  MCP SSE Endpoint: http://localhost:${PORT}/sse`);
+    console.log(`  Health Check:     http://localhost:${PORT}/health`);
+    console.log(`==================================================`);
+    initTelegramBot();
+    startMorningBriefingScheduler();
+    startWeeklySummaryScheduler();
+    // Load the LLM before the first executive question arrives, then embed router examples added by SQL
+    warmUpModel().then(() => backfillEmbeddings());
+  });
+}
+
+// Start only when run directly (npm start / npm run dev); tests import the app without a port or background jobs
+const samePath = (a, b) => process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+if (process.argv[1] && samePath(path.resolve(process.argv[1]), fileURLToPath(import.meta.url))) {
+  startServer();
+}

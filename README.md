@@ -69,11 +69,19 @@
 
 | คำสั่ง | ทำอะไร |
 |---|---|
+| `npm test` | เทสอัตโนมัติของ ingest, login และ register ไม่แตะฐานข้อมูลจริงและไม่เรียก AI (ต้องใช้ Node 22.3 ขึ้นไป) |
 | `npm run test-conn` | ทดสอบการเชื่อมต่อ |
 | `npm run eval:triage` | วัดความแม่นยำของการจัดกลุ่ม |
 | `npm run eval:agent` | วัดผลผู้ช่วยตอบคำถามใน Telegram |
 | `node scripts/checkIngest.js --company <ชื่อ> --since 2h` | สรุปแชตที่ ingest เข้ามาของบริษัท อ่านอย่างเดียว ([วิธีใช้](docs/ingest/check-ingest.md)) |
 | `node scripts/hashLegacyPasswords.js` | ตรวจหารหัสผ่านที่ยังไม่ hash (ใส่ `--apply` เพื่อแก้จริง) |
+
+### เทสอัตโนมัติ (`npm test`)
+
+- ใช้ `node --test` รันไฟล์ `test/**/*.test.js` เท่านั้น
+- Supabase ถูกแทนด้วยฐานข้อมูลจำลองในหน่วยความจำ (`test/helpers/fakeSupabase.js`) และ AI ถูกแทนด้วยตัวจำลองที่บันทึกว่าแชตไหนถูกส่งไปวิเคราะห์
+- แอปเปิดที่ port สุ่มใน process ของเทส ไม่เปิด port 4000 ไม่สแกนคิว และไม่เริ่ม Telegram หรือ scheduler (`src/index.js` เริ่มสิ่งเหล่านี้เฉพาะตอนรันไฟล์โดยตรง)
+- `test/test_telegram_groups_and_rbac.js` เป็นเทสเก่าที่เขียนลงฐานข้อมูลจริง จึงไม่อยู่ใน `npm test`
 
 ---
 

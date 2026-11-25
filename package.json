@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
+    "test": "node --test --experimental-test-module-mocks \"test/**/*.test.js\"",
     "test-conn": "node src/testConnection.js",
     "seed": "node src/seedChats.js",
     "test-pipeline": "node src/runTest.js",
