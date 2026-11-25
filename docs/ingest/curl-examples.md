@@ -111,3 +111,5 @@ curl -i -X POST "$BASE_URL/api/chats/ingest" \
 | 413 | body ใหญ่เกิน 1 MB (`Request body too large (limit 1mb).`) | ส่งเฉพาะข้อความ ไม่แนบรูปหรือไฟล์ |
 | 429 | โควตาแชตของรอบบิลเต็ม แชตนี้**ไม่ถูกบันทึก** | ติดต่อทีม Sift AI เพื่อเพิ่มโควตา แล้วส่งใหม่ |
 | 500 | ระบบขัดข้องชั่วคราว | retry แบบเว้นระยะ เช่น 5, 30, 120 วินาที (ส่ง id เดิมได้อย่างปลอดภัย) |
+
+ส่งแล้วตรวจผลด้วย `node scripts/checkIngest.js` ดูวิธีใช้ที่ [check-ingest.md](check-ingest.md)

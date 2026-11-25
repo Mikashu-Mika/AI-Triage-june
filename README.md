@@ -72,6 +72,7 @@
 | `npm run test-conn` | ทดสอบการเชื่อมต่อ |
 | `npm run eval:triage` | วัดความแม่นยำของการจัดกลุ่ม |
 | `npm run eval:agent` | วัดผลผู้ช่วยตอบคำถามใน Telegram |
+| `node scripts/checkIngest.js --company <ชื่อ> --since 2h` | สรุปแชตที่ ingest เข้ามาของบริษัท อ่านอย่างเดียว ([วิธีใช้](docs/ingest/check-ingest.md)) |
 | `node scripts/hashLegacyPasswords.js` | ตรวจหารหัสผ่านที่ยังไม่ hash (ใส่ `--apply` เพื่อแก้จริง) |
 
 ---
