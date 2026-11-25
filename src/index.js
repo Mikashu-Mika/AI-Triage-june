@@ -14,6 +14,7 @@ import { processAgentQuery } from './agentService.js';
 import { warmUpModel } from './execAgent/llm.js';
 import { backfillEmbeddings } from './execAgent/examples.js';
 import { handleTelegramMessage, handleTelegramCallbackQuery, startTelegramPolling, initTelegramBot, setTelegramWebhook } from './telegramBot.js';
+import { loginLockSeconds, recordLoginFailure, clearLoginFailures } from './loginLimiter.js';
 import { enforceCompanyQuota, checkCompanyQuota, PACKAGE_CONFIG } from './quotaService.js';
 import { waitForInteractiveIdle, isInteractiveActive, getInteractiveCount, setTriageQueueStateGetter, getQueueMetrics } from './aiScheduler.js';
 import { startMorningBriefingScheduler, sendMorningBriefing, getMorningSchedulerStatus } from './morningScheduler.js';
@@ -200,8 +201,9 @@ initRealtimeListener();
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+// Chats are text only (largest real conversation is a few KB), so 1mb leaves plenty of room
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ limit: '1mb', extended: true }));
 app.use(express.static('public'));
 
 // Serve web UI for package and quota management
@@ -240,6 +242,28 @@ if (!ADMIN_API_KEY || ADMIN_API_KEY.length < 32) {
 }
 
 // Middleware: Authenticate admin using X-Admin-Key or user credentials (system_admin / super_admin)
+/**
+ * Password check behind the failed-login limit (see loginLimiter.js).
+ * Returns { retryAfter } in seconds when the IP or email is locked, otherwise { user } (null when wrong).
+ */
+async function authenticateUserLimited(req, email, password) {
+  const ip = req.ip || req.socket?.remoteAddress;
+  const retryAfter = loginLockSeconds(ip, email);
+  if (retryAfter > 0) return { retryAfter };
+  const user = await authenticateUser(email, password);
+  if (user) clearLoginFailures(email);
+  else recordLoginFailure(ip, email);
+  return { user };
+}
+
+function sendLoginLocked(res, retryAfter) {
+  res.set('Retry-After', String(retryAfter));
+  return res.status(429).json({
+    error: `เข้าสู่ระบบผิดหลายครั้งเกินไป กรุณารอ ${Math.ceil(retryAfter / 60)} นาทีแล้วลองใหม่`,
+    retry_after_seconds: retryAfter
+  });
+}
+
 async function authAdminOrKey(req, res, next) {
   // Admin key is accepted from the X-Admin-Key header only (query strings end up in logs and history)
   const adminKey = req.headers['x-admin-key'];
@@ -253,7 +277,8 @@ async function authAdminOrKey(req, res, next) {
   const password = req.headers['x-user-password'];
   if (email && password) {
     try {
-      const user = await authenticateUser(email, password);
+      const { user, retryAfter } = await authenticateUserLimited(req, email, password);
+      if (retryAfter) return sendLoginLocked(res, retryAfter);
       if (!user) {
         return res.status(401).json({ error: 'Unauthorized: Invalid email or password.' });
       }
@@ -285,7 +310,8 @@ async function authCompanyOrAdmin(req, res, next) {
   const password = req.headers['x-user-password'];
   if (email && password) {
     try {
-      const user = await authenticateUser(email, password);
+      const { user, retryAfter } = await authenticateUserLimited(req, email, password);
+      if (retryAfter) return sendLoginLocked(res, retryAfter);
       if (user) {
         req.user = user;
         req.company = { id: user.company_id, name: user.name };
@@ -1356,7 +1382,8 @@ async function authUser(req, res, next) {
   }
 
   try {
-    const user = await authenticateUser(email, password);
+    const { user, retryAfter } = await authenticateUserLimited(req, email, password);
+    if (retryAfter) return sendLoginLocked(res, retryAfter);
     if (!user) {
       return res.status(401).json({ error: 'Unauthorized: Invalid email or password.' });
     }
@@ -1390,7 +1417,8 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(400).json({ error: 'กรุณาระบุ email และ password' });
     }
 
-    const user = await authenticateUser(email, password);
+    const { user, retryAfter } = await authenticateUserLimited(req, email, password);
+    if (retryAfter) return sendLoginLocked(res, retryAfter);
     if (!user) {
       return res.status(401).json({ error: 'อีเมลหรือรหัสผ่านไม่ถูกต้อง' });
     }
@@ -1589,6 +1617,19 @@ app.delete('/api/customers/:id', authCompanyOrAdmin, async (req, res) => {
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
+});
+
+// Body errors (too large, malformed JSON) as JSON instead of Express's HTML page with a stack trace
+app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+  if (err.type === 'entity.too.large') {
+    return res.status(413).json({ error: 'Request body too large (limit 1mb).' });
+  }
+  if (err.type === 'entity.parse.failed') {
+    return res.status(400).json({ error: 'Invalid JSON body.' });
+  }
+  console.error('Unhandled error:', err);
+  return res.status(err.status || 500).json({ error: 'Internal server error.' });
 });
 
 // Start Express Server

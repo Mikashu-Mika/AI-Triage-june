@@ -83,6 +83,7 @@
 | `POST /api/chats/ingest` | `x-client-id` + `x-client-secret` | ส่งแชตเข้าระบบ ส่ง `id` เดิมซ้ำได้ ([ตัวอย่าง curl และ Postman](docs/ingest/)) |
 | `GET /api/chats/pending` | Client ID/Secret | ดูแชตที่รอ AI |
 | `POST /api/chats/feedback` | Client ID/Secret | ส่งผลที่คนตรวจแก้แล้วกลับเข้าระบบ |
+| `POST /api/auth/login` | email + password (จำกัดการใส่ผิด) | เข้าสู่ระบบ |
 | `POST /api/companies/register` | `X-Admin-Key` (header เท่านั้น) | สร้างบริษัทใหม่ |
 | `PUT /api/companies/:id/package` | `X-Admin-Key` | เปลี่ยนแพ็กเกจและโควตา |
 | `GET /api/queue/status` | - | ดูคิว AI |
@@ -90,6 +91,8 @@
 | `GET /sse`, `POST /messages` | - | MCP server สำหรับ MCP client |
 
 - admin key รับจาก header `X-Admin-Key` เท่านั้น ไม่รับจาก query หรือ body
+- **กันเดารหัสผ่าน:** ใส่รหัสผิดเกิน 5 ครั้งใน 15 นาที (นับแยกต่อ IP และต่อ email) จะได้ **429** พร้อม header `Retry-After` จนครบเวลา ใช้กับ `POST /api/auth/login` และทุก route ที่รับ `x-user-email` / `x-user-password` ตัวนับอยู่ในหน่วยความจำ รีสตาร์ทบอตแล้วจะเริ่มนับใหม่
+- body ใหญ่สุด 1 MB เกินแล้วได้ **413** และ JSON ผิดรูปแบบได้ **400** ทั้งสองแบบตอบเป็น JSON
 - รหัสผ่านผู้ใช้เก็บเป็น bcrypt hash รูปแบบเดียวกับ Back Office
 
 ---
