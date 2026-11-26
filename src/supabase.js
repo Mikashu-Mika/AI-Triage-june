@@ -925,7 +925,7 @@ export async function upsertTelegramGroup({ chatId, groupName = 'Telegram Group'
  * Upsert a Telegram member into telegram_group_members.
  * Automatically captures contact_id, first_name, last_name, username, and updates last_seen_at.
  * Preserves existing role ('executive', 'admin') unless explicitly overwritten.
- * Default role for newly inserted members is 'member'.
+ * Newly inserted members get defaultRole ('member' unless the caller passes another).
  * 
  * @param {object} memberData
  * @param {string|number} memberData.groupId - Telegram Chat ID
@@ -933,7 +933,8 @@ export async function upsertTelegramGroup({ chatId, groupName = 'Telegram Group'
  * @param {string} [memberData.firstName]
  * @param {string} [memberData.lastName]
  * @param {string} [memberData.username]
- * @param {string} [memberData.role] - 'member', 'executive', 'admin', 'blocked'
+ * @param {string} [memberData.role] - 'member', 'executive', 'admin', 'blocked'; overwrites the stored role
+ * @param {string} [memberData.defaultRole] - role for a new row only; an existing row keeps its role
  * @returns {Promise<object|null>}
  */
 export async function upsertTelegramMember({
@@ -942,7 +943,8 @@ export async function upsertTelegramMember({
   firstName = '',
   lastName = '',
   username = '',
-  role = null
+  role = null,
+  defaultRole = 'member'
 }) {
   if (!groupId || !telegramUserId) return null;
   const sGroupId = String(groupId);
@@ -961,7 +963,7 @@ export async function upsertTelegramMember({
       return null;
     }
 
-    const finalRole = role || (existing ? existing.role : 'member');
+    const finalRole = role || (existing ? existing.role : defaultRole);
 
     const payload = {
       group_id: sGroupId,

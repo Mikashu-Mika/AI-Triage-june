@@ -402,7 +402,9 @@ export async function handleTelegramMessage(message) {
           firstName: mFirstName,
           lastName: mLastName,
           username: mUsername,
-          role: 'member' // Default role for new members
+          // A new row starts as executive for the listed executives, otherwise member.
+          // A role already set in BO is kept, so re-joining never changes it.
+          defaultRole: isExecutiveSender(mId) ? 'executive' : 'member'
         });
 
         // Also ensure group record exists
@@ -438,7 +440,10 @@ export async function handleTelegramMessage(message) {
       telegramUserId: senderId,
       firstName: message.from.first_name || '',
       lastName: message.from.last_name || '',
-      username: message.from.username || ''
+      username: message.from.username || '',
+      // Without this, a listed executive's first message in a new group recorded them as
+      // 'member', and that stored role blocked them until someone changed it in BO
+      defaultRole: isExecutiveSender(senderId) ? 'executive' : 'member'
     });
     await upsertTelegramGroup({
       chatId,

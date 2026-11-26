@@ -60,7 +60,12 @@ class Query {
     return this;
   }
   insert(rows) { this.op = 'insert'; this.payload = rows; return this; }
-  upsert(rows) { this.op = 'upsert'; this.payload = rows; return this; }
+  upsert(rows, { onConflict } = {}) {
+    this.op = 'upsert';
+    this.payload = rows;
+    this.conflictCols = onConflict ? onConflict.split(',').map(c => c.trim()) : null;
+    return this;
+  }
   update(patch) { this.op = 'update'; this.payload = patch; return this; }
   delete() { this.op = 'delete'; return this; }
 
@@ -110,7 +115,10 @@ class Query {
       const list = Array.isArray(this.payload) ? this.payload : [this.payload];
       const written = [];
       for (const input of list) {
-        const existing = input.id !== undefined ? this.rows().find(r => r.id === input.id) : undefined;
+        // Upsert matches on the onConflict columns when given, like Postgres ON CONFLICT; otherwise on id
+        const existing = this.op === 'upsert' && this.conflictCols
+          ? this.rows().find(r => this.conflictCols.every(c => r[c] === input[c]))
+          : input.id !== undefined ? this.rows().find(r => r.id === input.id) : undefined;
         if (existing && this.op === 'insert') {
           return { data: null, error: { code: '23505', message: `duplicate key value violates unique constraint "${this.table}_pkey"` } };
         }
