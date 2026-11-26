@@ -1,0 +1,84 @@
+[
+  {
+    "q": "วันนี้มีปัญหาอะไรบ้าง",
+    "expect": {
+      "tool": "get_issue_stats",
+      "period": "today"
+    },
+    "source_case": 1
+  },
+  {
+    "q": "สรุปปัญหาย้อนหลัง 7 วัน ปัญหาไหนมีมากที่สุด",
+    "expect": {
+      "tool": "get_issue_stats",
+      "period": "last_n_days"
+    },
+    "source_case": 5
+  },
+  {
+    "q": "ปัญหาด่วนทั้งหมดมีเท่าไหร่คะ อะไรบ้าง",
+    "expect": {
+      "tool": [
+        "get_issue_stats",
+        "list_chats"
+      ]
+    },
+    "source_case": 9
+  },
+  {
+    "q": "เคสด่วนเดือนนี้มีเคสไหนบ้าง",
+    "expect": {
+      "tool": "list_chats",
+      "period": "this_month"
+    },
+    "source_case": 22
+  },
+  {
+    "q": "เปรียบเทียบสถิติปัญหาของเดือนนี้และเดือนที่แล้ว",
+    "expect": {
+      "tool": "compare_periods",
+      "period": "this_month",
+      "metric": "issues"
+    },
+    "source_case": 24
+  },
+  {
+    "q": "วันนี้มีลูกค้าใหม่กี่คน",
+    "expect": {
+      "tool": "get_customer_stats",
+      "period": "today"
+    },
+    "source_case": 28
+  },
+  {
+    "q": "มีเคสร้องเรียนหรือขู่อายัดบัญชีเข้ามาบ้างไหมในเดือนนี้",
+    "expect": {
+      "tool": "search_chats",
+      "period": "this_month"
+    },
+    "source_case": 35
+  },
+  {
+    "q": "ความพึงพอใจและอารมณ์ของลูกค้า ประจำเดือนนี้เป็นยังไงบ้าง",
+    "expect": {
+      "tool": "get_sentiment",
+      "period": "this_month"
+    },
+    "source_case": 40
+  },
+  {
+    "q": "ปัญหา หน้าเว็บค้าง/โหลดช้า ควรแก้ปัญหาแบบไหนดี",
+    "expect": {
+      "tool": "get_resolution_advice",
+      "category": "page_load_freeze"
+    },
+    "source_case": 43
+  },
+  {
+    "q": "สวัสดีค่ะ",
+    "expect": {
+      "mode": "chitchat"
+    },
+    "source_case": 53
+  }
+]

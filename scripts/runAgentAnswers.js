@@ -11,6 +11,7 @@
  *   node scripts/runAgentAnswers.js --jaika-only     (ใช้ AI Jaika อย่างเดียว ไม่ fallback ไป Cloudflare/Ollama;
  *                                                     ถ้า Jaika ล่มจะรอแล้วถามข้อเดิมซ้ำ หยุดเองเมื่อ Jaika ปิด 18:00)
  *   node scripts/runAgentAnswers.js --resume         (ข้ามข้อที่มีคำตอบในไฟล์ผลลัพธ์แล้ว)
+ *   node scripts/runAgentAnswers.js --cases data/exec_latency_cases.json   (ใช้ชุดคำถามอื่น เช่น 10 ข้อสำหรับวัดเวลาตอบ)
  */
 
 import fs from 'fs';
@@ -60,7 +61,9 @@ const { isJaikaConfigured, isJaikaOpenNow } = await import('../src/jaika.js');
 const { exportToExcelAndSheets } = await import('./exportAnswersToGoogleSheets.js');
 
 const companyId = process.env.DEFAULT_COMPANY_ID || '2c3f46cc-fae8-4ef8-99e1-874dec8b2af2';
-const casesFile = path.resolve('data/agent_eval_cases.json');
+// --cases <file>: another question set (default: the 62 real questions)
+const casesIdx = args.indexOf('--cases');
+const casesFile = path.resolve(casesIdx !== -1 ? args[casesIdx + 1] : 'data/agent_eval_cases.json');
 const cases = JSON.parse(fs.readFileSync(casesFile, 'utf8'));
 
 // Today's date in Thailand for the file name: YYYY-MM-DD
