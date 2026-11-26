@@ -37,6 +37,7 @@ CREATE TABLE IF NOT EXISTS agent_audit_logs (
 
 CREATE INDEX IF NOT EXISTS idx_agent_audit_logs_company_created ON agent_audit_logs(company_id, created_at DESC);
 
--- Server accesses these tables with the service role key; block direct anon/authenticated access
+-- Server accesses these tables with the service role key; block direct anon/authenticated access.
+-- The bot currently uses the anon key: run allow_audit_log_inserts.sql so it can insert.
 ALTER TABLE classification_audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_audit_logs ENABLE ROW LEVEL SECURITY;
