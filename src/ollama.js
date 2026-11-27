@@ -8,6 +8,36 @@ const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434';
 // After a Jaika triage failure, skip it for a while instead of waiting on every chat.
 let jaikaTriageBackoffUntil = 0;
 
+// Triage order: Jaika (in its hours) -> Cloudflare -> local Ollama. After a Cloudflare failure the
+// next chats go straight to Ollama for a while instead of failing (TRIAGE_OLLAMA_FALLBACK=false turns this off).
+let cfTriageBackoffUntil = 0;
+const CF_TRIAGE_TIMEOUT_MS = parseInt(process.env.CLOUDFLARE_TRIAGE_TIMEOUT_MS || '60000', 10);
+const CF_TRIAGE_BACKOFF_MS = parseInt(process.env.CLOUDFLARE_TRIAGE_BACKOFF_MS || String(10 * 60 * 1000), 10);
+const triageOllamaFallback = () => process.env.TRIAGE_OLLAMA_FALLBACK !== 'false';
+
+/**
+ * How long to skip Cloudflare after a failed triage call. The free daily allocation (429, code 4006)
+ * resets at 00:00 UTC, so retrying before then only fails again; other errors retry after CF_TRIAGE_BACKOFF_MS.
+ * @param {number} status - HTTP status, 0 for a network error or timeout
+ * @param {string} body - response body
+ * @param {number} [now]
+ * @returns {number} epoch ms to wait until
+ */
+export function cloudflareTriageBackoffUntil(status, body = '', now = Date.now()) {
+  if (status === 429 && /daily free allocation|"code":\s*4006/i.test(body)) {
+    const nextUtcMidnight = new Date(now);
+    nextUtcMidnight.setUTCHours(24, 0, 0, 0);
+    return nextUtcMidnight.getTime();
+  }
+  return now + CF_TRIAGE_BACKOFF_MS;
+}
+
+/** Test hook: clear the provider backoffs. */
+export function resetTriageBackoff() {
+  jaikaTriageBackoffUntil = 0;
+  cfTriageBackoffUntil = 0;
+}
+
 /**
  * Attempt to repair and parse potentially malformed JSON from LLM output.
  * Handles common issues: markdown fences, trailing commas, unescaped quotes, truncated JSON.
@@ -118,6 +148,8 @@ const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN;
 const IS_CLOUDFLARE = Boolean(CLOUDFLARE_ACCOUNT_ID && CLOUDFLARE_API_TOKEN);
 
 const MODEL_LLM = process.env.MODEL_LLM || (IS_CLOUDFLARE ? '@cf/qwen/qwen2.5-coder-32b-instruct' : 'qwen2.5:14b');
+// MODEL_LLM may name a Cloudflare model ("@cf/..."), which Ollama cannot run
+const OLLAMA_MODEL_LLM = process.env.OLLAMA_MODEL_LLM || (MODEL_LLM.startsWith('@cf/') ? 'qwen2.5:14b' : MODEL_LLM);
 const MODEL_EMBEDDING = process.env.MODEL_EMBEDDING || (IS_CLOUDFLARE ? '@cf/baai/bge-m3' : 'bge-m3');
 const OLLAMA_NUM_CTX = parseInt(process.env.OLLAMA_NUM_CTX || '8192', 10);
 
@@ -281,42 +313,67 @@ category_id, sub_category (Thai), intent (refund|withdraw|deposit|register|verif
       }
     }
 
-    if (!result && IS_CLOUDFLARE) {
-      const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${MODEL_LLM}`;
-      const response = await fetch(cfUrl, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          messages: [
-            { role: 'system', content: systemPrompt },
-            { role: 'user', content: `Analyze this conversation:\n${conversation}${clausesBlock}` }
-          ],
-          max_tokens: 2048,
-          temperature: 0.1
-        })
-      });
+    let usedModel = usedJaika ? (process.env.JAIKA_MODEL_CHAT || 'qwen2.5-14b') : null;
+    const useOllamaOnFailure = triageOllamaFallback();
 
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`Cloudflare AI error (${response.status}): ${errText}`);
+    if (!result && IS_CLOUDFLARE && (!useOllamaOnFailure || Date.now() > cfTriageBackoffUntil)) {
+      try {
+        const cfUrl = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${MODEL_LLM}`;
+        let response;
+        try {
+          response = await fetch(cfUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              messages: [
+                { role: 'system', content: systemPrompt },
+                { role: 'user', content: `Analyze this conversation:\n${conversation}${clausesBlock}` }
+              ],
+              max_tokens: 2048,
+              temperature: 0.1
+            }),
+            signal: AbortSignal.timeout(CF_TRIAGE_TIMEOUT_MS)
+          });
+        } catch (netErr) {
+          const err = new Error(`Cloudflare AI unreachable: ${netErr.message}`);
+          err.cfStatus = 0;
+          throw err;
+        }
+
+        if (!response.ok) {
+          const errText = await response.text();
+          const err = new Error(`Cloudflare AI error (${response.status}): ${errText}`);
+          err.cfStatus = response.status;
+          err.cfBody = errText;
+          throw err;
+        }
+
+        const data = await response.json();
+        const rawContent = data.result?.response;
+        if (typeof rawContent === 'object' && rawContent !== null) {
+          result = rawContent;
+        } else {
+          result = repairAndParseJSON(typeof rawContent === 'string' ? rawContent : JSON.stringify(data.result));
+        }
+
+        promptTokens = data.result?.usage?.prompt_tokens ?? null;
+        outputTokens = data.result?.usage?.completion_tokens ?? null;
+        usedModel = MODEL_LLM;
+      } catch (cfErr) {
+        if (!useOllamaOnFailure) throw cfErr;
+        cfTriageBackoffUntil = cloudflareTriageBackoffUntil(cfErr.cfStatus ?? 0, cfErr.cfBody ?? cfErr.message);
+        const until = new Date(cfTriageBackoffUntil + 7 * 3600e3).toISOString().slice(0, 16).replace('T', ' ');
+        console.warn(`⚠️ [Cloudflare Triage] ${cfErr.message.slice(0, 200)} -> using local Ollama (${OLLAMA_MODEL_LLM}) until ${until} ICT`);
+        result = undefined;
       }
+    }
 
-      const data = await response.json();
-      const rawContent = data.result?.response;
-      if (typeof rawContent === 'object' && rawContent !== null) {
-        result = rawContent;
-      } else {
-        result = repairAndParseJSON(typeof rawContent === 'string' ? rawContent : JSON.stringify(data.result));
-      }
-
-      promptTokens = data.result?.usage?.prompt_tokens ?? null;
-      outputTokens = data.result?.usage?.completion_tokens ?? null;
-    } else if (!result) {
+    if (!result) {
       const response = await postRequest(`${OLLAMA_URL}/api/chat`, {
-        model: MODEL_LLM,
+        model: OLLAMA_MODEL_LLM,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: `Analyze this conversation:\n${conversation}${clausesBlock}` }
@@ -346,8 +403,9 @@ category_id, sub_category (Thai), intent (refund|withdraw|deposit|register|verif
       }
       
       result = repairAndParseJSON(content);
+      usedModel = `ollama:${OLLAMA_MODEL_LLM}`;
     }
-    
+
     // Dynamically match category_id against availableCategories (supporting direct ID, clean key suffix, and name match)
     let category_id = result.category_id;
     const cleanKey = (category_id || '').split(':').pop().trim().toLowerCase();
@@ -426,7 +484,7 @@ category_id, sub_category (Thai), intent (refund|withdraw|deposit|register|verif
       ai_recommendation: sanitizeChinese(result.ai_recommendation || 'แนะนำตรวจสอบปัญหาระบบทั่วไป'),
       detected_issues: sanitizedIssues,
       _meta: {
-        model: usedJaika ? (process.env.JAIKA_MODEL_CHAT || 'qwen2.5-14b') : MODEL_LLM,
+        model: usedModel,
         num_ctx: OLLAMA_NUM_CTX,
         prompt_tokens: promptTokens,
         output_tokens: outputTokens,
