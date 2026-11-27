@@ -77,13 +77,28 @@ function cosineSimilarity(vecA, vecB) {
 export function segmentConversationIntoClauses(conversation) {
   if (!conversation) return { clauses: [], isSingleParagraph: false };
 
-  // 1. Split by newlines and inline speaker labels (e.g. "ลูกค้า: ... ลูกค้า: ...")
-  const rawTurns = conversation
-    .split(/\n|(?:^|\s+)(?:ลูกค้า|ผู้ใช้|แอดมิน|เจ้าหน้าที่|User|Customer|Admin):\s*/i)
-    .map(s => s.replace(/^(?:ลูกค้า|ผู้ใช้|แอดมิน|เจ้าหน้าที่|User|Customer|Admin):\s*/i, '').trim())
-    .filter(Boolean);
+  // 1. Split by newlines and inline speaker labels (e.g. "ลูกค้า: ... ลูกค้า: ..."), keeping who said each turn
+  const SPEAKER_LABEL = /^(ลูกค้า|ผู้ใช้|แอดมิน|เจ้าหน้าที่|User|Customer|Admin|Agent|Staff):\s*/i;
+  const STAFF_SPEAKER = /^(แอดมิน|เจ้าหน้าที่|Admin|Agent|Staff)$/i;
+  let speakerIsStaff = false; // a line without a label continues the previous speaker's message
+  const allTurns = conversation
+    .split(/\n|\s+(?=(?:ลูกค้า|ผู้ใช้|แอดมิน|เจ้าหน้าที่|User|Customer|Admin|Agent|Staff):)/i)
+    .map(s => s.trim())
+    .filter(Boolean)
+    .map(s => {
+      const label = s.match(SPEAKER_LABEL);
+      if (label) speakerIsStaff = STAFF_SPEAKER.test(label[1]);
+      return { text: s.replace(SPEAKER_LABEL, '').trim(), isStaff: speakerIsStaff };
+    })
+    .filter(t => t.text);
 
-  const isSingleParagraph = rawTurns.length === 1;
+  // Only the customer's own words can be issues: staff replies ("รบกวนรอสักครู่นะคะ") and
+  // attachment placeholders ("[รูปภาพ]", "[สติกเกอร์]") are context, not problems
+  const rawTurns = allTurns
+    .filter(t => !t.isStaff && !/^\[[^\[\]{}"]{1,40}\]$/.test(t.text))
+    .map(t => t.text);
+
+  const isSingleParagraph = allTurns.length === 1;
   const sentences = [];
 
   for (const turn of rawTurns) {
