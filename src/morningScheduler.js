@@ -8,7 +8,7 @@
  * - รองรับการยิง Trigger แบบแมนนวลสำหรับทดสอบ (Manual Trigger / On-Demand)
  */
 
-import { supabase, getCompanyByTelegramChatId } from './supabase.js';
+import { supabase, getCompanyByTelegramChatId, getTelegramGroups } from './supabase.js';
 import { generateMorningBriefing } from './execAgent/morningBriefing.js';
 import { sendTelegramMessage } from './telegramBot.js';
 
@@ -16,6 +16,35 @@ import { sendTelegramMessage } from './telegramBot.js';
 const sentBriefingsCache = new Set();
 let schedulerInterval = null;
 let isExecutionLock = false;
+
+/**
+ * Every Telegram group that should get the scheduled briefings: active and linked to a company in BO.
+ * Each group gets its own company's numbers. An empty list means nothing is sent.
+ * @returns {Promise<string[]>} chat ids
+ */
+export async function getBriefingChatIds() {
+  const groups = await getTelegramGroups();
+  return [...new Set(groups.filter(g => g.is_active && g.company_id).map(g => String(g.chat_id)))];
+}
+
+/**
+ * Run `send(chatId)` for every briefing group, one after another. A failure in one group is logged
+ * and the other groups still get theirs. Returns one result per group.
+ */
+export async function sendToAllBriefingGroups(send, label) {
+  const chatIds = await getBriefingChatIds();
+  if (!chatIds.length) console.warn(`⚠️ [${label}] No active Telegram group is linked to a company in BO. Nothing sent.`);
+  const results = [];
+  for (const chatId of chatIds) {
+    try {
+      results.push(await send(chatId));
+    } catch (err) {
+      console.error(`❌ [${label}] Error sending to ${chatId}:`, err.message);
+      results.push({ chatId, error: err.message });
+    }
+  }
+  return results;
+}
 
 /**
  * ดึงวันที่ปัจจุบันตามเวลาประเทศไทย (Asia/Bangkok) ในรูปแบบ 'YYYY-MM-DD'
@@ -214,8 +243,8 @@ export function startMorningBriefingScheduler({
     if (hour === targetHour && minute >= targetMinute && minute <= targetMinute + 5) {
       isExecutionLock = true;
       try {
-        const targetChatId = process.env.TELEGRAM_EXEC_GROUP_ID || '-5495142610';
-        await sendMorningBriefing({ chatId: targetChatId, force: false });
+        // Every group linked to a company in BO; the per-group guard keeps it to one message a day
+        await sendToAllBriefingGroups(chatId => sendMorningBriefing({ chatId, force: false }), 'MorningScheduler');
       } catch (err) {
         console.error('❌ [MorningScheduler] Error during scheduled briefing delivery:', err.message);
       } finally {

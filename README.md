@@ -110,10 +110,13 @@
 
 | งาน | เวลา (ไทย) | ค่าที่ตั้งได้ |
 |---|---|---|
-| สรุปประจำวันเข้ากลุ่มผู้บริหาร (`TELEGRAM_EXEC_GROUP_ID`) | ทุกวัน 11:00 | `BRIEFING_TARGET_HOUR`, `BRIEFING_TARGET_MINUTE` |
-| สรุปรายสัปดาห์ให้กลุ่มผู้บริหาร | วันจันทร์ 11:15 | `WEEKLY_SUMMARY_ENABLED`, `WEEKLY_SUMMARY_HOUR`, `WEEKLY_SUMMARY_MINUTE`, `TELEGRAM_EXEC_GROUP_ID` |
+| สรุปประจำวัน | ทุกวัน 11:00 | `BRIEFING_TARGET_HOUR`, `BRIEFING_TARGET_MINUTE` |
+| สรุปรายสัปดาห์ | วันจันทร์ 11:15 | `WEEKLY_SUMMARY_ENABLED`, `WEEKLY_SUMMARY_HOUR`, `WEEKLY_SUMMARY_MINUTE` |
 
-ทดลองดูผลโดยไม่ส่งจริง: `POST /api/scheduler/weekly-summary/send` กับ body `{"dryRun": true}`
+ทั้งสองอย่างส่งเข้า**ทุกกลุ่ม Telegram ที่ผูกบริษัทไว้และเปิดใช้งาน**ในเมนู จัดการกลุ่ม Telegram ของ BO แต่ละกลุ่มได้ตัวเลขของบริษัทตัวเอง
+`TELEGRAM_EXEC_GROUP_ID` ใช้เป็นกลุ่มเริ่มต้นตอนส่งด้วยมือผ่าน API เท่านั้น
+
+ทดลองดูผลโดยไม่ส่งจริง: `POST /api/scheduler/weekly-summary/send` กับ body `{"dryRun": true}` (ใส่ `chatId` เพื่อเลือกกลุ่ม)
 
 ---
 

@@ -1,7 +1,8 @@
 /**
  * src/weeklyScheduler.js
  *
- * Sends the weekly executive summary (last Monday-Sunday) to the executive group every Monday.
+ * Sends the weekly executive summary (last Monday-Sunday) every Monday to each Telegram group that is
+ * linked to a company in BO, with that company's numbers.
  * - Default time 11:15 ICT, after the 11:00 morning briefing so the two arrive as separate messages.
  *   Change with WEEKLY_SUMMARY_HOUR / WEEKLY_SUMMARY_MINUTE; turn off with WEEKLY_SUMMARY_ENABLED=false.
  * - Its own duplicate guard (action WEEKLY_SUMMARY_AUTO, keyed by the week's Monday), so it never
@@ -11,7 +12,7 @@
 import { supabase, getCompanyByTelegramChatId } from './supabase.js';
 import { generateWeeklySummary, resolveWeekPeriod } from './execAgent/weeklySummary.js';
 import { sendTelegramMessage } from './telegramBot.js';
-import { getBangkokDateString, getBangkokTime } from './morningScheduler.js';
+import { getBangkokDateString, getBangkokTime, sendToAllBriefingGroups } from './morningScheduler.js';
 
 const ACTION_TYPE = 'WEEKLY_SUMMARY_AUTO';
 const sentCache = new Set(); // `${weekStart}:${chatId}`
@@ -149,14 +150,13 @@ export function startWeeklySummaryScheduler({ checkIntervalMs = 30000 } = {}) {
     if (isExecutionLock || getBangkokWeekday() !== 1) return;
     const now = getBangkokTime();
     if (now.hour * 60 + now.minute < hour * 60 + minute) return;
-    const weekStart = getBangkokDateString(resolveWeekPeriod().start);
-    if (sentCache.has(`${weekStart}:${defaultChatId()}`)) return;
     if (Date.now() - lastAttemptAt < RETRY_AFTER_MS) return;
     isExecutionLock = true;
     lastAttemptAt = Date.now();
     try {
-      // A summary already sent before a restart is found in activity_logs and cached by the guard
-      await sendWeeklySummary({ chatId: defaultChatId() });
+      // Every group linked to a company in BO. A group already sent this week (also before a restart,
+      // found in activity_logs) is skipped by the per-group guard, so each gets one message.
+      await sendToAllBriefingGroups(chatId => sendWeeklySummary({ chatId }), 'WeeklyScheduler');
     } catch (err) {
       console.error('❌ [WeeklyScheduler] Error sending weekly summary:', err.message);
     } finally {
