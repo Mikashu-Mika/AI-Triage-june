@@ -189,14 +189,19 @@ RULES
 1. Split the chat into atomic customer statements (use PRE-SEGMENTED CLAUSES when given). Every statement must appear in exactly one "detected_issues" item.
 2. One issue item = one category. If a sentence joins symptoms of different categories (e.g. with "และ", "แต่", "ทั้งที่", "แถม"), split it into separate items. Statements of the same category may be merged into one item.
 3. Never create an item from a bare noun phrase without a problem predicate (e.g. "การส่งอีเมลยืนยัน"); keep it with the statement it belongs to.
-4. Questions, greetings, context and inquiries that do NOT report a failure (e.g. asking how long something takes, asking about promotions or rules, "กำลังจะซื้อ...") are NOT problems: use the "other" category with urgency "low".
+4. Give every item an "issue_type":
+   - "problem": the customer reports something that failed, is missing, is wrong or is unfair (money not received, cannot log in, page stuck, complaint).
+   - "question": the customer only asks for information or how to do something, without reporting a failure (e.g. how long a withdrawal takes, opening hours, which game pays, what new members get, whether a bonus needs turnover). Decide by what the customer says, not by the topic: a question about withdrawals is still a "question". Use the "other" category with urgency "low".
+   - "chitchat": greetings, thanks, a test message, or context with no request. Use the "other" category with urgency "low".
+   A sentence that both asks and reports a failure is a "problem".
+   Read each short statement together with the statements before it: "โหลดไม่ไป" right after a stuck-page complaint is the same stuck page.
 5. Complaints about service quality, dissatisfaction and improvement suggestions belong to the category whose description covers complaints/feedback; requests for new features to the feature-request category when one exists.
-6. Unauthorized account changes, suspected hacking, or requests to change bank account / phone / credentials are high-risk: urgency "high" or "urgent".
+6. Unauthorized account changes, suspected hacking, or requests to change bank account / phone / credentials are high-risk: urgency "high" or "urgent". When the customer's money is missing or at risk (a deposit or withdrawal not received, money deducted without the service, asking to freeze an account that holds a balance) the urgency is at least "high"; "urgent" when it comes with suspected hacking.
 7. Top-level "category_id", "priority" and "urgency" describe the most severe real problem; if the chat has no real problem use "other" with priority "low".
 8. "problem_summary" is the customer's own statement (verbatim or lightly trimmed), not a paraphrase of the whole chat.
 
 OUTPUT KEYS
-category_id, sub_category (Thai), intent (refund|withdraw|deposit|register|verify|promotion|report_issue|complain|inquire|follow_up), root_cause (Thai, a plausible cause to check), sentiment (โกรธ|ไม่พอใจ|สับสน|สงสัย|ชมเชย|ปกติ), urgency, priority (low|medium|high|urgent), department (Finance|Support|Developer|Marketing|Admin|Head Admin|VIP), summary (1 Thai sentence), keywords (2-4 Thai words), confidence (0-100), recommended_reply (1 polite Thai sentence), resolution (Solved|Pending|Escalated|Rejected|Duplicate), business_impact (Revenue Risk|Customer Risk|None), business_impact_score (0-100), ai_recommendation (Thai, actionable for support), detected_issues: [{ issue_no, problem_summary, category_id, urgency, department }].
+category_id, sub_category (Thai), intent (refund|withdraw|deposit|register|verify|promotion|report_issue|complain|inquire|follow_up), root_cause (Thai, a plausible cause to check), sentiment (โกรธ|ไม่พอใจ|สับสน|สงสัย|ชมเชย|ปกติ), urgency, priority (low|medium|high|urgent), department (Finance|Support|Developer|Marketing|Admin|Head Admin|VIP), summary (1 Thai sentence), keywords (2-4 Thai words), confidence (0-100), recommended_reply (1 polite Thai sentence), resolution (Solved|Pending|Escalated|Rejected|Duplicate), business_impact (Revenue Risk|Customer Risk|None), business_impact_score (0-100), ai_recommendation (Thai, actionable for support), detected_issues: [{ issue_no, problem_summary, issue_type (problem|question|chitchat), category_id, urgency, department }].
 `;
 
   // Dynamically extract all valid category IDs from Supabase for this company to build strict enum
@@ -259,6 +264,10 @@ category_id, sub_category (Thai), intent (refund|withdraw|deposit|register|verif
           properties: {
             issue_no: { type: 'integer' },
             problem_summary: { type: 'string' },
+            issue_type: {
+              type: 'string',
+              enum: ['problem', 'question', 'chitchat']
+            },
             category_id: {
               type: 'string',
               enum: validCategoryIds
@@ -272,7 +281,7 @@ category_id, sub_category (Thai), intent (refund|withdraw|deposit|register|verif
               enum: ['Finance', 'Support', 'Developer', 'Marketing', 'Admin', 'Head Admin', 'VIP']
             }
           },
-          required: ['problem_summary', 'category_id', 'urgency', 'department']
+          required: ['problem_summary', 'issue_type', 'category_id', 'urgency', 'department']
         }
       }
     },

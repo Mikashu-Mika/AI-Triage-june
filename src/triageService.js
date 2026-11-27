@@ -304,18 +304,21 @@ export async function ensureCompleteSentenceCoverage(
   for (const clause of clauses) {
     const clauseLower = clause.toLowerCase();
 
-    // Find if an LLM issue matches specifically this single clause (and did NOT bundle multiple distinct clauses together)
-    const matchingLlmIssue = llmIssues.find(iss => {
+    // Find the LLM issue that covers this clause: first one written for this clause alone, then one where the
+    // LLM grouped several statements together (it read them in context, e.g. "โหลดไม่ไป" after a stuck-page complaint)
+    const spannedCount = s => clauses.filter(cl => s.includes(cl.toLowerCase())).length;
+    const singleClauseLlmIssue = llmIssues.find(iss => {
       const s = (iss.summary || '').toLowerCase().trim();
-      if (!s) return false;
-      const spannedClausesCount = clauses.filter(cl => s.includes(cl.toLowerCase())).length;
-      if (spannedClausesCount > 1) {
-        // LLM bundled multiple clauses into one issue; do not treat as a single-clause match so we can verify/split each clause
-        return false;
-      }
+      if (!s || spannedCount(s) > 1) return false;
       if (s === clauseLower || s.includes(clauseLower) || clauseLower.includes(s)) return true;
       return calculateTextSimilarity(clauseLower, s) >= 0.65;
     });
+    const groupedLlmIssue = singleClauseLlmIssue ? null : llmIssues.find(iss => {
+      const s = (iss.summary || '').toLowerCase().trim();
+      return s && spannedCount(s) > 1 && s.includes(clauseLower);
+    });
+    const matchingLlmIssue = singleClauseLlmIssue || groupedLlmIssue;
+    const issueType = matchingLlmIssue?.issue_type || null;
 
     const semanticMatch = await classifySentenceSemantic(clause, categories, otherCatId);
 
@@ -324,18 +327,25 @@ export async function ensureCompleteSentenceCoverage(
     let finalDepartment = defaultDepartment || 'Support';
     let matchSource = semanticMatch.source;
 
-    if (matchingLlmIssue) {
+    if (matchingLlmIssue && (issueType === 'question' || issueType === 'chitchat')) {
+      // The LLM read this as a question or small talk, not a failure: it is recorded under the company's
+      // 'other' category with low urgency whatever its topic, and the vector match may not turn it into a problem
+      finalCategoryId = otherCatId;
+      finalPriority = 'low';
+      finalDepartment = matchingLlmIssue.department || 'Support';
+      matchSource = `LLM ${issueType}`;
+    } else if (matchingLlmIssue) {
       const llmCatNormalized = normalizeCategoryId(matchingLlmIssue.category_id, categories) || otherCatId;
       const isLlmOther = llmCatNormalized === otherCatId || llmCatNormalized.endsWith(':other');
       // If LLM said 'other' (non-problem), but Dynamic Vector detected a real problem category (similarity >= 0.55), do NOT keep 'other'!
       // For two competing real categories, require high confidence (>= 0.78) to override LLM.
-      const overrideThreshold = isLlmOther ? 0.55 : 0.78;
+      const overrideThreshold = isLlmOther && issueType !== 'problem' ? 0.55 : 0.78;
       if (semanticMatch.similarity >= overrideThreshold && semanticMatch.category_id !== llmCatNormalized) {
         finalCategoryId = semanticMatch.category_id;
         matchSource = `${semanticMatch.source} (Override)`;
       } else {
         finalCategoryId = llmCatNormalized;
-        matchSource = 'LLM Atomic Clause + Verified';
+        matchSource = groupedLlmIssue ? 'LLM Grouped Clause + Verified' : 'LLM Atomic Clause + Verified';
       }
       finalPriority = matchingLlmIssue.priority || matchingLlmIssue.urgency || defaultPriority;
       finalDepartment = matchingLlmIssue.department || defaultDepartment || 'Support';
@@ -352,7 +362,8 @@ export async function ensureCompleteSentenceCoverage(
       department: finalDepartment,
       summary: clause,
       recommended_reply: '',
-      source: matchSource
+      source: matchSource,
+      issue_type: matchingLlmIssue ? issueType : null
     });
   }
 
@@ -374,7 +385,10 @@ export async function ensureCompleteSentenceCoverage(
       /^(ช่วย(แก้ไข|ตรวจสอบ|ดู).*(หน่อย|ด่วน|นะคะ|นะครับ|ด้วย))$/i.test(item.summary);
     const isOtherCat = (item.category_id || '').split(':').pop().trim().toLowerCase() === 'other';
     const hasRealTechnicalIssues = resolvedClauseIssues.some(iss => iss !== item && !iss.category_id.endsWith(':other') && !iss.category_id.endsWith(':feedback_complaint'));
-    if ((isClosingPlea || isOtherCat) && hasRealTechnicalIssues) continue;
+    // A customer question stays as its own 'other' issue even next to real problems (policy 27 Nov:
+    // questions are recorded under เรื่องอื่นๆ with low urgency); small talk and closing pleas do not
+    const isQuestion = item.issue_type === 'question';
+    if ((isClosingPlea || isOtherCat) && hasRealTechnicalIssues && !isQuestion) continue;
 
     // RULE: For non-defect chats (e.g. pure inquiry/context), preserve standalone 'other' category without monster consolidation
     if (isOtherCat) {
@@ -440,7 +454,8 @@ export async function classifyChat(chat, context = {}) {
       priority: iss.urgency || iss.priority || triage.priority || 'medium',
       department: iss.department || triage.department || 'Support',
       summary: text || triage.summary || 'ไม่มีบทสรุป',
-      recommended_reply: ''
+      recommended_reply: '',
+      issue_type: iss.issue_type || null
     };
   });
   if (issues.length === 0) {
