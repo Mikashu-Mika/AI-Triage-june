@@ -684,6 +684,47 @@ app.post('/api/triage/save', authCompanyOrAdmin, async (req, res) => {
   }
 });
 
+// Minutes of quiet after which new lines under the same chat id start a new case (0 turns splitting off)
+function splitGapMs() {
+  const minutes = Number(process.env.CHAT_SPLIT_GAP_MINUTES ?? 30);
+  return Number.isFinite(minutes) && minutes > 0 ? minutes * 60 * 1000 : 0;
+}
+
+// Splitting needs chats.source_id, source_offset and last_ingested_at (sql/split_chat_cases_by_gap.sql).
+// Until those columns exist, ingest keeps one case per chat id as before.
+let caseSplitColumns;
+async function caseSplitSupported() {
+  if (caseSplitColumns !== undefined) return caseSplitColumns;
+  const { error } = await supabase.from('chats').select('source_id, source_offset, last_ingested_at').limit(1);
+  if (!error) return (caseSplitColumns = true);
+  if (error.code === '42703' || error.code === 'PGRST204' || /column/i.test(error.message || '')) {
+    console.warn('⚠️ [Ingest] chats.source_id/source_offset/last_ingested_at are missing; run sql/split_chat_cases_by_gap.sql to split cases by time gap');
+    return (caseSplitColumns = false);
+  }
+  return false; // a transient error: check again on the next request
+}
+
+// The newest case stored for a chat id sent by the chat platform
+async function findLatestCase(companyId, sourceId, split) {
+  const columns = 'id, company_id, conversation, customer_id, status, created_at' + (split ? ', source_offset, last_ingested_at' : '');
+  if (split) {
+    const { data, error } = await supabase
+      .from('chats')
+      .select(columns)
+      .eq('company_id', companyId)
+      .eq('source_id', sourceId)
+      .order('source_offset', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) throw error;
+    if (data) return data;
+  }
+  // Chats saved before splitting existed, or a chat id used by another company
+  const { data, error } = await supabase.from('chats').select(columns).eq('id', sourceId).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
 // REST API: Ingest a new chat session from live chat (Real-time Seam) - Authenticated
 app.post('/api/chats/ingest', authCompany, enforceCompanyQuota, async (req, res) => {
   const { id, customer_id, conversation } = req.body;
@@ -713,36 +754,51 @@ app.post('/api/chats/ingest', authCompany, enforceCompanyQuota, async (req, res)
 
     // 1. Save chat session as pending, enforcing company boundary
     // (chat id is a global primary key, so another company's chat must never be overwritten)
-    const chatRecord = {
-      customer_id,
-      conversation: finalConversation,
-      status: 'pending'
-    };
     const conflictResponse = () => res.status(409).json({
       error: `Conflict: Chat ID ${id} is already used by another company. Please use a different chat ID.`
     });
 
-    const { data: existingChat, error: lookupErr } = await supabase
-      .from('chats')
-      .select('company_id, conversation, customer_id, status')
-      .eq('id', id)
-      .maybeSingle();
-    if (lookupErr) throw lookupErr;
+    // A chat platform may keep one id for a whole day and resend the growing conversation.
+    // Lines that arrive after the latest case was quiet for the split gap become a new case
+    // (`<id>-part2`, `-part3`, ...); lines that arrive sooner extend the latest case.
+    const split = await caseSplitSupported();
+    const now = new Date().toISOString();
+    const lines = finalConversation.split('\n');
+    const latest = await findLatestCase(req.company.id, id, split);
 
-    let data, error;
-    if (existingChat) {
-      if (existingChat.company_id !== req.company.id) {
+    let data, error, chatId = id;
+    if (!latest) {
+      ({ data, error } = await supabase
+        .from('chats')
+        .insert({
+          id, customer_id, conversation: finalConversation, status: 'pending', company_id: req.company.id,
+          ...(split ? { source_id: id, source_offset: 0, last_ingested_at: now } : {})
+        })
+        .select()
+        .single());
+      // Another request inserted the same id between lookup and insert
+      if (error?.code === '23505') {
         return conflictResponse();
       }
+    } else {
+      if (latest.company_id !== req.company.id) {
+        return conflictResponse();
+      }
+      const offset = latest.source_offset ?? 0;
+      const tail = lines.slice(offset);
+      const caseLines = (latest.conversation ?? '').split('\n');
+      const extendsCase = tail.length >= caseLines.length && caseLines.every((line, i) => tail[i] === line);
+      const sameCase = extendsCase && tail.length === caseLines.length;
+
       // Same conversation already classified: keep the result and skip another AI call
       // (a resend after a timeout or a retry must not re-triage the chat)
-      if (existingChat.conversation === finalConversation && existingChat.status === 'completed') {
-        let unchanged = existingChat;
-        if (existingChat.customer_id !== customer_id) {
+      if (sameCase && latest.status === 'completed') {
+        let unchanged;
+        if (latest.customer_id !== customer_id) {
           const { data: moved, error: moveErr } = await supabase
             .from('chats')
             .update({ customer_id })
-            .eq('id', id)
+            .eq('id', latest.id)
             .eq('company_id', req.company.id)
             .select()
             .single();
@@ -750,45 +806,79 @@ app.post('/api/chats/ingest', authCompany, enforceCompanyQuota, async (req, res)
           unchanged = moved;
         } else {
           const { data: current, error: readErr } = await supabase
-            .from('chats').select().eq('id', id).single();
+            .from('chats').select().eq('id', latest.id).single();
           if (readErr) throw readErr;
           unchanged = current;
         }
         return res.json({
           message: 'Chat unchanged and already classified; not queued again',
           triage_queued: false,
+          chat_id: latest.id,
           data: unchanged
         });
       }
-      // A changed conversation invalidates earlier human verification, so the AI may re-classify it
-      if (existingChat.conversation !== finalConversation) {
-        await supabase.from('chat_issues').update({ is_human_verified: false }).eq('chat_id', id);
+
+      if (tail.length === 0) {
+        return res.json({
+          message: 'Conversation is shorter than what was already received for this chat id; nothing changed',
+          triage_queued: false,
+          chat_id: latest.id
+        });
       }
-      ({ data, error } = await supabase
-        .from('chats')
-        .update(chatRecord)
-        .eq('id', id)
-        .eq('company_id', req.company.id)
-        .select()
-        .single());
-    } else {
-      ({ data, error } = await supabase
-        .from('chats')
-        .insert({ id, ...chatRecord, company_id: req.company.id })
-        .select()
-        .single());
-      // Another request inserted the same id between lookup and insert
-      if (error?.code === '23505') {
-        return conflictResponse();
+
+      const gapMs = splitGapMs();
+      const lastAt = Date.parse(latest.last_ingested_at ?? latest.created_at);
+      const startsNewCase = split && gapMs > 0 && extendsCase && !sameCase
+        && Number.isFinite(lastAt) && Date.now() - lastAt >= gapMs;
+
+      if (startsNewCase) {
+        const part = latest.id === id ? 2 : Number(latest.id.match(/-part(\d+)$/)?.[1] ?? 1) + 1;
+        chatId = `${id}-part${part}`;
+        ({ data, error } = await supabase
+          .from('chats')
+          .insert({
+            id: chatId,
+            customer_id,
+            conversation: tail.slice(caseLines.length).join('\n'),
+            status: 'pending',
+            company_id: req.company.id,
+            source_id: id,
+            source_offset: offset + caseLines.length,
+            last_ingested_at: now
+          })
+          .select()
+          .single());
+        if (error?.code === '23505') {
+          return res.status(409).json({ error: `Conflict: Chat ID ${chatId} is already in use.` });
+        }
+      } else {
+        // Lines that arrived within the gap (or an edited history) replace the latest case's part
+        chatId = latest.id;
+        const caseConversation = tail.join('\n');
+        const changed = latest.conversation !== caseConversation;
+        // A changed conversation invalidates earlier human verification, so the AI may re-classify it
+        if (changed) {
+          await supabase.from('chat_issues').update({ is_human_verified: false }).eq('chat_id', chatId);
+        }
+        ({ data, error } = await supabase
+          .from('chats')
+          .update({
+            customer_id, conversation: caseConversation, status: 'pending',
+            ...(split && changed ? { last_ingested_at: now } : {})
+          })
+          .eq('id', chatId)
+          .eq('company_id', req.company.id)
+          .select()
+          .single());
       }
     }
 
     if (error) throw error;
-    
-    // 2. Enqueue the triage in the background to process sequentially!
-    enqueueTriage(id);
 
-    res.json({ message: 'Chat ingested successfully and queued for real-time Sift AI classification', triage_queued: true, data });
+    // 2. Enqueue the triage in the background to process sequentially!
+    enqueueTriage(chatId);
+
+    res.json({ message: 'Chat ingested successfully and queued for real-time Sift AI classification', triage_queued: true, chat_id: chatId, data });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
