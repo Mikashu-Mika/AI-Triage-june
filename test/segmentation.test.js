@@ -1,7 +1,7 @@
 // Layer 1 of triage: only the customer's own words become clauses (and so can become issues).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { segmentConversationIntoClauses } from '../src/triageService.js';
+import { segmentConversationIntoClauses, stripLineTimestamps } from '../src/triageService.js';
 
 const clauses = conversation => segmentConversationIntoClauses(conversation).clauses;
 
@@ -43,4 +43,27 @@ test('a conversation stored as raw JSON is not mistaken for a placeholder', () =
 test('text without labels is still treated as the customer', () => {
   assert.deepEqual(clauses('ล็อกอินไม่ได้'), ['ล็อกอินไม่ได้']);
   assert.deepEqual(clauses('แอดมิน: สวัสดีค่ะ'), [], 'a staff-only chat has no clauses');
+});
+
+// OneBoxx (since 28 Nov) starts every line with the time and labels its own bot "แอดมิน (AI)".
+test('the time at the start of each line is ignored and "แอดมิน (AI)" counts as staff', () => {
+  const conversation = [
+    '[2026-11-27 10:34] ลูกค้า: เข้าระบบไม่ได้ค่ะ หน้าล็อกอินหมุนตลอด',
+    '[2026-11-27 10:35] แอดมิน (AI): ระบบกำลังตรวจสอบบัญชีของคุณ กรุณารอสักครู่',
+    '[2026-11-27 10:36] แอดมิน: รบกวนแจ้งอีเมลที่ใช้สมัครค่ะ',
+    '[2026-11-27 10:38] ลูกค้า: ส่งไปแล้วค่ะ แต่ยังเข้าไม่ได้',
+  ].join('\n');
+
+  assert.deepEqual(clauses(conversation), ['เข้าระบบไม่ได้ค่ะ หน้าล็อกอินหมุนตลอด', 'ส่งไปแล้วค่ะ แต่ยังเข้าไม่ได้']);
+});
+
+test('only a leading time is removed; times inside a message stay', () => {
+  assert.equal(
+    stripLineTimestamps('[2026-11-27 10:34] ลูกค้า: โอนไปตอน [10:30] แล้วค่ะ\n[2026-11-27 10:35:12] แอดมิน: รับทราบค่ะ'),
+    'ลูกค้า: โอนไปตอน [10:30] แล้วค่ะ\nแอดมิน: รับทราบค่ะ'
+  );
+});
+
+test('a bot label without a time is also staff', () => {
+  assert.deepEqual(clauses('ลูกค้า: สมัครไม่ได้\nBot (auto): please wait\nบอท: กำลังตรวจสอบ'), ['สมัครไม่ได้']);
 });

@@ -68,6 +68,16 @@ function cosineSimilarity(vecA, vecB) {
 }
 
 /**
+ * Removes the time the chat platform puts at the start of each line, e.g. "[2026-11-27 10:34] ลูกค้า: ..."
+ * (OneBoxx since 28 Nov), so speaker labels are read and the AI never quotes the time as part of an issue.
+ * @param {string} conversation
+ * @returns {string}
+ */
+export function stripLineTimestamps(conversation) {
+  return (conversation || '').replace(/^[ \t]*\[\d{4}-\d{2}-\d{2}[ T]\d{1,2}:\d{2}(?::\d{2})?\][ \t]*/gm, '');
+}
+
+/**
  * Layer 1: Dynamic Thai Discourse & Clause Segmenter
  * Splits raw customer conversation (multi-line or single-paragraph) into atomic semantic clauses
  * based on speaker turns, Thai sentence-boundary spaces, and contrasting/additive discourse markers.
@@ -76,13 +86,15 @@ function cosineSimilarity(vecA, vecB) {
  */
 export function segmentConversationIntoClauses(conversation) {
   if (!conversation) return { clauses: [], isSingleParagraph: false };
+  conversation = stripLineTimestamps(conversation);
 
-  // 1. Split by newlines and inline speaker labels (e.g. "ลูกค้า: ... ลูกค้า: ..."), keeping who said each turn
-  const SPEAKER_LABEL = /^(ลูกค้า|ผู้ใช้|แอดมิน|เจ้าหน้าที่|User|Customer|Admin|Agent|Staff):\s*/i;
-  const STAFF_SPEAKER = /^(แอดมิน|เจ้าหน้าที่|Admin|Agent|Staff)$/i;
+  // 1. Split by newlines and inline speaker labels (e.g. "ลูกค้า: ... ลูกค้า: ..."), keeping who said each turn.
+  // A label may carry a note in brackets, e.g. "แอดมิน (AI):" for the chat platform's own bot.
+  const SPEAKER_LABEL = /^(ลูกค้า|ผู้ใช้|แอดมิน|เจ้าหน้าที่|บอท|User|Customer|Admin|Agent|Staff|Bot)(?:\s*\([^()\n]{1,20}\))?:\s*/i;
+  const STAFF_SPEAKER = /^(แอดมิน|เจ้าหน้าที่|บอท|Admin|Agent|Staff|Bot)$/i;
   let speakerIsStaff = false; // a line without a label continues the previous speaker's message
   const allTurns = conversation
-    .split(/\n|\s+(?=(?:ลูกค้า|ผู้ใช้|แอดมิน|เจ้าหน้าที่|User|Customer|Admin|Agent|Staff):)/i)
+    .split(/\n|\s+(?=(?:ลูกค้า|ผู้ใช้|แอดมิน|เจ้าหน้าที่|บอท|User|Customer|Admin|Agent|Staff|Bot)(?:\s*\([^()\n]{1,20}\))?:)/i)
     .map(s => s.trim())
     .filter(Boolean)
     .map(s => {
@@ -430,9 +442,10 @@ export async function classifyChat(chat, context = {}) {
   const trainingExamples = context.trainingExamples || await getTrainingExamples(chat.company_id);
 
   // 1. Layer 1 clause segmentation + Layer 2 LLM classification
-  const { clauses: preSegmentedClauses } = segmentConversationIntoClauses(chat.conversation);
+  const conversation = stripLineTimestamps(chat.conversation);
+  const { clauses: preSegmentedClauses } = segmentConversationIntoClauses(conversation);
   await waitForInteractiveIdle(`classifyChat (${chat.id}) - LLM`);
-  const triage = await generateTriage(chat.conversation, categories, trainingExamples, preSegmentedClauses);
+  const triage = await generateTriage(conversation, categories, trainingExamples, preSegmentedClauses);
 
   // 2. Embedding of the summary + similar cases of the same company
   await waitForInteractiveIdle(`classifyChat (${chat.id}) - Embedding`);
@@ -469,7 +482,7 @@ export async function classifyChat(chat, context = {}) {
     }];
   }
   issues = await ensureCompleteSentenceCoverage(
-    chat.conversation,
+    conversation,
     issues,
     categories,
     chat.id,
